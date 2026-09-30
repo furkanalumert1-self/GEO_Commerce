@@ -4,7 +4,7 @@ import { Card, CardHeader, PageHeader, TableWrap, Td, Th } from "@/components/ui
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { requireUser } from "@/lib/page-access";
-import { fmtDate } from "@/lib/format";
+import { daysAgo, fmtDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
@@ -13,7 +13,7 @@ export default async function AdminPage() {
   const u = await requireUser("/admin");
   const user = await db.user.findUnique({ where: { id: u.id } });
   if (!user || !config().platformAdmins.includes(user.email.toLowerCase())) notFound();
-  const since = new Date(Date.now() - 30 * 86_400_000);
+  const since = daysAgo(30);
   const [tenants, dead, costs, inboxErrors] = await Promise.all([
     db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }),
     db.jobRecord.findMany({ where: { status: "dead" }, orderBy: { updatedAt: "desc" }, take: 25, select: { id: true, type: true, deadReason: true, lastError: true, workspaceId: true, updatedAt: true } }),

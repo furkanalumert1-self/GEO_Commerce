@@ -74,3 +74,8 @@ export const ACTION_STATUS_LABEL: Record<string, string> = {
 
 export const CHANNEL_LABEL = (c: string) =>
   c.startsWith("ai_organic:") ? `AI organik · ${ENGINE_SHORT[c.split(":")[1]!] ?? c.split(":")[1]}` : c.startsWith("paid:") ? `Ücretli · ${c.split(":")[1]}` : ({ direct: "Doğrudan", organic_search: "Organik arama", referral: "Yönlendirme", unattributed: "İlişkilendirilemedi" } as Record<string, string>)[c] ?? c;
+
+/** Şimdiden N gün önce (server tarafı sorgu penceresi). */
+export function daysAgo(n: number, now = new Date()): Date {
+  return new Date(now.getTime() - n * 86_400_000);
+}

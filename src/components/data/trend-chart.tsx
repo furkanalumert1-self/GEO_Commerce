@@ -11,7 +11,7 @@ export function TrendChart({ data, series, yLabel }: { data: Array<Record<string
     <figure className="flex flex-col gap-2">
       <div className="h-64 w-full" aria-hidden>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
+          <LineChart accessibilityLayer={false} tabIndex={-1} data={data} margin={{ top: 8, right: 12, bottom: 4, left: -12 }}>
             <CartesianGrid stroke="#DCE2E8" vertical={false} />
             <XAxis dataKey="day" tick={{ fontSize: 11, fill: "#526070" }} tickFormatter={(d: string) => d.slice(5)} minTickGap={16} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 11, fill: "#526070" }} width={40} />

@@ -6,7 +6,7 @@ export default defineConfig({
   testDir: "tests/e2e",
   timeout: 60_000,
   retries: 0,
-  use: { baseURL: `http://localhost:${port}`, trace: "retain-on-failure" },
+  use: { baseURL: `http://localhost:${port}`, trace: "retain-on-failure", launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {} },
   projects: [
     { name: "mobile-360", use: { ...devices["Desktop Chrome"], viewport: { width: 360, height: 780 } } },
     { name: "tablet-768", use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
@@ -14,6 +14,7 @@ export default defineConfig({
   ],
   webServer: {
     command: `npx next start -p ${port}`,
+    env: { DEMO_LOGIN: "true", APP_URL: `http://localhost:${port}` },
     port,
     reuseExistingServer: true,
     timeout: 120_000,

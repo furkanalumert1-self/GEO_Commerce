@@ -13,15 +13,14 @@
     "worker": "tsx src/workers/main.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run tests/unit",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "npm run db:test:reset && vitest run tests/integration",
+    "test:integration": "vitest run tests/integration",
     "test:e2e": "playwright test",
     "db:generate": "prisma generate --config prisma.config.ts",
     "db:migrate": "prisma migrate dev --config prisma.config.ts",
     "db:deploy": "prisma migrate deploy --config prisma.config.ts",
     "db:seed": "tsx prisma/seed.ts",
-    "db:test:reset": "dotenv -v DATABASE_URL=$TEST_DATABASE_URL -- prisma migrate reset --force --config prisma.config.ts",
     "postinstall": "prisma generate --config prisma.config.ts"
   },
   "dependencies": {

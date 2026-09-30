@@ -20,7 +20,8 @@ if (cfg.SMTP_URL) {
 if (cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET) {
   providers.push(Google({ clientId: cfg.AUTH_GOOGLE_ID, clientSecret: cfg.AUTH_GOOGLE_SECRET }));
 }
-export const demoLoginEnabled = cfg.DEMO_MODE && cfg.NODE_ENV !== "production";
+// Production build'de (next start / E2E) yalnız açık DEMO_LOGIN=true ile; canlı anahtarlarla birlikte DEMO_MODE zaten reddedilir.
+export const demoLoginEnabled = cfg.DEMO_MODE && (cfg.NODE_ENV !== "production" || process.env.DEMO_LOGIN === "true");
 if (demoLoginEnabled) {
   providers.push(
     Credentials({

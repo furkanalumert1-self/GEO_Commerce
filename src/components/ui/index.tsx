@@ -41,9 +41,10 @@ export function CardHeader({ title, description, action, id }: { title: ReactNod
 
 type Tone = "neutral" | "primary" | "success" | "warning" | "danger";
 
-export function Badge({ tone = "neutral", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+export function Badge({ tone = "neutral", children, className, title }: { tone?: Tone; children: ReactNode; className?: string; title?: string }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap",
         tone === "neutral" && "border-border bg-bg text-muted",

@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import type { Metadata } from "next";
 import { Card } from "@/components/ui";
 import { AuditForm } from "@/components/forms/audit-form";

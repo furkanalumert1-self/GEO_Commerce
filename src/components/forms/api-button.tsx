@@ -29,7 +29,8 @@ export function ApiButton({
   pendingLabel?: string;
   variant?: "primary" | "secondary" | "ghost" | "danger";
   confirm?: string;
-  redirectTo?: string | ((data: Record<string, unknown>) => string);
+  /** Başarıda yönlendirme; "{alan}" yer tutucuları yanıt verisinden doldurulur (ör. "/x/{id}", "{url}"). */
+  redirectTo?: string;
   idempotent?: boolean;
   disabled?: boolean;
   disabledReason?: string;
@@ -57,7 +58,9 @@ export function ApiButton({
         return;
       }
       if (redirectTo) {
-        router.push(typeof redirectTo === "function" ? redirectTo(json?.data ?? {}) : redirectTo);
+        const target = redirectTo.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent(String(json?.data?.[k] ?? "")));
+        if (/^https:\/\//.test(decodeURIComponent(target))) window.location.assign(decodeURIComponent(target));
+        else router.push(target);
         return;
       }
       if (onSuccessMessage) setOk(onSuccessMessage);

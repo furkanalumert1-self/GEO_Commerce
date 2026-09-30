@@ -1,0 +1,1509 @@
+// GEO Commerce — veri modeli (§10). id=uuid, ts=timestamptz, para=BigInt minor units.
+// Tenant tablolarında workspaceId NOT NULL; brand-scoped tablolarda brandId NOT NULL ve
+// (workspaceId, brandId) → Brand(workspaceId, id) composite FK ile tenant uyumu DB düzeyinde korunur.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  owner
+  admin
+  editor
+  analyst
+  viewer
+  client
+  billing
+}
+
+enum PlanKey {
+  free_audit
+  starter
+  growth
+  commerce
+  agency
+  enterprise
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  canceled
+  incomplete
+  read_only
+}
+
+enum JobStatus {
+  queued
+  running
+  partial
+  succeeded
+  failed
+  canceled
+  dead
+}
+
+enum Surface {
+  api_grounded
+  api_plain
+  licensed_ui
+}
+
+enum ObservationStatus {
+  pending
+  succeeded
+  failed
+  parse_failed
+}
+
+enum IntentType {
+  informational
+  category_discovery
+  transactional
+  comparison
+  alternative
+  local
+}
+
+enum MentionKind {
+  mention
+  recommendation
+  negative
+  incidental
+}
+
+enum CitationAssociation {
+  own
+  competitor
+  third_party
+}
+
+enum OpportunityStatus {
+  new
+  triaged
+  in_progress
+  measuring
+  won
+  dismissed
+}
+
+enum GapType {
+  intent_content
+  missing_comparison
+  catalog_mismatch
+  technical_access
+  citation_gap
+  structured_data
+}
+
+enum ActionType {
+  content
+  landing
+  category
+  product
+  comparison
+  faq
+  schema
+  citation_task
+  ad_draft
+}
+
+enum ActionStatus {
+  draft
+  review
+  approved
+  publishing
+  published
+  measuring
+  completed
+  failed
+  rejected
+  rolled_back
+}
+
+enum IntegrationStatus {
+  not_configured
+  connecting
+  syncing
+  healthy
+  degraded
+  reauth_required
+  unsupported
+}
+
+enum ReservationState {
+  reserved
+  committed
+  released
+}
+
+// ───────────────────────────── Auth.js ─────────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @db.Timestamptz
+  image         String?
+  locale        String    @default("tr")
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+
+  accounts      Account[]
+  sessions      Session[]
+  memberships   Membership[]
+  notifications Notification[]
+}
+
+model Account {
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expires      DateTime @db.Timestamptz
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime @db.Timestamptz
+
+  @@id([identifier, token])
+}
+
+// ───────────────────────────── Tenancy ─────────────────────────────
+
+model Workspace {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String   @unique
+  ownerId         String   @db.Uuid
+  timezone        String   @default("Europe/Istanbul")
+  status          String   @default("active") // active | suspended | deleting
+  billingCurrency String   @default("USD")
+  isDemo          Boolean  @default(false)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  memberships  Membership[]
+  brands       Brand[]
+  invites      Invite[]
+  subscription Subscription?
+  whiteLabel   WhiteLabel?
+  usageBuckets UsageBucket[]
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+}
+
+model Membership {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  role        Role
+  isApprover  Boolean  @default(false) // Editor için ayrı publish/budget onayı
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  grants    BrandGrant[]
+
+  @@unique([workspaceId, userId])
+  @@unique([workspaceId, id])
+}
+
+model BrandGrant {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  membershipId String   @db.Uuid
+  brandId      String   @db.Uuid
+  role         Role
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  membership Membership @relation(fields: [workspaceId, membershipId], references: [workspaceId, id], onDelete: Cascade)
+  brand      Brand      @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([membershipId, brandId])
+}
+
+model Invite {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  email       String
+  role        Role
+  brandIds    String[]  @db.Uuid
+  tokenHash   String    @unique
+  expiresAt   DateTime  @db.Timestamptz
+  acceptedAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Brand {
+  id         String    @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  domain     String
+  name       String
+  aliases    String[]
+  country    String    @default("TR")
+  language   String    @default("tr")
+  timezone   String    @default("Europe/Istanbul")
+  currency   String    @default("TRY")
+  categories String[]
+  verifiedAt DateTime? @db.Timestamptz
+  archivedAt DateTime? @db.Timestamptz
+  readOnly   Boolean   @default(false) // downgrade sonrası seçilmeyen markalar
+  onboarding Json?
+  trackerSiteKey String @unique @default(uuid())
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+  updatedAt  DateTime  @updatedAt @db.Timestamptz
+
+  workspace          Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  grants             BrandGrant[]
+  verifications      DomainVerification[]
+  crawlRuns          CrawlRun[]
+  categoriesRel      Category[]
+  products           Product[]
+  clusters           IntentCluster[]
+  prompts            Prompt[]
+  competitors        Competitor[]
+  schedules          MonitoringSchedule[]
+  runs               MonitoringRun[]
+  metricSnapshots    MetricSnapshot[]
+  opportunities      Opportunity[]
+  actions            Action[]
+  integrations       Integration[]
+  orders             Order[]
+  events             Event[]
+  visitorSessions    VisitorSession[]
+  adsAccounts        AdsAccount[]
+  adsRules           AdsRule[]
+  reports            Report[]
+
+  @@unique([workspaceId, domain])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, createdAt(sort: Desc)])
+}
+
+model DomainVerification {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  method      String // dns_txt | html_token | oauth
+  tokenHash   String
+  expiresAt   DateTime  @db.Timestamptz
+  verifiedAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+}
+
+model WhiteLabel {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @unique @db.Uuid
+  logoKey      String?
+  displayName  String?
+  accent       String?
+  customDomain String?   @unique
+  verifiedAt   DateTime? @db.Timestamptz
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────────── Billing & usage ─────────────────────────────
+
+model Plan {
+  id           String   @id @default(uuid()) @db.Uuid
+  planKey      PlanKey
+  version      Int
+  monthlyPrice Int? // USD cent; enterprise null
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  entitlement PlanEntitlement?
+
+  @@unique([planKey, version])
+}
+
+model PlanEntitlement {
+  id        String   @id @default(uuid()) @db.Uuid
+  planId    String   @unique @db.Uuid
+  limits    Json
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @unique @db.Uuid
+  planKey            PlanKey
+  planVersion        Int                @default(1)
+  status             SubscriptionStatus
+  billingCustomerId  String?
+  subscriptionId     String?            @unique
+  currentPeriodStart DateTime           @db.Timestamptz
+  currentPeriodEnd   DateTime           @db.Timestamptz
+  trialEnd           DateTime?          @db.Timestamptz
+  pastDueSince       DateTime?          @db.Timestamptz
+  cancelAtPeriodEnd  Boolean            @default(false)
+  pendingPlanKey     PlanKey?
+  overrideLimits     Json? // Enterprise sözleşme override
+  overrideExpiresAt  DateTime?          @db.Timestamptz
+  overrideReason     String?
+  lastProviderEventAt DateTime?         @db.Timestamptz
+  createdAt          DateTime           @default(now()) @db.Timestamptz
+  updatedAt          DateTime           @updatedAt @db.Timestamptz
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model UsageBucket {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  metric      String
+  period      String // subscription cycle anahtarı (UTC başlangıç ISO)
+  limit       Int
+  used        Int      @default(0)
+  reserved    Int      @default(0)
+  notified80  Boolean  @default(false)
+  notified100 Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  reservations UsageReservation[]
+
+  @@unique([workspaceId, metric, period])
+}
+
+model UsageReservation {
+  id          String           @id @default(uuid()) @db.Uuid
+  workspaceId String           @db.Uuid
+  bucketId    String           @db.Uuid
+  operationId String           @unique
+  amount      Int
+  committed   Int              @default(0)
+  state       ReservationState @default(reserved)
+  expiresAt   DateTime         @db.Timestamptz
+  createdAt   DateTime         @default(now()) @db.Timestamptz
+  updatedAt   DateTime         @updatedAt @db.Timestamptz
+
+  bucket UsageBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+
+  @@index([state, expiresAt])
+}
+
+model CostLedger {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String?  @db.Uuid // audit pre-claim null olabilir
+  provider    String
+  model       String?
+  operation   String
+  attemptId   String
+  costMicros  BigInt // USD micro
+  currency    String   @default("USD")
+  succeeded   Boolean
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([attemptId])
+  @@index([createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+// ───────────────────────────── Audit (public lead magnet) ─────────────────────────────
+
+model Audit {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String?   @db.Uuid // yalnız claim sonrası
+  domain           String
+  locale           String    @default("tr-TR")
+  tokenHash        String    @unique
+  claimTokenHash   String?   @unique
+  claimUserId      String?   @db.Uuid
+  claimedAt        DateTime? @db.Timestamptz
+  fingerprintHash  String
+  status           JobStatus @default(queued)
+  stage            String    @default("queued")
+  progressDone     Int       @default(0)
+  progressTotal    Int       @default(0)
+  resultSummary    Json?
+  errorCode        String?
+  expiresAt        DateTime  @db.Timestamptz
+  createdAt        DateTime  @default(now()) @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @db.Timestamptz
+
+  @@index([domain, createdAt])
+  @@index([fingerprintHash, createdAt])
+}
+
+// ───────────────────────────── Crawl & catalog ─────────────────────────────
+
+model CrawlRun {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  status      JobStatus @default(queued)
+  maxPages    Int
+  pagesFound  Int       @default(0)
+  pagesDone   Int       @default(0)
+  pagesFailed Int       @default(0)
+  startedAt   DateTime? @db.Timestamptz
+  finishedAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand     Brand          @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  snapshots PageSnapshot[]
+}
+
+model PageSnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  brandId        String   @db.Uuid
+  crawlRunId     String   @db.Uuid
+  url            String
+  canonical      String?
+  pageType       String? // product | category | policy | contact | home | other
+  httpStatus     Int?
+  contentHash    String?
+  etag           String?
+  title          String?
+  textStorageKey String?
+  schemaTypes    String[]
+  findings       Json?
+  excluded       Boolean  @default(false)
+  sampledAt      DateTime @db.Timestamptz
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
+  crawlRun CrawlRun @relation(fields: [crawlRunId], references: [id], onDelete: Cascade)
+
+  @@unique([crawlRunId, url])
+  @@index([workspaceId, brandId, canonical])
+  @@index([contentHash])
+}
+
+model Category {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  brandId     String   @db.Uuid
+  connectorId String?  @db.Uuid
+  externalId  String
+  name        String
+  url         String?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  brand    Brand             @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  products ProductCategory[]
+
+  @@unique([brandId, connectorId, externalId])
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  brandId     String   @db.Uuid
+  connectorId String?  @db.Uuid
+  externalId  String
+  name        String
+  description String?
+  url         String?
+  imageUrl    String?
+  attributes  Json?
+  active      Boolean  @default(true)
+  source      String   @default("crawl") // crawl | feed | csv | connector
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  brand      Brand             @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  variants   ProductVariant[]
+  categories ProductCategory[]
+
+  @@unique([brandId, connectorId, externalId])
+  @@index([workspaceId, brandId, createdAt(sort: Desc)])
+}
+
+model ProductVariant {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  productId   String   @db.Uuid
+  externalId  String
+  sku         String?
+  priceMinor  BigInt?
+  currency    String?
+  stock       Int?
+  available   Boolean?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, externalId])
+}
+
+model ProductCategory {
+  productId  String @db.Uuid
+  categoryId String @db.Uuid
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+}
+
+// ───────────────────────────── Prompts & monitoring ─────────────────────────────
+
+model IntentCluster {
+  id          String     @id @default(uuid()) @db.Uuid
+  workspaceId String     @db.Uuid
+  brandId     String     @db.Uuid
+  category    String?
+  type        IntentType
+  label       String
+  locale      String
+  createdAt   DateTime   @default(now()) @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @db.Timestamptz
+
+  brand         Brand         @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  prompts       Prompt[]
+  opportunities Opportunity[]
+
+  @@unique([brandId, label, locale])
+}
+
+model Prompt {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  clusterId   String    @db.Uuid
+  active      Boolean   @default(true)
+  branded     Boolean   @default(false)
+  weight      Float     @default(1)
+  targetPage  String?
+  source      String    @default("user") // user | generated | audit
+  archivedAt  DateTime? @db.Timestamptz
+  currentVersionId String? @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand    Brand           @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  cluster  IntentCluster   @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  versions PromptVersion[]
+
+  @@index([workspaceId, brandId, active])
+}
+
+model PromptVersion {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @db.Uuid
+  promptId         String   @db.Uuid
+  version          Int
+  text             String
+  normalizedHash   String
+  commercialScore  Int
+  commercialRubric Json
+  rationale        String?
+  scoreOverridden  Boolean  @default(false)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+  updatedAt        DateTime @updatedAt @db.Timestamptz
+
+  prompt       Prompt        @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  observations Observation[]
+
+  @@unique([promptId, version])
+  @@index([workspaceId, normalizedHash])
+}
+
+model Competitor {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  name        String
+  domain      String
+  aliases     String[]
+  source      String    @default("user") // user | ai_candidate | domain_finding
+  confirmedAt DateTime? @db.Timestamptz
+  archivedAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([brandId, domain])
+}
+
+model MonitoringSchedule {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  brandId     String   @db.Uuid
+  engines     String[]
+  locales     String[]
+  frequency   String // weekly | daily
+  repetitions Int      @default(1)
+  budgetUnits Int
+  cohortCursor Int     @default(0)
+  enabled     Boolean  @default(true)
+  nextRunAt   DateTime? @db.Timestamptz
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([brandId])
+}
+
+model MonitoringRun {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @db.Uuid
+  brandId           String    @db.Uuid
+  status            JobStatus @default(queued)
+  trigger           String // manual | schedule | audit | demo
+  configVersion     String
+  engines           String[]
+  locales           String[]
+  repetitions       Int
+  scheduledCount    Int
+  completedCount    Int       @default(0)
+  failedCount       Int       @default(0)
+  coverage          Float?
+  operationId       String    @unique
+  scheduledAt       DateTime  @db.Timestamptz
+  startedAt         DateTime? @db.Timestamptz
+  finishedAt        DateTime? @db.Timestamptz
+  createdAt         DateTime  @default(now()) @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @db.Timestamptz
+
+  brand        Brand         @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  observations Observation[]
+
+  @@index([workspaceId, brandId, createdAt(sort: Desc)])
+}
+
+model Observation {
+  id              String            @id @default(uuid()) @db.Uuid
+  workspaceId     String            @db.Uuid
+  brandId         String            @db.Uuid
+  runId           String            @db.Uuid
+  promptVersionId String            @db.Uuid
+  provider        String
+  engine          String // chatgpt | gemini | perplexity | google_ai_overviews | copilot
+  model           String?
+  surface         Surface
+  country         String
+  language        String
+  repetition      Int
+  attempt         Int               @default(1)
+  status          ObservationStatus @default(pending)
+  errorCode       String?
+  rawStorageKey   String?
+  rawText         String? // TTL 30 gün; retention job temizler
+  listDetected    Boolean           @default(false)
+  latencyMs       Int?
+  costMicros      BigInt?
+  parseVersion    String?
+  weight          Float             @default(1)
+  sampleKey       String            @unique // run+promptVersion+engine+locale+repetition
+  sampledAt       DateTime          @db.Timestamptz
+  createdAt       DateTime          @default(now()) @db.Timestamptz
+  updatedAt       DateTime          @updatedAt @db.Timestamptz
+
+  run           MonitoringRun         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  promptVersion PromptVersion         @relation(fields: [promptVersionId], references: [id], onDelete: Cascade)
+  mentions      Mention[]
+  citations     Citation[]
+  evidence      OpportunityEvidence[]
+
+  @@index([runId, promptVersionId])
+  @@index([workspaceId, brandId, sampledAt])
+}
+
+model Mention {
+  id            String      @id @default(uuid()) @db.Uuid
+  workspaceId   String      @db.Uuid
+  observationId String      @db.Uuid
+  entityType    String // brand | competitor
+  entityId      String      @db.Uuid
+  kind          MentionKind
+  rank          Int?
+  confidence    Float
+  excerpt       String?
+  needsReview   Boolean     @default(false)
+  createdAt     DateTime    @default(now()) @db.Timestamptz
+  updatedAt     DateTime    @updatedAt @db.Timestamptz
+
+  observation Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@unique([observationId, entityId, kind])
+  @@index([observationId, entityId])
+}
+
+model Citation {
+  id            String              @id @default(uuid()) @db.Uuid
+  workspaceId   String              @db.Uuid
+  observationId String              @db.Uuid
+  url           String
+  canonicalUrl  String
+  domain        String
+  excerpt       String?
+  association   CitationAssociation
+  entityId      String?             @db.Uuid // own brand / competitor
+  sourceType    String? // media | review | blog | directory | forum | industry | own | other
+  verifiedAt    DateTime?           @db.Timestamptz
+  createdAt     DateTime            @default(now()) @db.Timestamptz
+  updatedAt     DateTime            @updatedAt @db.Timestamptz
+
+  observation Observation @relation(fields: [observationId], references: [id], onDelete: Cascade)
+
+  @@unique([observationId, canonicalUrl])
+  @@index([workspaceId, domain])
+}
+
+model MetricSnapshot {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @db.Uuid
+  brandId       String   @db.Uuid
+  date          DateTime @db.Date
+  cohortHash    String
+  engine        String // "all" dahil
+  surface       String
+  formulaVersion String
+  numerator     Json
+  denominator   Json
+  values        Json
+  coverage      Float?
+  sampleCount   Int
+  createdAt     DateTime @default(now()) @db.Timestamptz
+  updatedAt     DateTime @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([brandId, date, cohortHash, engine, surface, formulaVersion])
+}
+
+// ───────────────────────────── Opportunities & actions ─────────────────────────────
+
+model Opportunity {
+  id             String            @id @default(uuid()) @db.Uuid
+  workspaceId    String            @db.Uuid
+  brandId        String            @db.Uuid
+  clusterId      String            @db.Uuid
+  gapType        GapType
+  locale         String
+  channel        String            @default("organic") // organic | paid
+  title          String
+  score          Int?
+  provisional    Boolean           @default(false)
+  components     Json
+  confidence     Float
+  status         OpportunityStatus @default(new)
+  ownerId        String?           @db.Uuid
+  priority       String            @default("medium")
+  dueAt          DateTime?         @db.Timestamptz
+  expectedEffort String?
+  targetUrl      String?
+  diagnosis      Json?
+  recommendedAction String?
+  paidBlockedReason String?
+  dedupeKey      String
+  createdAt      DateTime          @default(now()) @db.Timestamptz
+  updatedAt      DateTime          @updatedAt @db.Timestamptz
+
+  brand    Brand                 @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  cluster  IntentCluster         @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  evidence OpportunityEvidence[]
+  actions  Action[]
+
+  @@unique([brandId, dedupeKey])
+  @@index([workspaceId, brandId, status, score(sort: Desc)])
+}
+
+model OpportunityEvidence {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @db.Uuid
+  opportunityId String   @db.Uuid
+  observationId String?  @db.Uuid
+  pageUrl       String?
+  quote         String?
+  note          String?
+  createdAt     DateTime @default(now()) @db.Timestamptz
+  updatedAt     DateTime @updatedAt @db.Timestamptz
+
+  opportunity Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  observation Observation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
+}
+
+model Action {
+  id            String       @id @default(uuid()) @db.Uuid
+  workspaceId   String       @db.Uuid
+  brandId       String       @db.Uuid
+  opportunityId String?      @db.Uuid
+  type          ActionType
+  status        ActionStatus @default(draft)
+  title         String
+  targetUrl     String?
+  assigneeId    String?      @db.Uuid
+  currentVersionId String?   @db.Uuid
+  version       Int          @default(0) // optimistic concurrency
+  publishedAt   DateTime?    @db.Timestamptz
+  measurement   Json?
+  createdAt     DateTime     @default(now()) @db.Timestamptz
+  updatedAt     DateTime     @updatedAt @db.Timestamptz
+
+  brand        Brand           @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  opportunity  Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  versions     ActionVersion[]
+  approvals    Approval[]
+  publications Publication[]
+
+  @@index([workspaceId, brandId, status])
+}
+
+model ActionVersion {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  actionId     String   @db.Uuid
+  number       Int
+  content      Json
+  contentHash  String
+  diff         Json?
+  sourceHashes Json?
+  createdById  String?  @db.Uuid
+  generated    Boolean  @default(false)
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  action Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+
+  @@unique([actionId, number])
+}
+
+model Approval {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  actionId    String    @db.Uuid
+  versionId   String    @db.Uuid
+  versionHash String
+  approverId  String    @db.Uuid
+  revokedAt   DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  action Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+}
+
+model Publication {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @db.Uuid
+  actionId      String    @db.Uuid
+  integrationId String?   @db.Uuid
+  resourceRef   String
+  oldHash       String?
+  newHash       String
+  backupKey     String?
+  operationId   String    @unique
+  status        String // pending | published | failed | rolled_back | conflict
+  error         String?
+  publishedAt   DateTime? @db.Timestamptz
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+
+  action Action @relation(fields: [actionId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────────── Commerce & attribution ─────────────────────────────
+
+model Integration {
+  id           String            @id @default(uuid()) @db.Uuid
+  workspaceId  String            @db.Uuid
+  brandId      String            @db.Uuid
+  provider     String // shopify | ikas | ticimax | ideasoft | csv_feed | openai_ads
+  storeId      String
+  capabilities Json
+  scopes       String[]
+  status       IntegrationStatus @default(not_configured)
+  secretRef    String? // şifreli payload; ham anahtar asla dönmez
+  lastSyncAt   DateTime?         @db.Timestamptz
+  cursor       Json?
+  errorCode    String?
+  createdAt    DateTime          @default(now()) @db.Timestamptz
+  updatedAt    DateTime          @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([brandId, provider, storeId])
+}
+
+model VisitorSession {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  anonymousId String?
+  externalSessionId String
+  startedAt   DateTime  @db.Timestamptz
+  lastSeenAt  DateTime  @db.Timestamptz
+  consent     Json
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand       Brand        @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  touchpoints Touchpoint[]
+
+  @@unique([brandId, externalSessionId])
+}
+
+model Touchpoint {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  brandId     String   @db.Uuid
+  sessionId   String   @db.Uuid
+  anonymousId String?
+  occurredAt  DateTime @db.Timestamptz
+  channel     String // ai_organic:chatgpt | paid:chatgpt_ads | organic_search | direct | referral | ...
+  referrerHost String?
+  landingPath String?
+  utm         Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  session VisitorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, brandId, anonymousId, occurredAt])
+}
+
+model Event {
+  id              String   @id @default(uuid()) @db.Uuid
+  workspaceId     String   @db.Uuid
+  brandId         String   @db.Uuid
+  externalEventId String
+  source          String // browser | server
+  type            String
+  occurredAt      DateTime @db.Timestamptz
+  receivedAt      DateTime @db.Timestamptz
+  anonymousId     String?
+  sessionId       String?
+  orderRef        String?
+  productIds      String[]
+  valueMinor      BigInt?
+  currency        String?
+  referrerHost    String?
+  landingPath     String?
+  utm             Json?
+  consent         Json
+  schemaVersion   Int
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+
+  @@unique([brandId, source, externalEventId])
+  @@index([workspaceId, brandId, occurredAt])
+}
+
+model Order {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @db.Uuid
+  brandId         String    @db.Uuid
+  connectorId     String    @db.Uuid // Integration.id (csv/import dahil)
+  externalOrderId String
+  anonymousId     String?
+  sessionRef      String?
+  paidAt          DateTime? @db.Timestamptz
+  status          String // pending | paid | canceled | refunded | partially_refunded
+  currency        String
+  grossMinor      BigInt
+  discountMinor   BigInt    @default(0)
+  taxMinor        BigInt    @default(0)
+  shippingMinor   BigInt    @default(0)
+  refundedMinor   BigInt    @default(0)
+  netMinor        BigInt
+  sourceVersion   DateTime? @db.Timestamptz // out-of-order webhook koruması
+  createdAt       DateTime  @default(now()) @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @db.Timestamptz
+
+  brand        Brand         @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  items        OrderItem[]
+  refunds      Refund[]
+  attributions Attribution[]
+
+  @@unique([workspaceId, connectorId, externalOrderId])
+  @@index([workspaceId, brandId, paidAt])
+}
+
+model OrderItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @db.Uuid
+  orderId        String   @db.Uuid
+  productExternalId String?
+  variantExternalId String?
+  name           String?
+  quantity       Int
+  unitPriceMinor BigInt
+  discountMinor  BigInt   @default(0)
+  createdAt      DateTime @default(now()) @db.Timestamptz
+  updatedAt      DateTime @updatedAt @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+model Refund {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  orderId     String   @db.Uuid
+  externalId  String
+  amountMinor BigInt // yalnız ürün iadesi
+  refundedAt  DateTime @db.Timestamptz
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, externalId])
+}
+
+model Attribution {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  orderId      String   @db.Uuid
+  modelVersion String // last_non_direct_30d@1 | first_touch_30d@1
+  touchpointId String?  @db.Uuid
+  channel      String // ai_organic:chatgpt | ... | unattributed
+  windowDays   Int
+  netMinor     BigInt
+  currency     String
+  computedAt   DateTime @db.Timestamptz
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, modelVersion])
+}
+
+// ───────────────────────────── Ads ─────────────────────────────
+
+model AdsAccount {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @db.Uuid
+  brandId        String    @db.Uuid
+  integrationId  String?   @db.Uuid
+  provider       String
+  externalId     String
+  currency       String
+  country        String?
+  capabilities   Json // {read,conversion_send,campaign_write,budget_write}
+  accessStatus   String // access_required | active | revoked
+  policyVersion  String?
+  lastVerifiedAt DateTime? @db.Timestamptz
+  automationLevel String   @default("approval_required") // off | recommendations | approval_required | bounded_rules
+  killSwitch     Boolean   @default(false)
+  createdAt      DateTime  @default(now()) @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @db.Timestamptz
+
+  brand     Brand      @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@unique([brandId, provider, externalId])
+}
+
+model Campaign {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  accountId   String   @db.Uuid
+  externalId  String
+  name        String
+  status      String
+  dailyBudgetMinor BigInt?
+  totalBudgetMinor BigInt?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  account  AdsAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  adGroups AdGroup[]
+  metrics  AdMetric[]
+
+  @@unique([accountId, externalId])
+}
+
+model AdGroup {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  campaignId  String   @db.Uuid
+  externalId  String
+  name        String
+  status      String
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  ads      Ad[]
+
+  @@unique([campaignId, externalId])
+}
+
+model Ad {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  adGroupId   String   @db.Uuid
+  externalId  String
+  status      String
+  creative    Json
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  adGroup AdGroup @relation(fields: [adGroupId], references: [id], onDelete: Cascade)
+
+  @@unique([adGroupId, externalId])
+}
+
+model AdMetric {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @db.Uuid
+  campaignId   String   @db.Uuid
+  date         DateTime @db.Date
+  windowLabel  String
+  model        String
+  currency     String
+  spendMinor   BigInt
+  impressions  Int
+  clicks       Int
+  conversions  Float
+  valueMinor   BigInt
+  syncedAt     DateTime @db.Timestamptz
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, date, windowLabel, model])
+}
+
+model AdsRule {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  accountId   String    @db.Uuid
+  name        String
+  config      Json
+  version     Int       @default(1)
+  enabled     Boolean   @default(false)
+  approverId  String?   @db.Uuid
+  lastFiredAt DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand Brand @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+}
+
+model AdsOperation {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  accountId   String    @db.Uuid
+  kind        String // create_paused_campaign | update_budget | pause
+  operationId String    @unique
+  inputHash   String
+  approvedById String?  @db.Uuid
+  approvedAt  DateTime? @db.Timestamptz
+  status      String // previewed | approved | executing | succeeded | failed | revoked
+  providerId  String?
+  result      Json?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+}
+
+model ConversionDelivery {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  eventId     String    @db.Uuid
+  destination String
+  status      String // pending | sent | failed | dead | skipped_no_consent
+  attempts    Int       @default(0)
+  nextRetryAt DateTime? @db.Timestamptz
+  lastError   String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  @@unique([eventId, destination])
+  @@index([status, nextRetryAt])
+}
+
+// ───────────────────────────── Reports, notifications, API ─────────────────────────────
+
+model Report {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  brandId     String    @db.Uuid
+  template    String
+  filters     Json
+  snapshot    Json?
+  snapshotAt  DateTime? @db.Timestamptz
+  objectKey   String?
+  format      String // pdf | csv | html
+  status      JobStatus @default(queued)
+  createdById String?   @db.Uuid
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  brand      Brand       @relation(fields: [workspaceId, brandId], references: [workspaceId, id], onDelete: Cascade)
+  shareLinks ShareLink[]
+}
+
+model ReportSchedule {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  brandId     String   @db.Uuid
+  template    String
+  cadence     String // weekly | monthly
+  recipients  String[] @db.Uuid // yalnız doğrulanmış üyeler
+  nextRunAt   DateTime @db.Timestamptz
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+}
+
+model ShareLink {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  reportId    String    @db.Uuid
+  tokenHash   String    @unique
+  expiresAt   DateTime  @db.Timestamptz
+  revokedAt   DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  userId      String    @db.Uuid
+  type        String
+  payload     Json
+  readAt      DateTime? @db.Timestamptz
+  dedupeKey   String
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([workspaceId, userId, createdAt(sort: Desc)])
+}
+
+model NotificationPreference {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId      String   @db.Uuid
+  type        String
+  channel     String // in_app | email
+  cadence     String // instant | daily | weekly | off
+  threshold   Int?
+  quietHours  Json?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([workspaceId, userId, type, channel])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  keyHash     String    @unique
+  last4       String
+  scopes      String[]
+  brandScope  String[]  @db.Uuid
+  expiresAt   DateTime? @db.Timestamptz
+  revokedAt   DateTime? @db.Timestamptz
+  lastUsedAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEndpoint {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  url         String
+  secretRef   String
+  events      String[]
+  disabledAt  DateTime? @db.Timestamptz
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  deliveries WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  endpointId  String    @db.Uuid
+  eventId     String
+  eventType   String
+  payload     Json
+  status      String // pending | delivered | failed | dead
+  attempts    Int       @default(0)
+  nextRetryAt DateTime? @db.Timestamptz
+  lastStatus  Int?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, eventId])
+  @@index([status, nextRetryAt])
+}
+
+// ───────────────────────────── Jobs, inbox/outbox, audit ─────────────────────────────
+
+model JobRecord {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String?   @db.Uuid
+  brandId       String?   @db.Uuid
+  type          String
+  status        JobStatus @default(queued)
+  operationId   String    @unique
+  correlationId String
+  configVersion String?
+  payloadRef    Json
+  cursor        Json?
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  progressDone  Int       @default(0)
+  progressTotal Int       @default(0)
+  lastError     String?
+  deadReason    String?
+  lockedUntil   DateTime? @db.Timestamptz
+  startedAt     DateTime? @db.Timestamptz
+  finishedAt    DateTime? @db.Timestamptz
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+
+  @@index([status, lockedUntil])
+  @@index([workspaceId, createdAt(sort: Desc)])
+}
+
+model InboxEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  provider        String
+  providerEventId String
+  rawHash         String
+  payload         Json
+  processedAt     DateTime? @db.Timestamptz
+  error           String?
+  createdAt       DateTime  @default(now()) @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @db.Timestamptz
+
+  @@unique([provider, providerEventId])
+}
+
+model OutboxEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String?   @db.Uuid
+  eventType   String
+  payload     Json
+  deliveredAt DateTime? @db.Timestamptz
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+
+  @@index([deliveredAt, createdAt])
+}
+
+model IdempotencyRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  route       String
+  key         String
+  inputHash   String
+  response    Json?
+  statusCode  Int?
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([workspaceId, route, key])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String?  @db.Uuid
+  actorId      String?  @db.Uuid
+  actorType    String // user | api_key | system | platform_admin
+  scope        String
+  action       String
+  target       String
+  beforeAfter  Json? // redacted
+  reason       String?
+  requestId    String?
+  createdAt    DateTime @default(now()) @db.Timestamptz
+  updatedAt    DateTime @updatedAt @db.Timestamptz
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt(sort: Desc)])
+}
+
+model PrivacyRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  requestedBy String    @db.Uuid
+  kind        String // export | delete
+  status      JobStatus @default(queued)
+  dueAt       DateTime  @db.Timestamptz
+  objectKey   String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String
+  workspaceId String?  @db.Uuid
+  enabled     Boolean
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  @@unique([key, workspaceId])
+}

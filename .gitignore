@@ -1,0 +1,18 @@
+node_modules
+.next
+out
+coverage
+playwright-report
+test-results
+*.tsbuildinfo
+next-env.d.ts
+.env
+.env.local
+.env.test.local
+/src/generated/prisma
+# prisma init tooling artifacts (not part of the app)
+.agents
+.windsurf
+.claude/skills
+skills-lock.json
+prisma7.config.ts

@@ -6,6 +6,7 @@ import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
+import { log } from "@/lib/observability/log";
 
 /**
  * Auth.js: e-posta bağlantısı + Google OAuth. Kendi parola kripto sistemi yok.
@@ -31,8 +32,15 @@ if (demoLoginEnabled) {
       async authorize(creds) {
         const email = String(creds?.email ?? "").toLowerCase();
         if (!email.endsWith("@demo.example")) return null;
-        const user = await db.user.findUnique({ where: { email } });
-        return user ? { id: user.id, email: user.email, name: user.name } : null;
+        try {
+          const user = await db.user.findUnique({ where: { email } });
+          if (!user) log.warn("auth.demo_user_missing", { hint: "Demo seed çalıştırılmamış olabilir" });
+          return user ? { id: user.id, email: user.email, name: user.name } : null;
+        } catch (e) {
+          // Genellikle DATABASE_URL / tablo eksikliği; Vercel Runtime Logs'ta görünür.
+          log.error("auth.demo_db_error", { error: e });
+          throw e;
+        }
       },
     }),
   );

@@ -5,6 +5,13 @@ import { LoginForm } from "@/components/forms/login-form";
 
 export const metadata: Metadata = { title: "Giriş", robots: { index: false } };
 
+const ERROR_TEXT: Record<string, string> = {
+  CredentialsSignin: "Demo kullanıcısı bulunamadı. Veritabanına demo verisi yüklenmemiş olabilir (DB setup → demo seed).",
+  Configuration: "Sunucu tarafında bir yapılandırma veya veritabanı hatası oluştu. Yönetici: Vercel Logs'ta \"auth.\" ile başlayan satıra bakın.",
+  Verification: "Giriş bağlantısının süresi dolmuş veya daha önce kullanılmış. Yeni bir bağlantı isteyin.",
+  AccessDenied: "Bu hesapla giriş izni yok.",
+};
+
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   const sp = await searchParams;
   const next = sp.next && sp.next.startsWith("/") && !sp.next.startsWith("//") ? sp.next : "/w";
@@ -13,7 +20,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <h1 className="text-2xl font-semibold">Giriş yap</h1>
       {sp.error ? (
         <div role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm">
-          Giriş tamamlanamadı. Bağlantının süresi dolmuş olabilir; yeni bir bağlantı isteyin.
+          <p>{ERROR_TEXT[sp.error] ?? "Giriş tamamlanamadı. Tekrar deneyin."}</p>
+          <p className="mt-1 text-xs text-muted">Hata kodu: {sp.error.slice(0, 40)}</p>
         </div>
       ) : null}
       <Card className="p-5">

@@ -87,13 +87,18 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
   const cfg = parsed.data;
   // `next build` sırasında runtime sırları gerekmez; kontroller sunucu çalışırken uygulanır.
   const building = env.NEXT_PHASE === "phase-production-build";
-  if (!building && !cfg.DATABASE_URL) throw new Error("Geçersiz ortam yapılandırması: DATABASE_URL zorunlu");
-  if (cfg.NODE_ENV === "production" && !building) {
-    if (cfg.DEMO_MODE && LIVE_CREDENTIAL_KEYS.some((k) => cfg[k])) {
+  if (!building) {
+    // Eksik zorunlu değişkenlerin hepsi tek mesajda (değerler değil, yalnız adlar) — Vercel Runtime Logs'ta görünür.
+    const missing: string[] = [];
+    if (!cfg.DATABASE_URL) missing.push("DATABASE_URL");
+    if (cfg.NODE_ENV === "production") {
+      if (!cfg.AUTH_SECRET) missing.push("AUTH_SECRET");
+      if (!cfg.SECRETS_ENCRYPTION_KEY) missing.push("SECRETS_ENCRYPTION_KEY");
+    }
+    if (missing.length) throw new Error(`Geçersiz ortam yapılandırması: eksik değişkenler: ${missing.join(", ")}`);
+    if (cfg.NODE_ENV === "production" && cfg.DEMO_MODE && LIVE_CREDENTIAL_KEYS.some((k) => cfg[k])) {
       throw new Error("Prod'da DEMO_MODE canlı sağlayıcı anahtarlarıyla birlikte açılamaz.");
     }
-    if (!cfg.AUTH_SECRET) throw new Error("Prod'da AUTH_SECRET zorunlu.");
-    if (!cfg.SECRETS_ENCRYPTION_KEY) throw new Error("Prod'da SECRETS_ENCRYPTION_KEY zorunlu.");
   }
   return {
     ...cfg,

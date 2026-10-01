@@ -3,10 +3,9 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { Card } from "@/components/ui";
 import { AuditForm } from "@/components/forms/audit-form";
-import { config } from "@/lib/config";
 
 export default function LandingPage() {
-  const demo = config().DEMO_MODE;
+  const demo = process.env.DEMO_MODE === "true";
   return (
     <div className="flex flex-col gap-12">
       <section aria-labelledby="hero" className="grid gap-8 lg:grid-cols-[1.2fr_1fr] lg:items-start">

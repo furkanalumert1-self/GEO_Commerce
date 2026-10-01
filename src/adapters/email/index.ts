@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { config } from "@/lib/config";
 import { log } from "@/lib/observability/log";
+import { defaultEmailFrom } from "@/lib/brand";
 
 export interface EmailMessage {
   to: string;
@@ -17,7 +18,7 @@ export interface EmailAdapter {
 /** SMTP (Mailpit localde) veya Resend. Yapılandırılmamışsa açık not_configured. */
 export function getEmailAdapter(): EmailAdapter {
   const cfg = config();
-  const from = cfg.EMAIL_FROM ?? "GEO Commerce <no-reply@localhost>";
+  const from = cfg.EMAIL_FROM ?? defaultEmailFrom;
   if (cfg.EMAIL_PROVIDER === "resend" && cfg.RESEND_API_KEY) {
     return {
       status: () => "ready",

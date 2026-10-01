@@ -38,7 +38,7 @@ export function RunPlanner({ url, engines, locale }: { url: string; engines: Eng
     if (!res.ok) return setError(`${body?.error?.message ?? "İşlem başarısız"}${body?.requestId ? ` · istek no: ${body.requestId}` : ""}`);
     if (doPreview) setPreview(body.data);
     else {
-      setQueued(`Ölçüm kuyruğa alındı (${body.data.preview.unitsPlanned} answer unit ayrıldı).`);
+      setQueued(`Ölçüm kuyruğa alındı (${body.data.preview.unitsPlanned} yanıt birimi ayrıldı).`);
       setPreview(null);
       router.refresh();
     }

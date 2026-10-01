@@ -31,7 +31,7 @@ export function ReportView({ snapshot: s, timeZone, brandingName }: { snapshot: 
           {s.visibility.partial ? " Bazı motorlar kapsam eşiğinin altında kaldığı için toplam skor kısmidir." : ""}
           {s.visibility.smallSample ? " Örneklem küçüktür." : ""} {s.opportunities.length} açık fırsat öncelik sırasıyla aşağıdadır.
         </p>
-        <p className="mt-2 text-xs text-muted">Formül {s.visibility.formulaVersion} · cohort {s.visibility.cohortHash} · yüzey {s.provenance.surfaces.map((x) => SURFACE_LABEL[x] ?? x).join(", ")} · modeller {s.provenance.models.join(", ")}</p>
+        <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">Teknik detaylar</summary><p className="mt-1 break-all">Formül {s.visibility.formulaVersion} · ölçüm kümesi {s.visibility.cohortHash} · yüzey {s.provenance.surfaces.map((x) => SURFACE_LABEL[x] ?? x).join(", ")} · modeller {s.provenance.models.join(", ")}</p></details>
       </Card>
       <Card>
         <CardHeader title="Motorlar ve SOV" />
@@ -60,7 +60,7 @@ export function ReportView({ snapshot: s, timeZone, brandingName }: { snapshot: 
       ) : null}
       <Card className="p-4 text-sm">
         <h2 className="font-semibold">Notlar ve sonraki adımlar</h2>
-        <ul className="mt-1 list-disc pl-5 text-muted">{s.notes.map((n) => <li key={n}>{n}</li>)}<li>En yüksek skorlu fırsat için taslak oluşturup onaylayın; 14/28 gün sonra aynı cohort ile yeniden ölçün.</li></ul>
+        <ul className="mt-1 list-disc pl-5 text-muted">{s.notes.map((n) => <li key={n}>{n}</li>)}<li>En yüksek skorlu fırsat için taslak oluşturup onaylayın; 14/28 gün sonra aynı soru kümesiyle yeniden ölçün.</li></ul>
       </Card>
     </article>
   );

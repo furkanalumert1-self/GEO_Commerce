@@ -38,7 +38,7 @@ export function verifyShopifyHmac(raw: string, headerValue: string | undefined, 
   return safeEqual(digest, headerValue);
 }
 
-function toMinor(amount: unknown): bigint {
+export function toMinor(amount: unknown): bigint {
   const s = String(amount ?? "0");
   const [i, f = ""] = s.split(".");
   return BigInt(i || "0") * 100n + BigInt((f + "00").slice(0, 2)) * (s.startsWith("-") ? -1n : 1n);
@@ -86,14 +86,15 @@ export function normalizeShopifyOrder(p: Record<string, unknown>): NormalizedOrd
 }
 
 function shopifyAdapter(cfg: AppConfig): CommerceAdapter {
-  const caps: CommerceCapability[] = ["catalogRead", "ordersRead", "refundsRead", "contentWrite", "oauth"];
+  // İçerik yazma (contentWrite) bu sürümde istenmez/iddia edilmez; yayın export + manuel bildirimle.
+  const caps: CommerceCapability[] = ["catalogRead", "ordersRead", "refundsRead", "oauth"];
   if (!cfg.SHOPIFY_CLIENT_ID || !cfg.SHOPIFY_CLIENT_SECRET) {
     return unavailable("shopify", "Shopify", caps, "SHOPIFY_CLIENT_ID/SECRET yapılandırılmamış", "not_configured");
   }
-  const base = unavailable("shopify", "Shopify", caps, "Canlı Shopify sync henüz partner mağazasıyla doğrulanmadı", "not_configured");
+  const base = unavailable("shopify", "Shopify", caps, "Shopify bağlantısı OAuth ile kurulur", "not_configured");
   return {
     ...base,
-    availability: () => ({ state: "available", reason: "Webhook doğrulama ve normalize hazır; canlı sync acceptance bekliyor" }),
+    availability: () => ({ state: "available", reason: "OAuth ile bağlanır; yalnız okuma izni (ürün, stok, sipariş). Bağlı durumu gerçek API kontrolünden sonra gösterilir. İçerik yayınlama desteklenmez." }),
     verifyWebhook: (raw, headers, secret) => verifyShopifyHmac(raw, headers["x-shopify-hmac-sha256"], secret),
     normalizeEvent: (payload) => normalizeShopifyOrder(payload as Record<string, unknown>),
   };

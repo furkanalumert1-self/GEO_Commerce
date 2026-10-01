@@ -46,8 +46,8 @@ export default async function RevenuePage({ params, searchParams }: { params: Pr
       />
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} showEngine={false} />
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="AI kaynaklı net gelir" value={Object.keys(rev.aiNetByCurrency).length ? Object.entries(rev.aiNetByCurrency).map(([c, v]) => fmtMoney(v, c)).join(" · ") : fmtMoney(0, access.brand.currency)} hint="Para birimleri ayrı; kur dönüşümü yapılmadı" />
-        <Stat label="AI siparişleri" value={fmtNumber(rev.aiOrders)} hint={`${rev.model} · 30 gün pencere`} />
+        <Stat label="AI kaynaklı net gelir" value={Object.keys(rev.aiNetByCurrency).length ? <span className="flex flex-col gap-0.5 text-xl">{Object.entries(rev.aiNetByCurrency).map(([c, v]) => <span key={c}><span className="mr-2 text-xs font-medium text-text-secondary">{c}</span>{fmtMoney(v, c)}</span>)}</span> : fmtMoney(0, access.brand.currency)} hint="Para birimleri ayrı; kur dönüşümü yapılmadı" />
+        <Stat label="AI siparişleri" value={fmtNumber(rev.aiOrders)} hint={`${rev.model === FIRST_TOUCH ? "İlk dokunuş" : "Son dokunuş (doğrudan hariç)"} · 30 gün pencere`} />
         <Stat label="AI oturumlarında CVR" value={fmtPct(rev.aiCvr, "tr-TR", 1)} hint={`${rev.aiSessions} ölçülebilen AI oturumu`} />
         <Stat label="Attribution kapsamı" value={fmtPct(rev.attributionCoverage)} hint={`${rev.unattributed} sipariş ilişkilendirilemedi (consent/UTM/eşleşme yok)`} />
       </div>

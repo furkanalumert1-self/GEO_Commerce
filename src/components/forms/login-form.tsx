@@ -47,9 +47,15 @@ export function LoginForm({ providers, next }: { providers: { email: boolean; go
       {providers.google ? (
         <Button onClick={() => signIn("google", { callbackUrl: next })}>Google ile devam et</Button>
       ) : null}
+      {!providers.email && !providers.google && providers.demo ? (
+        <div role="status" className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
+          Gerçek hesap girişi henüz yapılandırılmadı (e-posta bağlantısı için SMTP_URL veya Google OAuth gerekli). Aşağıdaki demo hesapları yalnız örnek veri içerir.
+        </div>
+      ) : null}
       {providers.demo ? (
         <div className="border-t border-border pt-4">
-          <p className="text-sm font-medium">Demo hesapları (yalnız yerel demo modu)</p>
+          <p className="text-sm font-medium">Demo hesapları — yalnız örnek veri</p>
+          <p className="mt-0.5 text-xs text-text-secondary">Ayrı, “Örnek veri” etiketli demo çalışma alanlarını açar. Gerçek mağaza bağlanamaz, gerçek alan adı kaydedilemez ve gerçek hesap kimliği sağlamaz.</p>
           <ul className="mt-2 flex flex-col gap-2">
             {DEMO_USERS.map(([e, label]) => (
               <li key={e}>

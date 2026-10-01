@@ -71,14 +71,6 @@ export type AppConfig = z.infer<typeof envSchema> & {
   platformAdmins: string[];
 };
 
-const LIVE_CREDENTIAL_KEYS = [
-  "STRIPE_SECRET_KEY",
-  "OPENAI_API_KEY",
-  "GOOGLE_AI_API_KEY",
-  "PERPLEXITY_API_KEY",
-  "LICENSED_MONITOR_API_KEY",
-] as const;
-
 export function parseConfig(env: Record<string, string | undefined>): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
@@ -98,9 +90,8 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
       else decodeKey(cfg.SECRETS_ENCRYPTION_KEY); // format hatası erken ve açık mesajla
     }
     if (missing.length) throw new Error(`Geçersiz ortam yapılandırması: eksik değişkenler: ${missing.join(", ")}`);
-    if (cfg.NODE_ENV === "production" && cfg.DEMO_MODE && LIVE_CREDENTIAL_KEYS.some((k) => cfg[k])) {
-      throw new Error("Prod'da DEMO_MODE canlı sağlayıcı anahtarlarıyla birlikte açılamaz.");
-    }
+    // DEMO_MODE artık yalnız etiketli demo workspace'leri etkiler (fixtures orada); canlı anahtarlarla birlikte
+    // açık olabilir. Gerçek workspace'ler her zaman canlı sağlayıcıyı kullanır.
   }
   return {
     ...cfg,

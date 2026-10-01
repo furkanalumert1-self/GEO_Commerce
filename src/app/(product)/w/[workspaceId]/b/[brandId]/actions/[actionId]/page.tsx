@@ -11,8 +11,8 @@ import { isUuid } from "@/modules/tenancy/access";
 import { can } from "@/lib/permissions";
 import { fmtDate } from "@/lib/format";
 import { brandMetrics } from "@/modules/monitoring/queries";
-import { measurementWindows, workflowView } from "@/lib/view-models";
-import type { ActionContent } from "@/modules/actions/workflow";
+import { measurementOutcome, measurementWindows, workflowView } from "@/lib/view-models";
+import { blockingIssues, type ActionContent } from "@/modules/actions/workflow";
 
 export const metadata: Metadata = { title: "Aksiyon" };
 
@@ -46,7 +46,9 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
   ]);
   const measurement = a.measurement as { publishAt?: string; baselineDays?: number; followUps?: number[]; manualPublish?: boolean } | null;
   const manual = Boolean(measurement?.manualPublish);
-  const flow = workflowView(a.status, { manualPublish: manual });
+  const currentVersion = a.versions.find((v) => v.id === a.currentVersionId) ?? a.versions[0];
+  const needsFix = currentVersion ? blockingIssues(currentVersion.content as unknown as ActionContent).length > 0 : false;
+  let flow = workflowView(a.status, { manualPublish: manual, needsFix });
 
   // Ölçüm: fırsatın soru kümesi (yoksa markanın tüm soruları), yayın anı etrafında eş uzunlukta dönemler.
   let panel: ReactNode = null;
@@ -58,6 +60,11 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
       brandMetrics(db, workspaceId, brandId, { ...windows.after, promptIds }),
     ]);
     const side = (m: typeof before) => ({ score: m.aggregate.score, samples: m.sampleCount, engines: m.perEngine.map((e) => e.engine).sort() });
+    // Adım göstergesi ölçüm sonucuyla çelişmesin: etki hesaplanamıyorsa bunu açıkça söyler.
+    const outcome = measurementOutcome(windows.partial, before.sampleCount, after.sampleCount);
+    if (outcome.kind === "not_computable" && (a.status === "measuring" || a.status === "completed")) {
+      flow = { ...flow, label: a.status === "completed" ? "Ölçüm tamamlandı · etki hesaplanamadı" : flow.label, tone: a.status === "completed" ? "neutral" : flow.tone, next: outcome.message };
+    }
     panel = (
       <MeasurementPanel
         windows={windows}
@@ -80,7 +87,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
           { label: a.title },
         ]}
         title={a.title}
-        badges={<><ActionStatusBadge status={a.status} manual={manual} /><Badge>{TYPE_LABEL[a.type] ?? a.type}</Badge></>}
+        badges={<><ActionStatusBadge status={a.status} manual={manual} needsFix={needsFix} /><Badge>{TYPE_LABEL[a.type] ?? a.type}</Badge></>}
         description={`${a.targetUrl ? `Hedef: ${a.targetUrl} · ` : ""}Son işlem ${fmtDate(a.updatedAt, tz, "tr-TR", true)}`}
       />
       <Card className="mb-6 p-5">

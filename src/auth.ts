@@ -7,6 +7,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { log } from "@/lib/observability/log";
+import { defaultEmailFrom } from "@/lib/brand";
 
 /**
  * Auth.js: e-posta bağlantısı + Google OAuth. Kendi parola kripto sistemi yok.
@@ -16,7 +17,7 @@ const cfg = config();
 
 const providers: Provider[] = [];
 if (cfg.SMTP_URL) {
-  providers.push(Nodemailer({ server: cfg.SMTP_URL, from: cfg.EMAIL_FROM ?? "GEO Commerce <no-reply@localhost>", maxAge: 15 * 60 }));
+  providers.push(Nodemailer({ server: cfg.SMTP_URL, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60 }));
 }
 if (cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET) {
   providers.push(Google({ clientId: cfg.AUTH_GOOGLE_ID, clientSecret: cfg.AUTH_GOOGLE_SECRET }));

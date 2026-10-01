@@ -4,6 +4,8 @@ import { AppError } from "@/lib/http/errors";
 import { json, readJson, workspaceRoute } from "@/lib/http/api";
 import { assertCan } from "@/modules/tenancy/access";
 import { normalizeDomain } from "@/modules/audit/crawler";
+import { isDemoDomain } from "@/lib/demo";
+import { assertPublicUrl } from "@/lib/http/safe-fetch";
 
 export const GET = workspaceRoute(async ({ access, requestId }) => {
   const brands = await db.brand.findMany({
@@ -34,6 +36,15 @@ export const POST = workspaceRoute(async ({ req, access, requestId }) => {
     domain = normalizeDomain(input.domain);
   } catch {
     throw new AppError("validation_error", "Geçersiz alan adı", { fieldErrors: { domain: ["Geçersiz alan adı"] } });
+  }
+  // `.example` örnek alan adları yalnız demo workspace'te; demo workspace'e gerçek alan adı eklenmez.
+  if (isDemoDomain(domain) !== access.isDemo) {
+    throw new AppError("validation_error", access.isDemo ? "Demo çalışma alanında yalnız örnek (.example) alan adı kullanılabilir" : "Gerçek bir alan adı girin; .example yalnız demo içindir", { fieldErrors: { domain: [access.isDemo ? "Örnek alan adı kullanın" : "Gerçek alan adı girin"] } });
+  }
+  if (!access.isDemo) {
+    await assertPublicUrl(`https://${domain}/`).catch(() => {
+      throw new AppError("validation_error", "Alan adı herkese açık bir adrese çözümlenmiyor", { fieldErrors: { domain: ["Herkese açık bir alan adı girin"] } });
+    });
   }
   const existing = await db.brand.findFirst({ where: { workspaceId: access.workspaceId, domain } });
   if (existing) throw new AppError("conflict", "Bu alan adı zaten ekli");

@@ -2,58 +2,130 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Alert, Badge, Card, PageHeader } from "@/components/ui";
 import { ApiButton } from "@/components/forms/api-button";
+import { ShopifyConnectForm } from "@/components/forms/shopify-connect";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { pageBrand } from "@/lib/page-access";
+import { can } from "@/lib/permissions";
 import { hasFeature } from "@/modules/billing/plans";
 import { getCommerceAdapters } from "@/adapters/commerce";
+import { shopifyConfigured } from "@/modules/commerce/connect";
 import { fmtDate } from "@/lib/format";
 
-export const metadata: Metadata = { title: "Entegrasyonlar" };
+export const metadata: Metadata = { title: "Entegrasyon" };
 
-const STATE_TONE: Record<string, "success" | "warning" | "danger" | "neutral" | "primary"> = { healthy: "success", syncing: "primary", connecting: "primary", degraded: "warning", reauth_required: "warning", not_configured: "neutral", unsupported: "neutral" };
-const STATE_LABEL: Record<string, string> = { healthy: "Sağlıklı", syncing: "Senkronize ediliyor", connecting: "Bağlanıyor", degraded: "Sorunlu", reauth_required: "Yeniden yetkilendirme gerekli", not_configured: "Yapılandırılmamış", unsupported: "Henüz desteklenmiyor" };
+/** Bağlantı durumları (UI): gerçek kontrol sonucu olmadan "Bağlı" gösterilmez. */
+const STATE: Record<string, { label: string; tone: "success" | "warning" | "danger" | "neutral" | "primary" }> = {
+  not_configured: { label: "Bağlı değil", tone: "neutral" },
+  connecting: { label: "Bağlanıyor", tone: "primary" },
+  syncing: { label: "Doğrulanıyor", tone: "primary" },
+  healthy: { label: "Bağlı", tone: "success" },
+  reauth_required: { label: "Yetki süresi doldu", tone: "warning" },
+  degraded: { label: "Hata", tone: "danger" },
+  unsupported: { label: "Desteklenmiyor", tone: "neutral" },
+};
 
-export default async function IntegrationsPage({ params }: { params: Promise<{ workspaceId: string; brandId: string }> }) {
+function resolution(code: string | null): string | null {
+  if (!code) return null;
+  if (code === "auth_rejected") return "Mağaza erişimi reddedildi veya iptal edildi. Yeniden bağlanın.";
+  if (code === "app_uninstalled") return "Uygulama mağazadan kaldırılmış. Yeniden bağlanın.";
+  if (code.startsWith("missing_scopes")) return `Gerekli izinler verilmedi (${code.split(":")[1]}). Yeniden bağlanırken tüm izinleri onaylayın.`;
+  if (code === "sync_failed") return "Son senkronizasyon başarısız. Biraz sonra yeniden deneyin; sürerse yeniden bağlanın.";
+  if (code === "connect_failed") return "Bağlantı tamamlanamadı. Yeniden deneyin.";
+  if (code.startsWith("webhooks_failed")) return "Sipariş bildirimleri (webhook) kaydedilemedi; siparişler yalnız senkronizasyonla gelir. APP_URL'nin herkese açık HTTPS adresi olduğunu kontrol edip yeniden bağlanın.";
+  return `Hata kodu: ${code}`;
+}
+
+const CALLBACK_ERROR: Record<string, string> = {
+  missing_scopes: "Gerekli izinler verilmediği için bağlantı tamamlanmadı.",
+  connect_failed: "Shopify bağlantısı doğrulanamadı; mağaza erişimi kurulmadı.",
+  unauthenticated: "Bağlantı isteği doğrulanamadı veya süresi doldu. Yeniden başlatın.",
+  forbidden: "Bağlantıyı başlatan kullanıcı ile oturum eşleşmiyor veya yetkiniz yok.",
+  not_configured: "Shopify uygulaması sunucuda yapılandırılmamış.",
+};
+
+export default async function IntegrationsPage({ params, searchParams }: { params: Promise<{ workspaceId: string; brandId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId, brandId } = await params;
+  const sp = await searchParams;
   const access = await pageBrand(workspaceId, brandId);
   const allowed = hasFeature(access.entitlements, "commerce");
-  const [existing, brand] = await Promise.all([db.integration.findMany({ where: { brandId, workspaceId } }), db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { trackerSiteKey: true, domain: true } })]);
+  const manage = can({ role: access.brandRole, isApprover: access.isApprover }, "integrations.manage");
+  const [existing, brand] = await Promise.all([
+    db.integration.findMany({ where: { brandId, workspaceId }, orderBy: { updatedAt: "desc" } }),
+    db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { trackerSiteKey: true, domain: true } }),
+  ]);
   const adapters = getCommerceAdapters();
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
+  const tz = access.brand.timezone;
+  const blockReason = !allowed ? "Commerce paketi gerekli" : !manage ? "Bu işlem için entegrasyon yönetme yetkisi gerekli" : access.isDemo ? "Demo çalışma alanında gerçek mağaza bağlanamaz" : undefined;
   return (
     <>
-      <PageHeader title="Entegrasyonlar" description="Mağaza bağlantıları, CSV/feed importu ve first-party tracker. Resmi erişim ve gerçek mağaza testi olmadan hiçbir bağlantı 'tam destek' olarak gösterilmez." />
-      {!allowed ? <div className="mb-4"><Alert tone="primary" title="Mağaza entegrasyonları Commerce paketinde">CSV/feed importu ve readiness her pakette kullanılabilir. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></div> : null}
+      <PageHeader
+        breadcrumb={[{ label: "Ayarlar" }, { label: "Entegrasyon" }]}
+        title="Entegrasyon"
+        description="Mağaza bağlantıları, CSV/feed importu ve ölçüm etiketi. Bir bağlantı yalnız gerçek yetki ve API kontrolünden sonra “Bağlı” görünür."
+      />
+      {sp.connected === "shopify" ? <div className="mb-4"><Alert tone="success" title="Shopify bağlandı">Mağaza erişimi doğrulandı. Katalog ve sipariş senkronizasyonu kuyruğa alındı; tamamlandığında son senkronizasyon zamanı güncellenir.</Alert></div> : null}
+      {sp.error ? <div className="mb-4"><Alert tone="danger" title="Bağlantı tamamlanmadı">{CALLBACK_ERROR[sp.error] ?? "Bağlantı sırasında hata oluştu; yeniden deneyin."}</Alert></div> : null}
+      {!allowed ? <div className="mb-4"><Alert tone="primary" title="Mağaza entegrasyonları Commerce paketinde">CSV/feed importu her pakette kullanılabilir. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></div> : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {Object.values(adapters).map((a) => {
-          const conn = existing.find((e) => e.provider === a.provider);
+          const conn = existing.find((e) => e.provider === a.provider && e.status !== "not_configured") ?? existing.find((e) => e.provider === a.provider);
           const av = a.availability();
           const state = conn?.status ?? (av.state === "available" ? "not_configured" : av.state);
+          const st = STATE[state] ?? { label: state, tone: "neutral" as const };
+          const fix = resolution(conn?.errorCode ?? null);
+          const shopifyReady = a.provider === "shopify" && av.state === "available" && shopifyConfigured();
           return (
-            <Card key={a.provider} className="flex flex-col gap-3 p-4">
+            <Card key={a.provider} className="flex flex-col gap-3 p-5">
               <div className="flex items-start justify-between gap-2">
                 <h2 className="font-semibold">{a.label}</h2>
-                <Badge tone={STATE_TONE[state] ?? "neutral"}>{STATE_LABEL[state] ?? state}</Badge>
+                <Badge tone={st.tone}>{st.label}</Badge>
               </div>
-              <p className="text-xs text-muted">Yetenekler: {a.capabilities().join(", ")}</p>
-              {conn ? <p className="text-xs text-muted">Mağaza: {conn.storeId} · Son senkron: {fmtDate(conn.lastSyncAt, access.brand.timezone, "tr-TR", true)}{conn.errorCode ? ` · Hata: ${conn.errorCode}` : ""}</p> : null}
-              {av.reason ? <p className="text-sm text-muted">{av.reason}</p> : null}
-              <div className="mt-auto flex flex-wrap gap-2">
+              {conn && conn.status !== "not_configured" ? (
+                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                  <dt className="text-text-secondary">Mağaza</dt>
+                  <dd className="min-w-0 break-all">{conn.storeId}</dd>
+                  <dt className="text-text-secondary">Son başarılı senkronizasyon</dt>
+                  <dd>{conn.lastSyncAt ? fmtDate(conn.lastSyncAt, tz, "tr-TR", true) : "Henüz yok"}</dd>
+                  {conn.scopes.length ? (
+                    <>
+                      <dt className="text-text-secondary">Kapsam</dt>
+                      <dd className="min-w-0 break-words">{conn.scopes.join(", ")}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              ) : (
+                <p className="text-xs text-text-secondary">Yetenekler: {a.capabilities().join(", ")}</p>
+              )}
+              {fix ? <p className="rounded-md bg-surface-subtle px-3 py-2 text-sm"><span className="font-medium">Çözüm: </span>{fix}</p> : null}
+              {av.reason && !conn ? <p className="text-sm text-text-secondary">{av.reason}</p> : null}
+              <div className="mt-auto flex flex-col gap-2">
                 {a.provider === "csv_feed" ? (
-                  <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog`}>CSV içe aktar</Link>
+                  <Link className="inline-flex min-h-11 items-center self-start rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`/w/${workspaceId}/b/${brandId}/catalog`}>CSV içe aktar</Link>
+                ) : a.provider === "shopify" ? (
+                  !shopifyReady ? (
+                    <p className="text-sm text-text-secondary">Shopify uygulama anahtarları sunucuda yapılandırılmadığı için bağlantı kullanılamıyor.</p>
+                  ) : conn && (conn.status === "healthy" || conn.status === "degraded") ? (
+                    <div className="flex flex-wrap gap-2">
+                      <ApiButton url={`${api}/integrations/shopify/sync`} label="Şimdi senkronize et" pendingLabel="Kuyruğa alınıyor…" onSuccessMessage="Senkronizasyon kuyruğa alındı" disabled={Boolean(blockReason)} disabledReason={blockReason} />
+                      <ApiButton url={`${api}/integrations/shopify`} method="DELETE" variant="danger" label="Bağlantıyı kes" confirm="Shopify bağlantısı kesilsin mi? Erişim anahtarı iptal edilir; aktarılmış veriler korunur." disabled={Boolean(blockReason)} />
+                    </div>
+                  ) : (
+                    <ShopifyConnectForm url={`${api}/integrations/shopify/connect`} initialShop={conn?.storeId} label={conn && conn.status !== "not_configured" ? "Yeniden bağlan" : "Bağlan"} disabledReason={blockReason} />
+                  )
                 ) : (
-                  <ApiButton url={`${api}/integrations/${a.provider}/connect`} body={{ shopDomain: brand.domain }} label={conn?.status === "reauth_required" ? "Yeniden yetkilendir" : "Bağlan"} disabled={!allowed} disabledReason={!allowed ? "Commerce paketi gerekli" : undefined} />
+                  <p className="text-sm text-text-secondary">Bu sağlayıcı için canlı bağlantı henüz yok; CSV/feed importunu kullanın.</p>
                 )}
               </div>
             </Card>
           );
         })}
       </div>
-      <Card className="mt-6 p-4">
-        <h2 className="font-semibold">First-party tracker</h2>
-        <p className="mt-1 text-sm text-muted">Consent adapter ile page_view, product_view, add_to_cart, checkout_started, purchase olaylarını gönderir. Site anahtarı gizli değildir; yalnız {brand.domain} alan adından kabul edilir. Sohbet metni, form alanları ve gereksiz kişisel veri toplanmaz.</p>
-        <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-bg p-3 text-xs">{`<script>
+      <Card className="mt-6 p-5">
+        <h2 className="font-semibold">Ölçüm etiketi (first-party tracker)</h2>
+        <p className="mt-1 text-sm text-text-secondary">AI kaynaklı ziyaret ve siparişleri eşleştirmek için sitenize eklenir; yalnız kullanıcı izni (consent) varsa olay gönderir. Site anahtarı gizli değildir; yalnız {brand.domain} alan adından kabul edilir. Sohbet metni, form alanları ve gereksiz kişisel veri toplanmaz.</p>
+        <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-surface-subtle p-3 text-xs">{`<script>
   // Consent yönetim aracınız izin verdiğinde çağırın:
   // geoTrack({ type: "page_view", consent: { analytics: true, ads: false } })
   window.GEO_SITE_KEY = "${brand.trackerSiteKey}";

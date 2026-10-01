@@ -25,6 +25,12 @@ export const POST = route<{ provider: string; integrationId: string }>(async ({ 
   const eventId = headers["x-shopify-webhook-id"] ?? headers["x-webhook-id"] ?? sha256(raw);
   const inbox = await recordInbox(db, `${params.provider}:${integration.id}`, eventId, raw, { topic: headers["x-shopify-topic"] ?? null });
   if (inbox.duplicate) return json({ received: true, duplicate: true }, { requestId });
+  // Uygulama kaldırıldıysa erişim artık yok: "Yetki süresi doldu" durumuna geçilir, token silinir.
+  if ((headers["x-shopify-topic"] ?? "") === "app/uninstalled") {
+    await db.integration.update({ where: { id: integration.id }, data: { status: "reauth_required", secretRef: null, errorCode: "app_uninstalled" } });
+    await db.inboxEvent.update({ where: { id: inbox.id }, data: { processedAt: new Date() } });
+    return json({ received: true }, { requestId });
+  }
   const order = adapter.normalizeEvent(JSON.parse(raw));
   if (order) await upsertOrder(db, { workspaceId: integration.workspaceId, brandId: integration.brandId, connectorId: integration.id }, order);
   await db.inboxEvent.update({ where: { id: inbox.id }, data: { processedAt: new Date() } });

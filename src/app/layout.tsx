@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
 
 export const metadata: Metadata = {
-  title: { default: "Callypso AI Growth — GEO Commerce", template: "%s · Callypso AI Growth" },
-  description: "E-ticaret markaları için AI görünürlük, fırsat ve gelir ölçüm platformu.",
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
+  description: APP_DESCRIPTION,
+  applicationName: APP_NAME,
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };

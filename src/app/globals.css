@@ -95,3 +95,13 @@ summary.no-marker::-webkit-details-marker {
 details:not([open]) > :not(summary) {
   display: none;
 }
+
+/* Filtre alanı: mobilde açılır, ≥640 px her zaman açık. */
+@media (min-width: 640px) {
+  .filter-sheet > summary {
+    display: none;
+  }
+  .filter-sheet:not([open]) > :not(summary) {
+    display: flex;
+  }
+}

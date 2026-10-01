@@ -163,7 +163,7 @@ async function main() {
   }
 
   console.log("Aksiyonlar (6 farklı durum)…");
-  const products = await db.product.findMany({ where: { brandId: brand.id }, include: { variants: true }, take: 5 });
+  const products = await db.product.findMany({ where: { brandId: brand.id }, include: { variants: true }, take: 12 });
   const actionStates = ["draft", "review", "approved", "measuring", "completed", "rejected"] as const;
   for (const [i, status] of actionStates.entries()) {
     const o = opps[i % Math.max(1, opps.length)];
@@ -171,7 +171,10 @@ async function main() {
     const content = templateDraft({
       type: i % 2 ? "faq" : "content", language: "tr", brand: { name: brand.name, domain: brand.domain }, opportunity: { title: o.title, recommendedAction: o.recommendedAction, clusterLabel: o.cluster.label, gapType: o.gapType },
       evidence: o.evidence.map((e) => ({ quote: e.quote, url: e.pageUrl })), targetUrl: o.targetUrl,
-      catalog: products.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null })), allowedClaims: [],
+      // Onaylı/uygulanmış örnek kayıtlar zorunlu eksik (ör. [FİYAT]) içermez: yalnız fiyatı bilinen ürünler.
+      catalog: products
+        .filter((p) => !["approved", "measuring", "completed"].includes(status) || p.variants[0]?.priceMinor != null)
+        .map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null })), allowedClaims: [],
     });
     const a = await db.action.create({ data: { workspaceId: ws.id, brandId: brand.id, opportunityId: o.id, type: i % 2 ? "faq" : "content", status, title: content.title ?? o.title, targetUrl: o.targetUrl, version: 1, assigneeId: editor.id, publishedAt: ["measuring", "completed"].includes(status) ? new Date(TODAY.getTime() - (status === "completed" ? 30 : 5) * DAY) : null, measurement: ["measuring", "completed"].includes(status) ? { publishAt: new Date(TODAY.getTime() - (status === "completed" ? 30 : 5) * DAY).toISOString(), baselineDays: 14, followUps: [14, 28], manualPublish: true } : undefined } });
     const v = await db.actionVersion.create({ data: { workspaceId: ws.id, actionId: a.id, number: 1, content: content as object, contentHash: versionHash(content), generated: true, createdById: editor.id } });

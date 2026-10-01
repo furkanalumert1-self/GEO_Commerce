@@ -35,7 +35,7 @@ function fingerprint(): string {
 export function AuditForm({ demo }: { demo: boolean }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<{ message: string; requestId?: string } | null>(null);
-  const { register, handleSubmit, formState, setError } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { domain: demo ? "lumabakim.example" : "", locale: "tr-TR" } });
+  const { register, handleSubmit, formState, setError } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { domain: "", locale: "tr-TR" } });
 
   const onSubmit = async (v: Values) => {
     setServerError(null);
@@ -63,8 +63,8 @@ export function AuditForm({ demo }: { demo: boolean }) {
           {serverError.requestId ? <span className="block text-xs text-muted">İstek no: {serverError.requestId}</span> : null}
         </div>
       ) : null}
-      <Field label="Alan adı" htmlFor="domain" error={err} hint={demo ? "Demo modunda yalnız .example alan adları taranır." : "Yalnız herkese açık sayfalar taranır; robots.txt kurallarına uyulur."}>
-        <input id="domain" inputMode="url" autoComplete="url" className={inputClass} aria-invalid={Boolean(err)} aria-describedby={err ? "domain-error" : "domain-hint"} {...register("domain")} />
+      <Field label="Alan adı" htmlFor="domain" error={err} hint={demo ? "Gerçek alan adınız canlı taranır. Örnek veriyle denemek için lumabakim.example yazabilirsiniz." : "Yalnız herkese açık sayfalar taranır; robots.txt kurallarına uyulur."}>
+        <input id="domain" placeholder="magazaniz.com" inputMode="url" autoComplete="url" className={inputClass} aria-invalid={Boolean(err)} aria-describedby={err ? "domain-error" : "domain-hint"} {...register("domain")} />
       </Field>
       <Field label="Pazar / dil" htmlFor="locale">
         <select id="locale" className={inputClass} {...register("locale")}>

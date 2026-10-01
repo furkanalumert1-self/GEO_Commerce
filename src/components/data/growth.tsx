@@ -29,19 +29,27 @@ export function MetricCard({
   action?: ReactNode;
 }) {
   return (
-    <Card className="group relative flex min-h-[148px] flex-col p-5 hover:border-border-strong/60">
-      <p className="text-sm font-medium text-text-secondary">{label}</p>
-      <p className="tabular mt-3 text-[32px] font-semibold leading-[1.15] tracking-[-0.01em]">
+    <Card className="group relative flex min-h-[112px] flex-col p-4 hover:border-border-strong/60 sm:min-h-[148px] sm:p-5">
+      <p className="text-[13px] font-medium leading-snug text-text-secondary sm:text-sm">{label}</p>
+      <div className="tabular mt-2 text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] sm:mt-3 sm:text-[32px]">
         {missing ? <span aria-label="Değer yok">—</span> : value}
-        {!missing && unit ? <span className="ml-1 text-base font-normal text-text-secondary">{unit}</span> : null}
-      </p>
-      <div className="mt-1 text-[13px] leading-snug text-text-secondary">
-        {missing ? <span>{missing}</span> : delta ? <DeltaLine delta={delta} /> : null}
-        {scope ? <p className="mt-0.5 text-muted">{scope}</p> : null}
+        {!missing && unit ? <span className="ml-1 text-sm font-normal text-text-secondary sm:text-base">{unit}</span> : null}
       </div>
-      <div className="mt-auto pt-3 text-sm">
+      <div className="mt-1 text-xs leading-snug text-text-secondary sm:text-[13px]">
+        {missing ? <span>{missing}</span> : delta ? <DeltaLine delta={delta} /> : null}
+        {scope ? (
+          <>
+            <p className="mt-0.5 hidden text-muted sm:block">{scope}</p>
+            <details className="relative z-10 mt-0.5 sm:hidden">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center text-muted">Ayrıntı</summary>
+              <p className="text-muted">{scope}</p>
+            </details>
+          </>
+        ) : null}
+      </div>
+      <div className="mt-auto pt-2 text-sm sm:pt-3">
         {action ?? (
-          <Link href={href} className="inline-flex items-center gap-1 font-medium text-primary after:absolute after:inset-0 after:rounded-[var(--radius-lg)] hover:underline underline-offset-2">
+          <Link href={href} className="inline-flex min-h-11 items-center gap-1 font-medium text-primary after:absolute after:inset-0 after:rounded-[var(--radius-lg)] hover:underline underline-offset-2 sm:min-h-0">
             {linkLabel}
             <ArrowRight size={14} aria-hidden />
           </Link>
@@ -56,8 +64,12 @@ export function DeltaLine({ delta }: { delta: Delta }) {
   const Icon = delta.direction === "up" ? ArrowUpRight : delta.direction === "down" ? ArrowDownRight : Minus;
   return (
     <span className={cn("inline-flex items-center gap-1", delta.direction === "up" && "text-success", delta.direction === "down" && "text-danger")}>
-      <Icon size={14} aria-hidden />
-      {deltaText(delta)}
+      <Icon size={14} aria-hidden className="shrink-0" />
+      <span>
+        {deltaText(delta).replace(" önceki döneme göre", "")}
+        <span className="hidden sm:inline"> önceki döneme göre</span>
+        <span className="sr-only sm:hidden"> önceki döneme göre</span>
+      </span>
     </span>
   );
 }
@@ -83,7 +95,8 @@ const ACTION_TONE: Record<string, "neutral" | "primary" | "success" | "warning" 
   rolled_back: "danger",
 };
 
-export function ActionStatusBadge({ status, manual }: { status: string; manual?: boolean }) {
+export function ActionStatusBadge({ status, manual, needsFix }: { status: string; manual?: boolean; needsFix?: boolean }) {
+  if (needsFix && ["draft", "review", "approved"].includes(status)) return <Badge tone="danger">Düzeltme gerekli</Badge>;
   const label = status === "approved" ? "Onaylandı · yayına hazır" : manual && status === "measuring" ? "Haricen uygulandı · ölçülüyor" : (ACTION_STATUS_LABEL[status] ?? status);
   return <Badge tone={ACTION_TONE[status] ?? "neutral"}>{label}</Badge>;
 }

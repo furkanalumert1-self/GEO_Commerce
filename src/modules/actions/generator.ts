@@ -31,9 +31,10 @@ export interface GenerationInput {
   allowedClaims: string[];
 }
 
-export function generationStatus(): "ready" | "demo" | "not_configured" {
+export function generationStatus(opts: { demo?: boolean } = {}): "ready" | "demo" | "not_configured" {
   const cfg = config();
-  if (cfg.DEMO_MODE) return "demo";
+  // Şablon taslak yalnız demo workspace'te; gerçek workspace'te sağlayıcı yoksa açık hata (sahte taslak yok).
+  if (opts.demo && cfg.DEMO_MODE) return "demo";
   return cfg.OPENAI_API_KEY && cfg.GENERATION_MODEL ? "ready" : "not_configured";
 }
 
@@ -54,7 +55,8 @@ export function templateDraft(input: GenerationInput): ActionContent {
   if (input.allowedClaims.length === 0) placeholders.push("Dermatolojik test / sertifika iddiaları için onaylı kanıt ekleyin; şu an iddia kullanılmadı");
   const faq = [
     { q: `${input.opportunity.clusterLabel} için hangi ürünü seçmeliyim?`, a: `Cilt tipinize ve ihtiyacınıza göre ${products[0]?.name ?? "[ÜRÜN]"} gibi seçenekleri içerik listesiyle birlikte değerlendirin.` },
-    { q: "Ürünler hassas ciltlere uygun mu?", a: "Her ürün sayfasında cilt tipi uygunluğu belirtilir. [ONAYLI İDDİA EKLEYİN]" },
+    // Onaylı iddia yoksa iddia içeren soru hiç eklenmez (uydurma iddia yok); inceleme notu bilgilendiricidir.
+    ...(input.allowedClaims[0] ? [{ q: "Ürünlerle ilgili onaylı bilgi nedir?", a: input.allowedClaims[0] }] : []),
   ];
   const faqText = faq.map((f) => `${f.q} ${f.a}`).join(" ");
   const jsonLd =
@@ -79,8 +81,8 @@ export function templateDraft(input: GenerationInput): ActionContent {
 }
 
 /** Canlı üretim: OpenAI Responses + JSON şema zorunlu çıktı. Model adı config'ten. */
-export async function generateDraft(input: GenerationInput): Promise<ActionContent> {
-  const status = generationStatus();
+export async function generateDraft(input: GenerationInput, opts: { demo?: boolean } = {}): Promise<ActionContent> {
+  const status = generationStatus(opts);
   if (status === "demo") return templateDraft(input);
   if (status === "not_configured") throw new AppError("not_configured", "İçerik üretimi için GENERATION_MODEL ve OPENAI_API_KEY gerekli");
   const cfg = config();

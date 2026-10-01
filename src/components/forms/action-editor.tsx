@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, Field, inputClass } from "@/components/ui";
-import { lineDiff, toMarkdown, validateJsonLd, type ActionContent } from "@/modules/actions/workflow";
+import { blockingIssues, lineDiff, toMarkdown, validateJsonLd, type ActionContent } from "@/modules/actions/workflow";
 
 const STAGE_TITLE: Record<string, string> = {
   draft: "Taslak · sonraki adım",
@@ -88,6 +88,16 @@ export function ActionEditor({
     return true;
   };
 
+  // SSS düzenlenince FAQPage JSON-LD görünür metinle senkron tutulur.
+  const setFaq = (i: number, patch: Partial<{ q: string; a: string }>) => {
+    setDraft((d) => {
+      const faq = d.faq.map((f, j) => (j === i ? { ...f, ...patch } : f));
+      const ld = d.jsonLd && d.jsonLd["@type"] === "FAQPage" ? { ...d.jsonLd, mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })) } : d.jsonLd;
+      return { ...d, faq, jsonLd: ld };
+    });
+    setDirty(true);
+  };
+
   const setBlock = (i: number, markdown: string) => {
     setDraft((d) => ({ ...d, bodyBlocks: d.bodyBlocks.map((b, j) => (j === i ? { ...b, markdown } : b)) }));
     setDirty(true);
@@ -95,7 +105,23 @@ export function ActionEditor({
 
   const added = diff.filter((l) => l.type === "added").length;
   const removed = diff.filter((l) => l.type === "removed").length;
-  const exportLinks = permissions.export ? (
+  const firstVersion = versions.length < 2;
+  // Zorunlu eksikler kayıtlı güncel sürümden (onay/yayın bunu kullanır) ve düzenlenen taslaktan ayrı hesaplanır.
+  const savedIssues = blockingIssues(current.content);
+  const draftIssues = blockingIssues(draft);
+  const blocked = savedIssues.length > 0;
+  // Bir yer tutucuya atıf yapan not, o yer tutucu içerikten kaldırıldıysa giderilmiş sayılır.
+  const savedTokens = new Set(savedIssues.map((i) => i.token));
+  const openNotes = current.content.placeholders.filter((n) => {
+    const tokens = n.match(/\[[A-ZÇĞİÖŞÜ0-9][A-ZÇĞİÖŞÜ0-9 _/-]*\]/g);
+    return !tokens || tokens.some((t) => savedTokens.has(t));
+  });
+  const approvedButBlocked = action.status === "approved" && blocked;
+  const goToField = (fieldId: string) => {
+    setPane("edit");
+    requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
+  };
+  const exportLinks = permissions.export && !blocked ? (
     <span className="flex flex-wrap gap-2">
       {(["html", "md", "json"] as const).map((f) => (
         <a key={f} className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium shadow-[var(--shadow-card)] hover:bg-surface-subtle sm:min-h-10" href={`${api}/export?format=${f}&versionId=${current.id}`}>
@@ -118,44 +144,64 @@ export function ActionEditor({
         </div>
       ) : null}
 
+      {blocked ? (
+        <Card className="border-danger/40 p-5 text-sm" role="region" aria-labelledby="fix-required">
+          <p id="fix-required" className="font-semibold text-danger">Düzeltme gerekli ({savedIssues.length})</p>
+          <p className="mt-0.5 text-text-secondary">
+            Kayıtlı sürümde doldurulmamış zorunlu alanlar var. Bunlar giderilip yeni sürüm kaydedilmeden onay, yayın, dışa aktarma ve manuel uygulama yapılamaz.
+            {approvedButBlocked ? " Bu kayıt daha önce onaylanmış olsa da yayına hazır sayılmaz; düzenleme yeni onay gerektirir." : ""}
+          </p>
+          <ul className="mt-2 flex flex-col gap-1">
+            {savedIssues.map((i, k) => (
+              <li key={`${i.fieldId}-${k}`}>
+                <button type="button" className="min-h-11 text-left text-primary underline underline-offset-2 sm:min-h-0" onClick={() => goToField(i.fieldId)}>
+                  {i.fieldLabel}: {i.token}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+
       <Card>
-        <CardHeader title={STAGE_TITLE[action.status] ?? "Sonraki adım"} description={dirty ? "Kaydedilmemiş değişiklik var; onay ve gönderim için önce yeni sürüm olarak kaydedin." : undefined} />
+        <CardHeader title={approvedButBlocked ? "Düzeltme gerekli" : (STAGE_TITLE[action.status] ?? "Sonraki adım")} description={dirty ? "Kaydedilmemiş değişiklik var; onay ve gönderim için önce yeni sürüm olarak kaydedin." : undefined} />
         <div className="flex flex-col gap-4 p-5">
           {action.status === "approved" ? (
             <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
               <div>
                 <dt className="text-text-secondary">Onaylı sürüm</dt>
-                <dd className="tabular font-medium">v{current.number} · {current.contentHash.slice(0, 10)}…</dd>
+                <dd className="tabular font-medium">v{current.number}</dd>
               </div>
               <div className="min-w-0">
                 <dt className="text-text-secondary">Hedef</dt>
                 <dd className="break-all font-medium">{action.targetUrl ?? "Hedef URL belirtilmedi"}</dd>
               </div>
               <div>
-                <dt className="text-text-secondary">Değişiklik (v{compare.number} → v{current.number})</dt>
-                <dd className="tabular font-medium">+{added} / −{removed} satır</dd>
+                <dt className="text-text-secondary">Değişiklik</dt>
+                <dd className="font-medium">{firstVersion ? "İlk taslak" : <span className="tabular">v{compare.number} → v{current.number}: +{added} / −{removed} satır</span>}</dd>
               </div>
             </dl>
           ) : null}
           <div className="flex flex-wrap items-start gap-2" role="toolbar" aria-label="Aksiyon işlemleri">
             {permissions.approve && (action.status === "draft" || action.status === "review") ? (
-              <Button variant="primary" disabled={pending || dirty} onClick={() => call(`${api}/approve`, { versionId: current.id, expectedHash: current.contentHash }, "Onaylandı")}>Bu sürümü onayla</Button>
+              <Button variant="primary" disabled={pending || dirty || blocked} onClick={() => call(`${api}/approve`, { versionId: current.id, expectedHash: current.contentHash }, "Onaylandı")}>Bu sürümü onayla</Button>
             ) : null}
             {permissions.edit && action.status === "draft" ? <Button variant={permissions.approve ? "secondary" : "primary"} disabled={pending || dirty} onClick={() => call(`${api}/transition`, { to: "review" }, "İncelemeye gönderildi")}>İncelemeye gönder</Button> : null}
             {permissions.approve && (action.status === "draft" || action.status === "review") ? <Button variant="danger" disabled={pending} onClick={() => call(`${api}/transition`, { to: "rejected" }, "Reddedildi")}>Reddet</Button> : null}
             {action.status === "approved" && permissions.publish ? (
-              <span className="flex flex-col gap-1">
-                <Button variant={canPublishReason ? "secondary" : "primary"} disabled={pending || Boolean(canPublishReason)} onClick={() => call(`${api}/publish`, {}, "Yayın kuyruğa alındı")}>Mağazada yayımla</Button>
-              </span>
+              <Button variant={canPublishReason || blocked ? "secondary" : "primary"} disabled={pending || blocked || Boolean(canPublishReason)} onClick={() => call(`${api}/publish`, {}, "Yayın kuyruğa alındı")}>Mağazada yayımla</Button>
             ) : null}
-            {action.status === "approved" && permissions.approve ? <Button disabled={pending} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Manuel uygulama kaydedildi; ölçüm başladı")}>Manuel yayımlandı → ölçüme al</Button> : null}
+            {action.status === "approved" && permissions.approve ? <Button disabled={pending || blocked} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Manuel uygulama kaydedildi; ölçüm başladı")}>Manuel yayımlandı → ölçüme al</Button> : null}
             {action.status === "published" && permissions.approve ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Ölçüm başladı")}>Ölçümü başlat</Button> : null}
             {action.status === "publishing" ? <Button disabled={pending} onClick={() => router.refresh()}>Durumu yenile</Button> : null}
             {action.status === "measuring" && permissions.approve ? <Button disabled={pending} onClick={() => call(`${api}/transition`, { to: "completed" }, "Tamamlandı")}>Ölçümü tamamla</Button> : null}
             {(action.status === "rejected" || action.status === "rolled_back") && permissions.edit ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "draft" }, "Taslağa döndü")}>Taslağa döndür</Button> : null}
             {exportLinks}
           </div>
-          {action.status === "approved" && canPublishReason ? (
+          {blocked && (action.status === "draft" || action.status === "review" || action.status === "approved") ? (
+            <p className="text-sm text-text-secondary"><span className="font-medium text-text">Onay ve uygulama kapalı:</span> önce yukarıdaki zorunlu alanları doldurup yeni sürüm olarak kaydedin.</p>
+          ) : null}
+          {action.status === "approved" && canPublishReason && !blocked ? (
             <p className="text-sm text-text-secondary">
               <span className="font-medium text-text">Mağazada yayımlama kullanılamıyor:</span> {canPublishReason}.{" "}
               {integrationsHref ? <a className="text-primary underline" href={integrationsHref}>Entegrasyonları yönet</a> : null}
@@ -164,15 +210,20 @@ export function ActionEditor({
           {action.status === "approved" ? (
             <p className="text-xs text-text-secondary">Onaylamak içeriği yayınlamaz. Manuel uygulama bir kullanıcı bildirimi olarak kaydedilir; doğrulanmış mağaza yayını değildir.</p>
           ) : null}
-          {approved ? <p><Badge tone="success" className="whitespace-normal">Güncel sürüm onaylı (hash {current.contentHash.slice(0, 10)}…). Düzenleme onayı düşürür.</Badge></p> : null}
+          {approved ? (
+            <details className="text-xs text-text-secondary">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center sm:min-h-0">Teknik detaylar</summary>
+              <p className="mt-1 break-all">Onay, v{current.number} sürümüne bağlı (içerik özeti {current.contentHash.slice(0, 16)}…). Düzenleme onayı düşürür.</p>
+            </details>
+          ) : null}
         </div>
       </Card>
 
-      {current.content.placeholders.length ? (
+      {openNotes.length ? (
         <Card className="border-warning/40 p-5 text-sm">
-          <p className="font-medium">İnceleme gerekli ({current.content.placeholders.length})</p>
-          <p className="mt-0.5 text-text-secondary">AI metnindeki iddiaları, ürün özelliklerini ve kaynakları kontrol edin.</p>
-          <ul className="mt-2 list-disc pl-5 text-text-secondary">{current.content.placeholders.map((p) => <li key={p}>{p}</li>)}</ul>
+          <p className="font-medium">İnceleme notları ({openNotes.length})</p>
+          <p className="mt-0.5 text-text-secondary">Bilgilendirici; tek başına onayı engellemez. AI metnindeki iddiaları, ürün özelliklerini ve kaynakları kontrol edin.</p>
+          <ul className="mt-2 list-disc pl-5 text-text-secondary">{openNotes.map((p) => <li key={p}>{p}</li>)}</ul>
         </Card>
       ) : null}
 
@@ -187,7 +238,7 @@ export function ActionEditor({
             onClick={() => setPane(k)}
             className={pane === k ? "min-h-11 flex-1 rounded-[6px] bg-surface text-sm font-medium shadow-[var(--shadow-card)] ring-1 ring-border" : "min-h-11 flex-1 rounded-[6px] text-sm text-text-secondary"}
           >
-            {k === "edit" ? "Önerilen (düzenle)" : `Fark (+${added} / −${removed})`}
+            {k === "edit" ? "Önerilen (düzenle)" : firstVersion ? "Sürüm farkı" : `Fark (+${added} / −${removed})`}
           </button>
         ))}
       </div>
@@ -211,13 +262,25 @@ export function ActionEditor({
                 <textarea id={`a-block-${i}`} rows={6} className={`${inputClass} py-2 font-mono text-xs leading-relaxed`} disabled={!editable} value={b.markdown} onChange={(e) => setBlock(i, e.target.value)} />
               </Field>
             ))}
+            {draft.faq.map((f, i) => (
+              <fieldset key={`faq-${i}`} className="flex flex-col gap-2 rounded-md border border-border p-3">
+                <legend className="px-1 text-sm font-medium">SSS {i + 1}</legend>
+                <Field label="Soru" htmlFor={`a-faq-${i}-q`}>
+                  <input id={`a-faq-${i}-q`} className={inputClass} disabled={!editable} value={f.q} onChange={(e) => setFaq(i, { q: e.target.value })} />
+                </Field>
+                <Field label="Yanıt" htmlFor={`a-faq-${i}-a`}>
+                  <textarea id={`a-faq-${i}-a`} rows={3} className={`${inputClass} py-2`} disabled={!editable} value={f.a} onChange={(e) => setFaq(i, { a: e.target.value })} />
+                </Field>
+              </fieldset>
+            ))}
+            {editable && draftIssues.length ? <p className="text-xs text-danger" role="status">Taslakta {draftIssues.length} doldurulmamış yer tutucu var ({[...new Set(draftIssues.map((d) => d.token))].join(", ")}).</p> : null}
           </div>
         </Card>
         <Card id="pane-diff" className={pane === "diff" ? "" : "hidden xl:block"}>
           <CardHeader
             title="Sürüm farkı"
-            description={versions.length < 2 ? "İlk sürüm; karşılaştırılacak önceki sürüm yok" : `+${added} eklenen / −${removed} silinen satır`}
-            action={
+            description={firstVersion ? undefined : `+${added} eklenen / −${removed} silinen satır`}
+            action={firstVersion ? undefined :
               <label className="flex items-center gap-2 text-sm">
                 <span className="text-text-secondary">Karşılaştır:</span>
                 <select className="min-h-11 rounded-md border border-border-strong/60 bg-surface px-2 sm:min-h-8" value={compareId} onChange={(e) => setCompareId(e.target.value)}>
@@ -226,6 +289,9 @@ export function ActionEditor({
               </label>
             }
           />
+          {firstVersion ? (
+            <p className="p-5 text-sm text-text-secondary">İlk taslak; karşılaştırılacak önceki sürüm yok. Hedef sayfanın mevcut içeriği bu ekrana aktarılmadığından “mevcut → önerilen” karşılaştırması gösterilmiyor.</p>
+          ) : (
           <div className="max-h-[36rem] overflow-auto p-5 font-mono text-xs leading-relaxed" aria-label="Satır farkı" role="region" tabIndex={0}>
             {diff.map((l, i) => (
               <div key={i} className={l.type === "added" ? "rounded-sm bg-success-soft" : l.type === "removed" ? "rounded-sm bg-danger-soft line-through" : ""}>
@@ -235,6 +301,7 @@ export function ActionEditor({
               </div>
             ))}
           </div>
+          )}
         </Card>
       </div>
 

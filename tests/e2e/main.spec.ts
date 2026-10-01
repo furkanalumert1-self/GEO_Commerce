@@ -71,6 +71,18 @@ test("ölçüm → fırsat → Fix taslağı → onay → export", async ({ page
   await expect(page.getByText("Neden kaybediyorum?")).toBeVisible();
   await page.getByRole("button", { name: /Fix with AI/ }).click();
   await page.waitForURL(/\/actions\//);
+  // Zorunlu eksik (ör. [FİYAT]) varsa onay kapalıdır; alanlar doldurulup yeni sürüm kaydedilir.
+  await expect(page.getByRole("button", { name: "Bu sürümü onayla" })).toBeVisible();
+  if (await page.getByText(/Düzeltme gerekli \(/).isVisible()) {
+    await expect(page.getByRole("button", { name: "Bu sürümü onayla" })).toBeDisabled();
+    for (const box of await page.locator("#pane-edit textarea, #pane-edit input").all()) {
+      const v = await box.inputValue();
+      if (/\[[A-ZÇĞİÖŞÜ]/.test(v)) await box.fill(v.replace(/\[[A-ZÇĞİÖŞÜ0-9 _/-]+\](?!\()/g, "₺100,00"));
+    }
+    await page.getByRole("button", { name: "Yeni sürüm olarak kaydet" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Taslak kaydedildi" })).toBeVisible();
+    await expect(page.getByText(/Düzeltme gerekli \(/)).toBeHidden();
+  }
   await page.getByRole("button", { name: "Bu sürümü onayla" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Onaylandı" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Mağazada yayımla" })).toBeDisabled();

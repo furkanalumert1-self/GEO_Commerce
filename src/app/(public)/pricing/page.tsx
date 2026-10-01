@@ -20,7 +20,7 @@ export default function PricingPage() {
     ["Rakip / marka", (k) => (k === "enterprise" ? "Özel" : String(PLANS[k].limits.competitorsPerBrand))],
     ["Motorlar", engines],
     ["Aktif prompt", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.activePrompts)}${k === "agency" ? " (havuz)" : ""}`)],
-    ["Answer unit / ay", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.answerUnits)}${k === "agency" ? " (havuz)" : ""}`)],
+    ["Yanıt birimi / ay", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.answerUnits)}${k === "agency" ? " (havuz)" : ""}`)],
     ["Otomatik ölçüm", (k) => (k === "enterprise" ? "Özel" : PLANS[k].limits.monitoringFrequency === "weekly" ? "Haftalık" : "Günlük (bütçeli)")],
     ["Fırsatlar", (k) => (k === "starter" ? "İlk 10 detay" : k === "enterprise" ? "Özel" : "Tüm üretilenler")],
     ["Teşhis / Fix with AI", (k) => (PLANS[k].limits.fixUnits === 0 ? "—" : k === "enterprise" ? "Özel" : `✓ / ${PLANS[k].limits.fixUnits} üretim`)],
@@ -37,7 +37,7 @@ export default function PricingPage() {
       <div>
         <h1 className="text-2xl font-semibold">Fiyatlar</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">
-          USD / ay; vergiler ve reklam harcaması hariç. Ücretsiz abonelik yoktur: tek seferlik ücretsiz GEO Audit ve kart gerektirmeyen 7 günlük Starter denemesi (100 answer unit, 10 prompt, 1 marka) sunulur. Deneme sonunda otomatik tahsilat yapılmaz. Otomatik aşım ücreti kapalıdır; kotalar dolduğunda yeni işler durur, veriler okunabilir kalır.
+          USD / ay; vergiler ve reklam harcaması hariç. Ücretsiz abonelik yoktur: tek seferlik ücretsiz GEO Audit ve kart gerektirmeyen 7 günlük Starter denemesi (100 yanıt birimi, 10 soru, 1 marka) sunulur. Deneme sonunda otomatik tahsilat yapılmaz. Otomatik aşım ücreti kapalıdır; kotalar dolduğunda yeni işler durur, veriler okunabilir kalır.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -76,7 +76,7 @@ export default function PricingPage() {
           </tbody>
         </TableWrap>
         <p className="border-t border-border px-4 py-3 text-xs text-muted">
-          1 answer unit = 1 prompt × 1 motor × 1 ülke/dil × 1 tekrar. Başarısız yanıtlar kota tüketmez. Kotalar ürün varsayılanlarıdır; Enterprise limitleri sözleşmeyle belirlenir.
+          1 yanıt birimi = 1 soru × 1 platform × 1 ülke/dil × 1 tekrar (tek bir AI yanıtı). Başarısız yanıtlar kota tüketmez. Kotalar ürün varsayılanlarıdır; Enterprise limitleri sözleşmeyle belirlenir.
         </p>
       </Card>
     </div>

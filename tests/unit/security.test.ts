@@ -1,3 +1,4 @@
+import { demoAudit, fixturesAllowed } from "@/lib/demo";
 import { describe, expect, it } from "vitest";
 import { assertPublicUrl, isBlockedIp } from "@/lib/http/safe-fetch";
 import { createSecretBox, hmacSha256, randomToken, stableStringify } from "@/lib/crypto";
@@ -58,8 +59,13 @@ describe("log redaksiyonu", () => {
 });
 
 describe("config", () => {
-  it("prod'da demo + canlı anahtar birlikte fail", () => {
-    expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "ab".repeat(32), DEMO_MODE: "true", OPENAI_API_KEY: "sk" })).toThrow();
+  it("demo yalnız etiketli workspace'leri etkiler; canlı anahtarla birlikte açılabilir", () => {
+    const cfg = parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "ab".repeat(32), DEMO_MODE: "true", OPENAI_API_KEY: "sk" });
+    expect(fixturesAllowed({ isDemo: true }, cfg)).toBe(true);
+    expect(fixturesAllowed({ isDemo: false }, cfg)).toBe(false);
+    expect(demoAudit("lumabakim.example", cfg)).toBe(true);
+    expect(demoAudit("gercekmagaza.com", cfg)).toBe(false);
+    expect(fixturesAllowed({ isDemo: true }, parseConfig({ DATABASE_URL: "x" }))).toBe(false);
     expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "ab".repeat(32), DEMO_MODE: "true" })).not.toThrow();
   });
   it("boş string tanımsız sayılır", () => {

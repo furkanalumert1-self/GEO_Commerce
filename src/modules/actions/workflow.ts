@@ -42,6 +42,39 @@ export interface ActionContent {
 
 export const versionHash = (content: ActionContent) => hashObject(content);
 
+// ── Zorunlu eksikler (yer tutucular) ──
+
+/** Büyük harfli köşeli parantez yer tutucusu: [FİYAT], [ONAYLI İDDİA EKLEYİN]. Markdown bağlantısı ([metin](url)) sayılmaz. */
+const PLACEHOLDER_RE = /\[([A-ZÇĞİÖŞÜ0-9][A-ZÇĞİÖŞÜ0-9 _/-]{0,60})\](?!\()/g;
+
+export interface ContentIssue {
+  /** Editördeki alanın DOM id'si (bağlantı için). */
+  fieldId: string;
+  fieldLabel: string;
+  token: string;
+}
+
+/**
+ * Yayına engel zorunlu eksikler: görünür içerikte doldurulmamış yer tutucu. `placeholders` listesi
+ * bilgilendirici inceleme notlarıdır ve tek başına engel değildir.
+ */
+export function blockingIssues(c: ActionContent): ContentIssue[] {
+  const fields: Array<[string, string, string | undefined]> = [
+    ["a-title", "Başlık", c.title],
+    ["a-meta", "Meta açıklama", c.metaDescription],
+    ...c.bodyBlocks.map((b, i): [string, string, string] => [`a-block-${i}`, b.heading ?? `Blok ${i + 1}`, b.markdown]),
+    ...c.faq.flatMap((f, i): Array<[string, string, string]> => [
+      [`a-faq-${i}-q`, `SSS ${i + 1} soru`, f.q],
+      [`a-faq-${i}-a`, `SSS ${i + 1} yanıt`, f.a],
+    ]),
+  ];
+  const out: ContentIssue[] = [];
+  for (const [fieldId, fieldLabel, text] of fields) {
+    for (const m of (text ?? "").matchAll(PLACEHOLDER_RE)) out.push({ fieldId, fieldLabel, token: m[0] });
+  }
+  return out;
+}
+
 /** Approval hash race: onay verilen versiyon hash'i güncel versiyonla aynı olmalı. */
 export function checkApprovalHash(expectedHash: string, currentHash: string): { ok: true } | { ok: false; code: "conflict" } {
   return expectedHash === currentHash ? { ok: true } : { ok: false, code: "conflict" };

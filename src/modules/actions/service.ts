@@ -5,8 +5,9 @@ import { commit, ensureBucket, periodKey, release, reserve } from "@/modules/bil
 import type { BrandAccess } from "@/modules/tenancy/access";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
 import { generateDraft, type GenerationInput } from "./generator";
-import { canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
+import { blockingIssues, canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
 import { minimumPlanFor } from "@/modules/billing/plans";
+import { fixturesAllowed } from "@/lib/demo";
 
 /**
  * Action servisleri: server-side plan kapısı (Starter'da Fix with AI kapalı), fix unit kotası,
@@ -48,7 +49,7 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       catalog: catalog.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null })),
       allowedClaims: [],
     };
-    const content = await generateDraft(genInput);
+    const content = await generateDraft(genInput, { demo: fixturesAllowed(access) });
     const action = await db.$transaction(async (tx) => {
       const a = await tx.action.create({
         data: { workspaceId: access.workspaceId, brandId: access.brandId, opportunityId: opp.id, type: input.type, title: content.title ?? opp.title, targetUrl: genInput.targetUrl, status: "draft", version: 1 },
@@ -89,13 +90,28 @@ export async function transitionAction(db: PrismaClient, access: BrandAccess, ac
   const a = await db.action.findFirst({ where: { id: actionId, brandId: access.brandId, workspaceId: access.workspaceId } });
   if (!a) throw notFound("Aksiyon");
   if (!canTransitionAction(a.status as ActionStatus, to)) throw new AppError("conflict", `${a.status} → ${to} geçişi geçersiz`);
+  // Manuel uygulama bildirimi de yayın sayılır: zorunlu eksikli onaylı içerik uygulanmış gibi kaydedilmez.
+  if (to === "measuring" && a.status === "approved") await assertCurrentVersionComplete(db, a.currentVersionId);
   const data: Record<string, unknown> = { status: to, version: { increment: 1 } };
   if (to === "measuring") {
     const publishAt = new Date();
     data.publishedAt = a.publishedAt ?? publishAt;
-    data.measurement = { publishAt: publishAt.toISOString(), baselineDays: 14, followUps: [14, 28], note: "Aynı cohort ile karşılaştırılır; nedensellik iddia edilmez", manualPublish: a.status === "approved", by: userId };
+    data.measurement = { publishAt: publishAt.toISOString(), baselineDays: 14, followUps: [14, 28], note: "Aynı soru kümesiyle karşılaştırılır; nedensellik iddia edilmez", manualPublish: a.status === "approved", by: userId };
   }
   return db.action.update({ where: { id: a.id }, data });
+}
+
+function assertNoBlockingIssues(content: ActionContent) {
+  const issues = blockingIssues(content);
+  if (issues.length) {
+    throw new AppError("validation_error", `Düzeltme gerekli: ${issues.length} doldurulmamış zorunlu alan (${[...new Set(issues.map((i) => i.token))].join(", ")})`, { issues });
+  }
+}
+
+async function assertCurrentVersionComplete(db: PrismaClient, versionId: string | null) {
+  if (!versionId) throw new AppError("conflict", "Aksiyonun güncel sürümü yok");
+  const v = await db.actionVersion.findUniqueOrThrow({ where: { id: versionId } });
+  assertNoBlockingIssues(v.content as unknown as ActionContent);
 }
 
 /** Onay: yalnız approver; versionId + expectedHash güncel sürümle eşleşmeli (hash race → 409). */
@@ -110,6 +126,7 @@ export async function approveAction(db: PrismaClient, access: BrandAccess, input
     const check = checkApprovalHash(input.expectedHash, v.contentHash);
     if (!check.ok) throw new AppError("conflict", "İçerik onaydan önce değişti; yeni diff'i inceleyin");
     if (!["draft", "review"].includes(a.status)) throw new AppError("conflict", `${a.status} durumundaki aksiyon onaylanamaz`);
+    assertNoBlockingIssues(v.content as unknown as ActionContent);
     await tx.approval.create({ data: { workspaceId: access.workspaceId, actionId: a.id, versionId: v.id, versionHash: v.contentHash, approverId: input.userId } });
     await tx.auditLog.create({ data: { workspaceId: access.workspaceId, actorId: input.userId, actorType: "user", scope: `brand:${access.brandId}`, action: "action.approved", target: a.id } });
     return tx.action.update({ where: { id: a.id }, data: { status: "approved", version: { increment: 1 } } });
@@ -125,6 +142,7 @@ export async function publishAction(db: PrismaClient, access: BrandAccess, actio
   const a = await db.action.findFirst({ where: { id: actionId, brandId: access.brandId, workspaceId: access.workspaceId }, include: { approvals: { where: { revokedAt: null } } } });
   if (!a) throw notFound("Aksiyon");
   if (a.status !== "approved" || a.approvals.length === 0) throw new AppError("conflict", "Yayın için geçerli onay gerekli");
+  await assertCurrentVersionComplete(db, a.currentVersionId);
   const writable = await db.integration.findFirst({ where: { brandId: access.brandId, status: "healthy", capabilities: { path: ["contentWrite"], equals: true } } });
   if (!writable) {
     throw new AppError("unsupported", "Yazma destekli ve doğrulanmış bir mağaza bağlantısı yok. İçeriği HTML/Markdown/JSON olarak dışa aktarıp manuel yayımlayabilirsiniz.", { alternative: "export" });

@@ -34,7 +34,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
     <>
       <PageHeader
         title="Promptlar ve niyetler"
-        description="Niyet kümeleri, ticari niyet puanı ve ölçüm planı. Prompt gözlemleri gerçek arama hacmi değildir. Metin değişikliği yeni sürüm (yeni cohort) oluşturur; arşiv tarihsel ölçümü silmez."
+        description="Niyet kümeleri, ticari niyet puanı ve ölçüm planı. Prompt gözlemleri gerçek arama hacmi değildir. Metin değişikliği yeni sürüm (yeni karşılaştırma kümesi) oluşturur; arşiv tarihsel ölçümü silmez."
         badges={<Badge tone={activeCount >= access.entitlements.activePrompts ? "danger" : "neutral"}>Aktif {activeCount} / {access.entitlements.activePrompts}</Badge>}
       />
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
@@ -99,7 +99,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
             </div>
           </Card>
           <Card>
-            <CardHeader title="Ölçüm planı" description="prompt × motor × ülke/dil × tekrar. Kota yetmezse öncelikli cohort döndürülerek örneklenir." />
+            <CardHeader title="Ölçüm planı" description="soru × platform × ülke/dil × tekrar. Kota yetmezse öncelikli sorular sırayla örneklenir." />
             <div className="p-4">
               <RunPlanner url={`${api}/runs`} engines={engines.all} locale={`${access.brand.language}-${access.brand.country}`} />
             </div>

@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Alert, Badge, Card, CardHeader, PageHeader } from "@/components/ui";
 import { ActionStatusBadge, ImpactBadge, WorkflowStepper } from "@/components/data/growth";
-import { impactLevel, workflowView } from "@/lib/view-models";
+import { impactLevel, plainTr, workflowView } from "@/lib/view-models";
+import { actionsNeedingFix } from "@/modules/actions/readiness";
 import { ApiButton } from "@/components/forms/api-button";
 import { OpportunityControls } from "@/components/forms/opportunity-controls";
 import { db } from "@/lib/db";
@@ -25,7 +26,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const access = await pageBrand(workspaceId, brandId);
   if (!isUuid(opportunityId)) notFound();
   const unlocked = await unlockedOpportunityIds(db, access);
-  const o = await db.opportunity.findFirst({ where: { id: opportunityId, workspaceId, brandId }, include: { cluster: true, evidence: { include: { observation: { select: { engine: true, sampledAt: true, model: true } } } }, actions: { select: { id: true, title: true, status: true, measurement: true }, orderBy: { updatedAt: "desc" } } } });
+  const o = await db.opportunity.findFirst({ where: { id: opportunityId, workspaceId, brandId }, include: { cluster: true, evidence: { include: { observation: { select: { engine: true, sampledAt: true, model: true } } } }, actions: { select: { id: true, title: true, status: true, measurement: true, currentVersionId: true }, orderBy: { updatedAt: "desc" } } } });
   if (!o) notFound();
   if (unlocked !== "all" && !unlocked.has(o.id)) {
     return (
@@ -42,7 +43,8 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
-  const flow = workflowView(latest?.status, { manualPublish: Boolean((latest?.measurement as { manualPublish?: boolean } | null)?.manualPublish) });
+  const needsFix = await actionsNeedingFix(db, o.actions);
+  const flow = workflowView(latest?.status, { manualPublish: Boolean((latest?.measurement as { manualPublish?: boolean } | null)?.manualPublish), needsFix: latest ? needsFix.has(latest.id) : false });
   const activeAction = latest && !["completed", "rejected", "rolled_back"].includes(latest.status) ? latest : null;
   const fixButton = fixAllowed ? (
     <ApiButton
@@ -64,8 +66,10 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
     <Card>
       <CardHeader title="Özet" />
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 px-5 py-4 text-sm">
-        <dt className="text-text-secondary">Durum</dt>
+        <dt className="text-text-secondary">Fırsat takibi</dt>
         <dd><Badge tone="primary">{OPP_STATUS_LABEL[o.status]}</Badge></dd>
+        <dt className="text-text-secondary">Son aksiyon</dt>
+        <dd>{latest ? <ActionStatusBadge status={latest.status} manual={Boolean((latest.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(latest.id)} /> : "Henüz yok"}</dd>
         <dt className="text-text-secondary">Etki</dt>
         <dd><ImpactBadge level={impactLevel(o)} /></dd>
         <dt className="text-text-secondary">Fırsat skoru</dt>
@@ -84,7 +88,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
       <PageHeader
         breadcrumb={[{ label: "Büyüme Fırsatları" }, { label: "Fırsatlar", href: `${base}/opportunities` }, { label: o.title }]}
         title={o.title}
-        badges={<><Badge tone="primary">{OPP_STATUS_LABEL[o.status]}</Badge><Badge>{GAP_LABEL[o.gapType]}</Badge>{o.provisional ? <Badge tone="warning">Geçici skor</Badge> : null}</>}
+        badges={<><Badge tone="primary">Takip: {OPP_STATUS_LABEL[o.status]}</Badge><Badge>{GAP_LABEL[o.gapType]}</Badge>{o.provisional ? <Badge tone="warning">Geçici skor</Badge> : null}</>}
         description={`${o.cluster.label} · ${o.locale}${o.targetUrl ? ` · ${o.targetUrl}` : ""}`}
         action={
           <>
@@ -98,8 +102,10 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
         }
       />
       <Card className="mb-6 p-5">
+        <p className="mb-3 text-sm font-semibold">{latest ? "Son aksiyonun aşaması" : "Sonraki adım"}</p>
         <WorkflowStepper view={flow} />
-        <p className="mt-3 text-sm text-text-secondary">{latest ? <>Son aksiyon ({latest.title}): </> : null}<span className="font-medium text-text">{flow.label}.</span> {flow.next}</p>
+        <p className="mt-3 text-sm text-text-secondary">{latest ? <>{latest.title}: </> : null}<span className="font-medium text-text">{flow.label}.</span> {flow.next}</p>
+        <p className="mt-1 text-xs text-text-secondary">Fırsat takibi ({OPP_STATUS_LABEL[o.status]}) ekip içi iş durumudur; aksiyon aşamasından ayrı güncellenir.</p>
       </Card>
       <div className="mb-6 xl:hidden">{summary}</div>
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -150,7 +156,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
                   {e.quote ? <p>&ldquo;{e.quote}&rdquo;</p> : null}
                   {e.note ? <p className="text-text-secondary">{e.note}</p> : null}
                   <p className="mt-1 text-xs text-text-secondary">
-                    {e.observation ? `${ENGINE_SHORT[e.observation.engine] ?? e.observation.engine} · ${e.observation.model ?? ""} · ${fmtDate(e.observation.sampledAt, access.brand.timezone)}` : "Tarama bulgusu"}
+                    {e.observation ? `${ENGINE_SHORT[e.observation.engine] ?? e.observation.engine} · ${fmtDate(e.observation.sampledAt, access.brand.timezone)}` : "Tarama bulgusu"}
                     {e.pageUrl ? <> · <a className="break-all text-primary underline" href={e.pageUrl} target="_blank" rel="noopener noreferrer nofollow">{e.pageUrl}</a></> : null}
                   </p>
                 </li>
@@ -167,7 +173,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
                 {o.actions.map((a) => (
                   <li key={a.id} className="flex flex-col gap-1 px-5 py-3 text-sm">
                     <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`${base}/actions/${a.id}`}>{a.title}</Link>
-                    <span><ActionStatusBadge status={a.status} manual={Boolean((a.measurement as { manualPublish?: boolean } | null)?.manualPublish)} /></span>
+                    <span><ActionStatusBadge status={a.status} manual={Boolean((a.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(a.id)} /></span>
                   </li>
                 ))}
               </ul>
@@ -182,7 +188,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
                     <span className="font-medium">{COMP_LABEL[k]}</span>
                     <span className="tabular">{components[k]?.value ?? "Eksik"} <span className="text-xs text-text-secondary">× {OPPORTUNITY_WEIGHTS[k].toFixed(2)}</span></span>
                   </div>
-                  <p className="mt-0.5 text-xs text-text-secondary">{components[k]?.rationale}</p>
+                  <p className="mt-0.5 text-xs text-text-secondary">{components[k]?.rationale ? plainTr(components[k].rationale) : null}</p>
                 </li>
               ))}
             </ul>

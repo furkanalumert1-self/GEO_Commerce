@@ -25,7 +25,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
       <PageHeader
         title={ws.name}
         badges={<><Badge tone="primary">{PLANS[access.entitlements.planKey].label}</Badge>{access.entitlements.trial ? <Badge tone="warning">Deneme · {fmtDate(sub?.trialEnd, ws.timezone)} bitiş</Badge> : null}{access.entitlements.readOnlyReason ? <Badge tone="danger">Salt okunur</Badge> : null}</>}
-        description={`Rolünüz: ${access.role}. Dönem kullanımı: ${au ? `${fmtNumber(au.used)} / ${fmtNumber(au.limit)} answer unit` : "—"}.`}
+        description={`Rolünüz: ${access.role}. Dönem kullanımı: ${au ? `${fmtNumber(au.used)} / ${fmtNumber(au.limit)} yanıt birimi` : "—"}.`}
       />
       {brands.length === 0 ? (
         <Card><EmptyState title="Henüz marka yok" description="İlk markanızı ekleyerek kuruluma başlayın." action={<Link className="inline-flex min-h-11 items-center rounded-md border border-primary bg-primary px-4 text-sm font-medium text-white" href={`/w/${workspaceId}/onboarding`}>Marka ekle</Link>} /></Card>

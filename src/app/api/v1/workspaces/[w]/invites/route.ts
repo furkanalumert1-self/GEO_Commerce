@@ -6,6 +6,7 @@ import { hashToken, randomToken } from "@/lib/crypto";
 import { json, readJson, workspaceRoute } from "@/lib/http/api";
 import { assertCan } from "@/modules/tenancy/access";
 import { getEmailAdapter } from "@/adapters/email";
+import { APP_NAME } from "@/lib/brand";
 
 const body = z.object({ email: z.string().email().max(200), role: z.enum(["admin", "editor", "analyst", "viewer", "client", "billing"]), brandIds: z.array(z.string().uuid()).max(50).default([]) });
 
@@ -24,7 +25,7 @@ export const POST = workspaceRoute(async ({ req, access, requestId }) => {
   const email = getEmailAdapter();
   let delivered = false;
   if (email.status() === "ready") {
-    await email.send({ to: input.email, subject: "Çalışma alanı daveti", text: `Davet bağlantınız (7 gün geçerli): ${config().APP_URL}/invite/${token}` });
+    await email.send({ to: input.email, subject: `${APP_NAME} çalışma alanı daveti`, text: `${APP_NAME} davet bağlantınız (7 gün geçerli): ${config().APP_URL}/invite/${token}` });
     delivered = true;
   }
   await db.auditLog.create({ data: { workspaceId: access.workspaceId, actorId: access.principal.userId, actorType: "user", scope: "members", action: "invite.created", target: inv.id } });

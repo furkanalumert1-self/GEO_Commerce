@@ -14,6 +14,7 @@ import { visibilityScore, aggregateScore } from "@/modules/monitoring/metrics";
 import { scoreCommercialIntent, classifyIntentType } from "@/modules/prompts/intent";
 import { PLANS, TRIAL } from "@/modules/billing/plans";
 import { periodKey } from "@/modules/billing/quota";
+import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -33,16 +34,15 @@ export async function startAudit(db: PrismaClient, input: { domain: string; loca
     throw new AppError("validation_error", "Geçerli bir alan adı girin", { fieldErrors: { domain: ["Geçersiz alan adı"] } });
   }
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(domain)) throw new AppError("validation_error", "Geçerli bir alan adı girin", { fieldErrors: { domain: ["Geçersiz alan adı"] } });
-  if (cfg.DEMO_MODE) {
-    if (!domain.endsWith(".example")) {
-      throw new AppError("validation_error", "Demo modunda yalnız örnek alan adları (ör. lumabakim.example) taranabilir", { fieldErrors: { domain: ["Demo modunda .example alan adı kullanın"] } });
-    }
-  } else {
-    await assertPublicUrl(`https://${domain}/`);
+  const demo = demoAudit(domain, cfg);
+  if (isDemoDomain(domain) && !demo) {
+    throw new AppError("validation_error", "Örnek (.example) alan adları yalnız demo ortamında taranabilir", { fieldErrors: { domain: ["Gerçek bir alan adı girin"] } });
   }
+  // Gerçek alan adı: herkese açık adres kontrolü (private/localhost ve yönlendirmeyle bunlara erişim engellenir).
+  if (!demo) await assertPublicUrl(`https://${domain}/`);
   const since = new Date(Date.now() - FREE_WINDOW_DAYS * 86_400_000);
   const fingerprintHash = sha256(`fp:${input.fingerprint}`);
-  if (!cfg.DEMO_MODE) {
+  if (!demo) {
     const recent = await db.audit.findFirst({ where: { OR: [{ domain }, { fingerprintHash }], createdAt: { gte: since } } });
     if (recent) throw new AppError("rate_limited", "Bu alan adı veya cihaz için son 30 günde ücretsiz audit yapıldı", { resetAt: new Date(recent.createdAt.getTime() + FREE_WINDOW_DAYS * 86_400_000).toISOString() });
     await assertDailyCostCap(db);
@@ -111,12 +111,13 @@ export async function runAudit(db: PrismaClient, auditId: string, deps: { fetche
   const cfg = config();
   const audit = await db.audit.findUniqueOrThrow({ where: { id: auditId } });
   if (audit.status === "succeeded" || audit.status === "partial") return;
-  const fetcher = deps.fetcher ?? (cfg.DEMO_MODE ? fixtureFetcher : liveFetcher);
-  const adapters = deps.adapters ?? getAiAdapters(cfg);
+  const demo = demoAudit(audit.domain, cfg);
+  const fetcher = deps.fetcher ?? (demo ? fixtureFetcher : liveFetcher);
+  const adapters = deps.adapters ?? getAiAdapters(cfg, { demo });
   const stage = (s: string, done: number) => db.audit.update({ where: { id: auditId }, data: { stage: s, progressDone: done, status: "running" } });
 
   await stage("crawling", 1);
-  const crawl = await crawlSite({ domain: audit.domain, maxPages: PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: cfg.DEMO_MODE ? 0 : 250 });
+  const crawl = await crawlSite({ domain: audit.domain, maxPages: PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: demo ? 0 : 250 });
   const readiness = evaluateReadiness(crawl);
   const home = crawl.pages.find((p) => p.pageType === "home");
   const brandName = home?.facts.ogSiteName ?? home?.facts.h1 ?? audit.domain.split(".")[0]!;
@@ -175,7 +176,7 @@ export async function runAudit(db: PrismaClient, auditId: string, deps: { fetche
       progressDone: 5,
       resultSummary: {
         brandName,
-        demo: cfg.DEMO_MODE,
+        demo,
         visibility: { score: agg.score, smallSample: true, sampleCount: okCount, scheduled: prompts.length * AUDIT_ENGINES.length, partial: agg.partial, missingEngines: [...agg.missingEngines, ...unavailable.map((u) => u.engine)] },
         engines: perEngine.map((e) => ({ engine: e.engine, score: e.score, coverage: e.coverage })),
         unavailableEngines: unavailable,
@@ -200,6 +201,12 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
   const audit = await getAuditByToken(db, token);
   if (!audit) throw new AppError("not_found", "Audit bulunamadı veya süresi doldu");
   if (audit.status !== "succeeded" && audit.status !== "partial") throw new AppError("conflict", "Audit henüz tamamlanmadı", { retryable: true });
+  // Demo hesapları yalnız örnek alan adını, ayrı etiketli demo workspace'e kaydedebilir; gerçek hesaplar örnek alan adını kaydedemez.
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+  const demoUser = isDemoEmail(user.email);
+  if (demoUser !== isDemoDomain(audit.domain)) {
+    throw new AppError("forbidden", demoUser ? "Demo hesabı gerçek bir alan adını kaydedemez" : "Örnek (.example) audit gerçek hesaba kaydedilemez");
+  }
   return db.$transaction(async (tx) => {
     const consumed = await tx.audit.updateMany({ where: { id: audit.id, claimedAt: null }, data: { claimedAt: new Date(), claimUserId: userId } });
     if (consumed.count === 0) throw new AppError("conflict", "Bu audit zaten sahiplenildi");
@@ -207,7 +214,7 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
     const existingTrial = await tx.membership.findFirst({ where: { userId, role: "owner", workspace: { subscription: { isNot: null } } } });
     const slugBase = audit.domain.replace(/[^a-z0-9]+/g, "-").slice(0, 40);
     const ws = await tx.workspace.create({
-      data: { name: summary.brandName ?? audit.domain, slug: `${slugBase}-${randomToken(4).toLowerCase()}`, ownerId: userId, memberships: { create: { userId, role: "owner", isApprover: true } } },
+      data: { name: summary.brandName ?? audit.domain, slug: `${slugBase}-${randomToken(4).toLowerCase()}`, ownerId: userId, isDemo: demoUser, memberships: { create: { userId, role: "owner", isApprover: true } } },
     });
     const now = new Date();
     if (!existingTrial) {

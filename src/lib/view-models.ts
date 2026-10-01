@@ -84,7 +84,11 @@ function states(current: number, blockedAt?: number, allDone = false): StepState
  * Aksiyon durumu → beş adımlı akış. Aksiyon yoksa teşhis aşamasıdır.
  * `manualPublish`: export ile kullanıcı tarafından uygulandığı bildirilen aksiyon (doğrulanmış yayın değil).
  */
-export function workflowView(actionStatus: string | null | undefined, opts: { manualPublish?: boolean } = {}): WorkflowView {
+export function workflowView(actionStatus: string | null | undefined, opts: { manualPublish?: boolean; needsFix?: boolean } = {}): WorkflowView {
+  // Zorunlu alanı eksik içerik (onaylanmış olsa bile) hazır sayılmaz; taslak adımında engellenir.
+  if (opts.needsFix && (actionStatus === "draft" || actionStatus === "review" || actionStatus === "approved")) {
+    return { current: 1, states: states(1, 1), label: "Düzeltme gerekli", tone: "danger", next: "Doldurulmamış zorunlu alanları tamamlayıp yeni sürüm kaydedin; ardından yeniden onay gerekir." };
+  }
   switch (actionStatus) {
     case null:
     case undefined:
@@ -161,4 +165,41 @@ export function shiftDay(day: string, days: number): string {
 export function alignPrevious(current: Array<{ day: string }>, previous: Array<{ day: string; score: number | null }>, offsetDays: number): Array<number | null> {
   const byDay = new Map(previous.map((p) => [p.day, p.score]));
   return current.map((c) => byDay.get(shiftDay(c.day, -offsetDays)) ?? null);
+}
+
+// ── Ölçüm sonucu yeterliliği ────────────────────────────────────────────────
+
+export type MeasurementOutcome =
+  | { kind: "computable"; title: string; message: string | null }
+  | { kind: "not_computable"; title: string; message: string };
+
+/**
+ * Dönemin bitmesi ile karşılaştırma yeterliliği ayrı değerlendirilir. Başlangıç (önceki dönem) verisi
+ * yoksa geçmişe dönük veri oluşmayacağı için etki hesaplanamaz — "veri toplanıyor" denmez.
+ */
+export function measurementOutcome(partial: boolean, beforeSamples: number, afterSamples: number): MeasurementOutcome {
+  if (beforeSamples === 0) {
+    return {
+      kind: "not_computable",
+      title: "Etki hesaplanamadı",
+      message: partial
+        ? "Yayından önceki dönemde bu soru kümesi için gözlem yok; bu nedenle etki hesaplanamayacak. Sonraki dönem değeri yalnız bilgi amaçlıdır."
+        : "Dönem tamamlandı; başlangıç verisi olmadığı için etki hesaplanamadı.",
+    };
+  }
+  if (afterSamples === 0) {
+    return partial
+      ? { kind: "not_computable", title: "Sonraki dönem verisi bekleniyor", message: "Yayından sonra henüz gözlem yok; sonuç oluşmadan başarı veya başarısızlık değerlendirilmez." }
+      : { kind: "not_computable", title: "Etki hesaplanamadı", message: "Dönem tamamlandı; yayından sonra gözlem olmadığı için etki hesaplanamadı." };
+  }
+  return { kind: "computable", title: "Değişiklik sonrası gözlenen fark", message: partial ? "Kısmi dönem: sonraki pencere henüz dolmadı; fark değişebilir." : null };
+}
+
+/** Kayıtlı gerekçe metinlerindeki teknik terimleri sade Türkçeye çevirir (eski kayıtlar için de). */
+export function plainTr(text: string): string {
+  return text
+    .replace(/aynı cohort/gi, "aynı soru kümesi")
+    .replace(/cohort/gi, "soru kümesi")
+    .replace(/prompt'un/gi, "sorunun")
+    .replace(/\bprompt\b/gi, "soru");
 }

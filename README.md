@@ -1,4 +1,4 @@
-# Callypso AI Growth — GEO Commerce
+# Callypso AI Growth
 
 E-ticaret markaları için AI görünürlük ve gelir platformu: **Keşfet → Teşhis et → Düzelt → Ölç → Gelir**.
 Next.js (App Router) + TypeScript strict + Prisma/PostgreSQL + BullMQ/Redis. Modüler monolit, ayrı worker süreci.

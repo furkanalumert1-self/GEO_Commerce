@@ -4,7 +4,8 @@ import { ENGINE_SHORT, tzLabel } from "@/lib/format";
 
 /**
  * Ortak filtre çubuğu: tarih (7/30/90/custom) ve motor; URL search params ile.
- * Tarih değişince sayfadaki tüm widget'lar aynı cohort ile yeniden hesaplanır (server render).
+ * Tarih değişince sayfadaki tüm widget'lar aynı soru kümesiyle yeniden hesaplanır (server render).
+ * Mobilde kompakt açılır alan (details); ≥640 px her zaman açık.
  */
 export function FilterBar({
   basePath,
@@ -34,7 +35,15 @@ export function FilterBar({
     );
   const activeCount = (range !== "30" ? 1 : 0) + (engine ? 1 : 0);
   return (
-    <div className="mb-8 flex flex-wrap items-center gap-x-3 gap-y-2" role="group" aria-label="Filtreler">
+    <details className="filter-sheet mb-6 sm:mb-8">
+      <summary className="no-marker inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-medium shadow-[var(--shadow-card)]">
+        Filtreler
+        <span className="font-normal text-text-secondary">
+          · {range === "custom" ? "Özel aralık" : `${range} gün`} · {engine ? (ENGINE_SHORT[engine] ?? engine) : "Tüm platformlar"}
+          {activeCount ? ` (${activeCount} aktif)` : ""}
+        </span>
+      </summary>
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 sm:mt-0" role="group" aria-label="Filtreler">
       <div className="flex flex-wrap items-center gap-0.5 rounded-md bg-surface-subtle p-0.5" role="group" aria-label="Dönem">
         {["7", "30", "90"].map((r) => (
           <Link key={r} href={href({ range: r, from: null, to: null })} className={seg(range === r)} aria-current={range === r ? "true" : undefined}>
@@ -71,5 +80,6 @@ export function FilterBar({
       ) : null}
       <p className="text-xs text-text-secondary">Saat dilimi: {tzLabel(timeZone)}</p>
     </div>
+    </details>
   );
 }

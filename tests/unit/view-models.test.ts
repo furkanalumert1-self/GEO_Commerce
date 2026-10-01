@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { absoluteDelta, actionCta, alignPrevious, deltaText, impactLevel, measurementWindows, previousPeriod, relativeChange, workflowView } from "@/lib/view-models";
+import { absoluteDelta, actionCta, alignPrevious, deltaText, impactLevel, measurementOutcome, measurementWindows, previousPeriod, relativeChange, workflowView } from "@/lib/view-models";
 
 describe("dönem farkı", () => {
   it("önceki eşit dönem", () => {
@@ -82,5 +82,27 @@ describe("trend hizalama", () => {
     const cur = [{ day: "2026-09-29" }, { day: "2026-09-30" }, { day: "2026-10-01" }];
     const prev = [{ day: "2026-08-30", score: 40 }, { day: "2026-09-01", score: 42 }];
     expect(alignPrevious(cur, prev, 30)).toEqual([40, null, 42]);
+  });
+});
+
+describe("zorunlu eksik", () => {
+  it("onaylı ama eksikli içerik hazır gösterilmez", () => {
+    const v = workflowView("approved", { needsFix: true });
+    expect(v.label).toBe("Düzeltme gerekli");
+    expect(v.states[1]).toBe("blocked");
+    expect(workflowView("measuring", { needsFix: true }).label).toBe("Ölçülüyor");
+  });
+});
+
+describe("ölçüm yeterliliği", () => {
+  it("dönem bitti + baseline yok → hesaplanamadı, veri toplanıyor denmez", () => {
+    const o = measurementOutcome(false, 0, 40);
+    expect(o.kind).toBe("not_computable");
+    expect(o.message).toBe("Dönem tamamlandı; başlangıç verisi olmadığı için etki hesaplanamadı.");
+    expect(o.message).not.toMatch(/toplanıyor/);
+  });
+  it("kısmi dönem + baseline var + sonrası yok → bekleniyor", () => {
+    expect(measurementOutcome(true, 30, 0).title).toBe("Sonraki dönem verisi bekleniyor");
+    expect(measurementOutcome(true, 30, 5).kind).toBe("computable");
   });
 });

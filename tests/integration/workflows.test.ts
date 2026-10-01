@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveAction, saveActionVersion } from "@/modules/actions/service";
+import { approveAction, publishAction, saveActionVersion, transitionAction } from "@/modules/actions/service";
 import { templateDraft } from "@/modules/actions/generator";
 import { versionHash } from "@/modules/actions/workflow";
 import { resolveBrandAccess } from "@/modules/tenancy/access";
@@ -13,7 +13,10 @@ import { runJob } from "@/workers/runner";
 import { handlers, NonRetryableError } from "@/workers/handlers";
 import { db, makeTenant } from "./helpers";
 
-const content = templateDraft({ type: "faq", language: "tr", brand: { name: "B", domain: "b.example" }, opportunity: { title: "t", recommendedAction: null, clusterLabel: "c", gapType: "intent_content" }, evidence: [], targetUrl: null, catalog: [], allowedClaims: [] });
+const draftInput = { type: "faq" as const, language: "tr", brand: { name: "B", domain: "b.example" }, opportunity: { title: "t", recommendedAction: null, clusterLabel: "c", gapType: "intent_content" }, evidence: [], targetUrl: null, allowedClaims: [] };
+const content = templateDraft({ ...draftInput, catalog: [{ name: "Serum", url: null, priceMinor: 19900n, currency: "TRY", available: true }] });
+// Katalog boş/fiyatsız → görünür içerikte doldurulmamış yer tutucu (zorunlu eksik).
+const incomplete = templateDraft({ ...draftInput, catalog: [{ name: "Serum", url: null, priceMinor: null, currency: null, available: true }] });
 
 describe("aksiyon onayı", () => {
   it("onaydan önce içerik değişirse 409; düzenleme onayı düşürür", async () => {
@@ -30,6 +33,25 @@ describe("aksiyon onayı", () => {
     expect(ok.status).toBe("approved");
     await saveActionVersion(db, access, { actionId: a.id, expectedVersion: ok.version, content: { ...content, title: "sonra" }, userId: t.user.id });
     expect(await db.approval.count({ where: { actionId: a.id, revokedAt: null } })).toBe(0);
+  });
+});
+
+describe("zorunlu eksik", () => {
+  it("yer tutuculu sürüm onaylanamaz; eski onaylı eksikli kayıt uygulanamaz ve sessizce değiştirilmez", async () => {
+    const t = await makeTenant("commerce");
+    const access = await resolveBrandAccess(db, { kind: "user", userId: t.user.id }, t.ws.id, t.brand.id);
+    const a = await db.action.create({ data: { workspaceId: t.ws.id, brandId: t.brand.id, type: "faq", title: "x", version: 1 } });
+    const v = await db.actionVersion.create({ data: { workspaceId: t.ws.id, actionId: a.id, number: 1, content: incomplete as object, contentHash: versionHash(incomplete) } });
+    await db.action.update({ where: { id: a.id }, data: { currentVersionId: v.id } });
+    await expect(approveAction(db, access, { actionId: a.id, versionId: v.id, expectedHash: v.contentHash, userId: t.user.id })).rejects.toMatchObject({ code: "validation_error" });
+    // Eski veri: eksikli içerik onaylanmış halde.
+    await db.action.update({ where: { id: a.id }, data: { status: "approved" } });
+    await db.approval.create({ data: { workspaceId: t.ws.id, actionId: a.id, versionId: v.id, versionHash: v.contentHash, approverId: t.user.id } });
+    await expect(transitionAction(db, access, a.id, "measuring", t.user.id)).rejects.toMatchObject({ code: "validation_error" });
+    await expect(publishAction(db, access, a.id)).rejects.toMatchObject({ code: "validation_error" });
+    const after = await db.action.findUniqueOrThrow({ where: { id: a.id } });
+    expect(after.status).toBe("approved");
+    expect(await db.approval.count({ where: { actionId: a.id, revokedAt: null } })).toBe(1);
   });
 });
 

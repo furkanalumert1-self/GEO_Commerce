@@ -83,11 +83,11 @@ export default async function VisibilityPage({ params, searchParams }: { params:
             </tbody>
           </TableWrap>
           <div className="border-t border-border px-4 py-3">
-            <Provenance items={[["Formül", metrics.formulaVersion], ["Cohort", metrics.cohortHash], ["Yüzey", metrics.provenance.surfaces.map((s) => SURFACE_LABEL[s] ?? s).join(", ") || "—"], ["Başarısız", fmtNumber(metrics.failedCount)]]} />
+            <details className="text-xs"><summary className="inline-flex min-h-11 cursor-pointer items-center text-text-secondary sm:min-h-0">Ölçüm detayları</summary><div className="mt-1"><Provenance items={[["Yüzey", metrics.provenance.surfaces.map((s) => SURFACE_LABEL[s] ?? s).join(", ") || "—"], ["Başarısız sorgu", fmtNumber(metrics.failedCount)], ["Formül sürümü", metrics.formulaVersion], ["Ölçüm kümesi kimliği", metrics.cohortHash]]} /></div></details>
           </div>
         </Card>
         <Card>
-          <CardHeader title="Share of Voice" description="Aynı cohort; yanıt başına marka başına bir mention. Rakip seti değişirse cohort değişir." />
+          <CardHeader title="Share of Voice" description="Aynı soru kümesi; her yanıtta bir marka en fazla bir kez sayılır. Rakip listesi değişirse karşılaştırma kümesi değişir." />
           <TableWrap label="Share of voice">
             <thead>
               <tr>
@@ -110,7 +110,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
       <Card className="mt-6">
         <CardHeader
           title="Gözlemler"
-          description="Her satır bir answer unit. Kanıtı görmek için satırı açın."
+          description="Her satır tek bir AI yanıtıdır. Kanıtı görmek için satırı açın."
           action={<Link className="text-sm text-primary underline" href={qs({ status: sp.status === "failed" ? "" : "failed", page: "1" })}>{sp.status === "failed" ? "Tümünü göster" : "Yalnız başarısızlar"}</Link>}
         />
         {observations.length === 0 ? (

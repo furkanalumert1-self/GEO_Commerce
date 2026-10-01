@@ -8,6 +8,7 @@ import { ensureBucket, periodKey, reserve } from "@/modules/billing/quota";
 import { assertCan, assertCanRunPaidJob, type BrandAccess } from "@/modules/tenancy/access";
 import { createRun, unitsFor, MONITOR_CONFIG_VERSION, type RunPlan } from "./service";
 import { estimate } from "./planner";
+import { fixturesAllowed } from "@/lib/demo";
 
 export interface StartRunInput {
   promptIds?: string[];
@@ -20,7 +21,7 @@ export interface StartRunInput {
 
 /** Bağlı ve pakete dahil motorlar. not_configured motorlar açıkça ayrı döner. */
 export function engineAvailability(access: BrandAccess) {
-  const adapters = getAiAdapters();
+  const adapters = getAiAdapters(undefined, { demo: fixturesAllowed(access) });
   const connected = (Object.keys(adapters) as EngineKey[]).filter((e) => ["ready", "demo"].includes(adapters[e].status()));
   const allowed = allowedEngines(access.entitlements, connected);
   return {

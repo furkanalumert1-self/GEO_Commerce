@@ -12,6 +12,7 @@ export const QUEUE_NAME = "geo-jobs";
 
 export type JobType =
   | "audit"
+  | "commerce_sync"
   | "crawl"
   | "monitor_run"
   | "generate_opportunities"

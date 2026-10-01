@@ -25,7 +25,7 @@ export default async function ClientsPage({ params }: { params: Promise<{ worksp
   const canManage = can({ role: access.role, isApprover: access.isApprover }, "brand.manage");
   return (
     <>
-      <PageHeader title="Müşteriler" description={`Havuz: ${brands.length} / ${access.entitlements.brands} marka · ${au ? `${fmtNumber(au.used)} / ${fmtNumber(au.limit)}` : "—"} answer unit. Marka bütçeleri ortak havuzu aşamaz.`} />
+      <PageHeader title="Müşteriler" description={`Havuz: ${brands.length} / ${access.entitlements.brands} marka · ${au ? `${fmtNumber(au.used)} / ${fmtNumber(au.limit)}` : "—"} yanıt birimi. Marka bütçeleri ortak havuzu aşamaz.`} />
       {au && au.pct !== null && au.pct >= 80 ? <div className="mb-4"><Alert tone="warning" title={`Havuz kullanımı %${au.pct}`}>Limitte yeni ölçümler durur; veriler okunabilir kalır.</Alert></div> : null}
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <Card>

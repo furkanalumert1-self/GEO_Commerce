@@ -86,8 +86,8 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
     const actionability = targetChecked ? 85 : targetPage ? 60 : 35;
 
     const components: OpportunityComponents = {
-      intent: { value: intent, rationale: `${scores.length} prompt'un ortalama ticari niyet puanı` },
-      visibilityGap: { value: gap, rationale: `En güçlü rakip ${best.c.name} %${Math.round(best.p * 100)}, marka %${Math.round(brandP * 100)} (aynı cohort, ${obs.length} başarılı yanıt)` },
+      intent: { value: intent, rationale: `${scores.length} sorunun ortalama ticari niyet puanı` },
+      visibilityGap: { value: gap, rationale: `En güçlü rakip ${best.c.name} %${Math.round(best.p * 100)}, marka %${Math.round(brandP * 100)} (aynı soru kümesi, ${obs.length} başarılı yanıt)` },
       catalogFit: { value: catalogFitValue, rationale: catalogFitValue === null ? "Cluster kategorisi atanmadı — onaylı katalog eşleşmesi yok" : catalogFitValue === 100 ? `Katalogda "${cluster.category}" kategorisi var` : `Katalogda "${cluster.category}" bulunamadı` },
       evidenceStrength: { value: evidence, rationale: `${obs.length} başarılı tekrar, ${distinctSources} farklı kaynak, en yeni ${newestAgeDays} gün önce` },
       actionability: { value: actionability, rationale: targetChecked ? "Hedef sayfa tarandı ve somut düzeltme mümkün" : targetPage ? "Hedef sayfa var ama taranmadı" : "Hedef sayfa belirlenmedi" },

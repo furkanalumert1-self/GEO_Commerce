@@ -11,6 +11,9 @@ import { getAiAdapters } from "@/adapters/ai/providers";
 import { config } from "@/lib/config";
 import { resolveEntitlements, type PlanKey } from "@/modules/billing/plans";
 import { runRetention } from "./retention";
+import { syncIntegration } from "@/modules/commerce/connect";
+import { ShopifyAuthError } from "@/adapters/commerce/shopify";
+import { fixturesAllowed, isDemoDomain } from "@/lib/demo";
 
 /**
  * Job handler'ları. Yürütmeden önce tenant, abonelik ve (varsa) onay yeniden kontrol edilir:
@@ -51,21 +54,36 @@ export const handlers: Record<string, (ctx: JobContext) => Promise<void>> = {
     const run = await ctx.db.crawlRun.findUniqueOrThrow({ where: { id: crawlRunId }, include: { brand: true } });
     await ctx.db.crawlRun.update({ where: { id: crawlRunId }, data: { status: "running", startedAt: new Date() } });
     const prev = await ctx.db.pageSnapshot.findMany({ where: { brandId: run.brandId }, orderBy: { sampledAt: "desc" }, take: 2000, select: { url: true, etag: true, contentHash: true } });
+    const ws = await ctx.db.workspace.findUniqueOrThrow({ where: { id: run.workspaceId }, select: { isDemo: true } });
+    const demo = fixturesAllowed(ws) && isDemoDomain(run.brand.domain);
     const crawl = await crawlSite({
       domain: run.brand.domain,
       maxPages,
-      fetcher: config().DEMO_MODE ? fixtureFetcher : liveFetcher,
-      delayMs: config().DEMO_MODE ? 0 : 300,
+      fetcher: demo ? fixtureFetcher : liveFetcher,
+      delayMs: demo ? 0 : 300,
       onProgress: (d, t) => ctx.progress(d, t),
       previous: new Map(prev.map((p) => [p.url, { etag: p.etag, contentHash: p.contentHash ?? "" }])),
     });
     await persistCrawl(ctx.db, { workspaceId: run.workspaceId, brandId: run.brandId, crawlRunId }, crawl);
   },
 
+  async commerce_sync(ctx) {
+    await assertTenantActive(ctx, true);
+    const { integrationId } = ctx.job.payloadRef as { integrationId: string };
+    try {
+      await syncIntegration(ctx.db, integrationId);
+    } catch (e) {
+      // Yetki hatası yeniden denemeyle düzelmez; kullanıcı yeniden bağlanmalı.
+      if (e instanceof ShopifyAuthError) throw new NonRetryableError("auth_rejected");
+      throw e;
+    }
+  },
+
   async monitor_run(ctx) {
     await assertTenantActive(ctx, true);
     const { runId, plan, quotaOperationId } = ctx.job.payloadRef as { runId: string; plan: RunPlan; quotaOperationId: string | null };
-    await executeRun(ctx.db, runId, plan, getAiAdapters(), { quotaOperationId, onProgress: ctx.progress });
+    const ws = ctx.job.workspaceId ? await ctx.db.workspace.findUnique({ where: { id: ctx.job.workspaceId }, select: { isDemo: true } }) : null;
+    await executeRun(ctx.db, runId, plan, getAiAdapters(undefined, { demo: ws ? fixturesAllowed(ws) : false }), { quotaOperationId, onProgress: ctx.progress });
     if (ctx.job.workspaceId && ctx.job.brandId) await generateOpportunities(ctx.db, ctx.job.workspaceId, ctx.job.brandId);
   },
 

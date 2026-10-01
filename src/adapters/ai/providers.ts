@@ -159,9 +159,12 @@ export function perplexityAdapter(cfg: AppConfig): AiMonitorAdapter {
   };
 }
 
-/** Engine → adapter. Demo modunda deterministik fixture (dış çağrı yok, "Örnek veri"). */
-export function getAiAdapters(cfg: AppConfig = config()): Record<EngineKey, AiMonitorAdapter> {
-  if (cfg.DEMO_MODE) {
+/**
+ * Engine → adapter. `demo: true` yalnız demo workspace / örnek alan adı içindir (fixtures; dış çağrı yok).
+ * Gerçek kullanımda canlı sağlayıcı; yapılandırılmamışsa not_configured — mock'a düşülmez.
+ */
+export function getAiAdapters(cfg: AppConfig = config(), opts: { demo?: boolean } = {}): Record<EngineKey, AiMonitorAdapter> {
+  if (opts.demo && cfg.DEMO_MODE) {
     return {
       chatgpt: createFixtureAdapter("chatgpt"),
       gemini: createFixtureAdapter("gemini"),

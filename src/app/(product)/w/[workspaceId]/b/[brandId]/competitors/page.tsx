@@ -22,7 +22,7 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ wo
       <PageHeader title="Rakipler" description="Yalnız onaylı rakipler SOV ve fırsat hesabına girer. Kaldırma arşivler; tarihsel ölçüm korunur." badges={<Badge>{active} / {access.entitlements.competitorsPerBrand} onaylı</Badge>} />
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <Card>
-          <CardHeader title="Rakip listesi" description="SOV: son 30 gün, aynı cohort" />
+          <CardHeader title="Rakip listesi" description="Rekabet payı: son 30 gün, aynı soru kümesi" />
           {comps.length === 0 ? <EmptyState title="Rakip yok" description="Formdan rakip ekleyin veya audit'teki adayları onaylayın." /> : (
             <TableWrap label="Rakipler">
               <thead><tr><Th>Rakip</Th><Th>Kaynak</Th><Th>Durum</Th><Th numeric>SOV</Th><Th>İşlem</Th></tr></thead>
@@ -37,7 +37,7 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ wo
                       {c.archivedAt || !c.confirmedAt ? (
                         <ApiButton url={`${api}/${c.id}`} method="PATCH" label="Onayla" disabled={active >= access.entitlements.competitorsPerBrand} disabledReason="Paket limiti dolu" />
                       ) : (
-                        <ApiButton url={`${api}/${c.id}`} method="DELETE" label="Arşivle" confirm={`${c.name} arşivlensin mi? SOV cohort'u değişir; geçmiş veriler korunur.`} />
+                        <ApiButton url={`${api}/${c.id}`} method="DELETE" label="Arşivle" confirm={`${c.name} arşivlensin mi? Rekabet payı karşılaştırma kümesi değişir; geçmiş veriler korunur.`} />
                       )}
                     </Td>
                   </tr>

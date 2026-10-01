@@ -11,7 +11,7 @@ import { fmtDate, fmtNumber } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Abonelik" };
 
-const METRIC: Record<string, string> = { answer_units: "Answer unit", fix_units: "Fix with AI üretimi", crawl_urls: "Crawl URL", commerce_events: "Commerce event" };
+const METRIC: Record<string, string> = { answer_units: "Yanıt birimi", fix_units: "Fix with AI üretimi", crawl_urls: "Crawl URL", commerce_events: "Commerce event" };
 
 export default async function BillingPage({ params, searchParams }: { params: Promise<{ workspaceId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId } = await params;
@@ -50,7 +50,7 @@ export default async function BillingPage({ params, searchParams }: { params: Pr
           <ul className="divide-y divide-border">
             {PAID_PLAN_ORDER.map((k) => (
               <li key={k} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
-                <span><strong>{PLANS[k].label}</strong> · {formatUsd(PLANS[k].monthlyPriceUsdCents)}/ay · {PLANS[k].limits.brands} marka · {fmtNumber(PLANS[k].limits.answerUnits)} answer unit</span>
+                <span><strong>{PLANS[k].label}</strong> · {formatUsd(PLANS[k].monthlyPriceUsdCents)}/ay · {PLANS[k].limits.brands} marka · {fmtNumber(PLANS[k].limits.answerUnits)} yanıt birimi</span>
                 {k === access.entitlements.planKey && !access.entitlements.trial ? <Badge tone="success">Mevcut</Badge> : manage ? <ApiButton url={`/api/v1/workspaces/${workspaceId}/billing/checkout`} body={{ planKey: k }} label="Seç" redirectTo="{url}" disabled={billing !== "ready"} disabledReason="Ödeme sağlayıcısı yapılandırılmamış" /> : null}
               </li>
             ))}

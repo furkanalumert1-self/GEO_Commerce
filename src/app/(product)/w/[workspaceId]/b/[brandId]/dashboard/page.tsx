@@ -10,11 +10,29 @@ import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { brandMetrics, dailyTrend, parseRange } from "@/modules/monitoring/queries";
 import { revenueSummary } from "@/modules/commerce/service";
+import { actionsNeedingFix } from "@/modules/actions/readiness";
 import { hasFeature } from "@/modules/billing/plans";
 import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, SURFACE_LABEL } from "@/lib/format";
-import { absoluteDelta, actionCta, alignPrevious, impactLevel, previousPeriod } from "@/lib/view-models";
+import { absoluteDelta, actionCta, alignPrevious, impactLevel, plainTr, previousPeriod } from "@/lib/view-models";
 
 export const metadata: Metadata = { title: "Genel Bakış" };
+
+/** Para birimleri ayrı, etiketli satırlarda; kur verisi olmadan tek toplama çevrilmez. */
+function CurrencyAmounts({ byCurrency, fallbackCurrency }: { byCurrency: Record<string, bigint>; fallbackCurrency: string }) {
+  const entries = Object.entries(byCurrency);
+  if (entries.length === 0) return <>{fmtMoney(0, fallbackCurrency)}</>;
+  if (entries.length === 1) return <>{fmtMoney(entries[0]![1], entries[0]![0])}</>;
+  return (
+    <ul className="flex flex-col gap-0.5 text-lg sm:text-[22px]">
+      {entries.map(([c, v]) => (
+        <li key={c} className="flex items-baseline justify-between gap-2">
+          <span className="text-xs font-medium text-text-secondary">{c}</span>
+          <span>{fmtMoney(v, c)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 type SP = Promise<Record<string, string | undefined>>;
 type Components = Partial<Record<string, { value: number | null; rationale: string }>>;
@@ -55,6 +73,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     db.observation.findMany({ where: { workspaceId, brandId }, distinct: ["engine"], select: { engine: true } }),
     db.integration.count({ where: { brandId, capabilities: { path: ["ordersRead"], equals: true } } }),
   ]);
+  const needsFix = await actionsNeedingFix(db, recentActions);
   const revenueAllowed = hasFeature(access.entitlements, "revenue");
   const revenue = revenueAllowed && orderSources > 0 ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
 
@@ -137,7 +156,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         </div>
       ) : null}
 
-      <section aria-label="Temel göstergeler" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Temel göstergeler" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <MetricCard
           label="AI görünürlüğü"
           value={score ?? undefined}
@@ -168,7 +187,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         {revenue ? (
           <MetricCard
             label="AI kaynaklı gelir"
-            value={Object.keys(revenue.aiNetByCurrency).length === 0 ? fmtMoney(0, access.brand.currency) : Object.entries(revenue.aiNetByCurrency).map(([c, v]) => fmtMoney(v, c)).join(" · ")}
+            value={<CurrencyAmounts byCurrency={revenue.aiNetByCurrency} fallbackCurrency={access.brand.currency} />}
             scope={`${fmtNumber(revenue.aiOrders)} sipariş · son dokunuş · kapsam ${fmtPct(revenue.attributionCoverage)}`}
             href={`${base}/revenue${qs}`}
             linkLabel="Geliri gör"
@@ -200,7 +219,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
             {topOpps.map((o, i) => {
               const comps = o.components as Components;
               const engine = (o.diagnosis as DiagnosisJson)?.[0]?.observation?.engine;
-              const evidence = comps.visibilityGap?.rationale ?? comps.evidenceStrength?.rationale ?? null;
+              const rawEvidence = comps.visibilityGap?.rationale ?? comps.evidenceStrength?.rationale ?? null;
+              const evidence = rawEvidence ? plainTr(rawEvidence) : null;
               return (
                 <li key={o.id}>
                   <Card className={cn("flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between", i === 0 && "border-l-[3px] border-l-primary")}>
@@ -266,7 +286,9 @@ export default async function DashboardPage({ params, searchParams }: { params: 
               <EmptyState title="Sonuç yok" description="Seçili filtrelerde gözlem bulunamadı." action={<Link className="text-primary underline" href={`${base}/dashboard`}>Filtreleri sıfırla</Link>} />
             )}
           </div>
-          <div className="border-t border-border px-5 py-3">
+          <details className="border-t border-border px-5 py-3 text-xs">
+            <summary className="inline-flex min-h-11 cursor-pointer items-center text-text-secondary sm:min-h-0">Ölçüm detayları</summary>
+            <div className="mt-2">
             <Provenance
               items={[
                 ["Yüzey", metrics.provenance.surfaces.map((s) => SURFACE_LABEL[s] ?? s).join(", ") || "—"],
@@ -276,7 +298,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
                 ["Formül", `${metrics.formulaVersion}: 0,5·Anılma + 0,3·Öneri + 0,2·Kendi kaynağı`],
               ]}
             />
-          </div>
+            </div>
+          </details>
         </Card>
         <Card className="xl:col-span-4">
           <CardHeader title="Platformlar" description="Aynı ölçek (0–100); platformlar ayrı ölçülür." />
@@ -305,6 +328,20 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           {recentActions.length === 0 ? (
             <EmptyState title="Henüz aksiyon yok" description="Bir fırsatı inceleyip Fix with AI ile taslak oluşturduğunuzda çalışmalarınız burada görünür." />
           ) : (
+            <>
+            <ul className="divide-y divide-border sm:hidden">
+              {recentActions.map((a) => (
+                <li key={a.id} className="flex flex-col gap-1.5 px-4 py-3 text-sm">
+                  <Link className="font-medium hover:underline underline-offset-2" href={`${base}/actions/${a.id}`}>{a.title}</Link>
+                  <span className="break-all text-xs text-text-secondary">{a.targetUrl ?? a.opportunity?.title ?? "—"}</span>
+                  <span className="flex flex-wrap items-center justify-between gap-2">
+                    <ActionStatusBadge status={a.status} manual={Boolean((a.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(a.id)} />
+                    <Link className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary" href={`${base}/actions/${a.id}`} aria-label={`${actionCta(a.status)}: ${a.title}`}>{actionCta(a.status)} <ArrowRight size={14} aria-hidden /></Link>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden sm:block">
             <TableWrap label="Son çalışmalar">
               <thead>
                 <tr>
@@ -324,7 +361,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
                         <Link className="font-medium hover:underline underline-offset-2" href={`${base}/actions/${a.id}`}>{a.title}</Link>
                       </Td>
                       <Td className="max-w-[18rem] truncate text-text-secondary" title={a.targetUrl ?? a.opportunity?.title ?? undefined}>{a.targetUrl ?? a.opportunity?.title ?? "—"}</Td>
-                      <Td><ActionStatusBadge status={a.status} manual={manual} /></Td>
+                      <Td><ActionStatusBadge status={a.status} manual={manual} needsFix={needsFix.has(a.id)} /></Td>
                       <Td className="whitespace-nowrap text-text-secondary">{fmtDate(a.updatedAt, tz, "tr-TR", true)}</Td>
                       <Td className="text-right">
                         <Link className="inline-flex min-h-11 items-center gap-1 whitespace-nowrap text-sm font-medium text-primary hover:underline underline-offset-2 sm:min-h-0" href={`${base}/actions/${a.id}`} aria-label={`${actionCta(a.status)}: ${a.title}`}>
@@ -336,6 +373,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
                 })}
               </tbody>
             </TableWrap>
+            </div>
+            </>
           )}
         </Card>
       </section>

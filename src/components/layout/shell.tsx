@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui";
 import { MobileNav, SidebarNav, type NavEntry, type NavModel } from "./nav-client";
 import { ContextSwitcher } from "./context-switcher";
 import { SignOutButton } from "./sign-out";
+import { APP_NAME } from "@/lib/brand";
 
 export interface ShellWorkspace {
   id: string;
@@ -109,8 +110,8 @@ export function AppShell({
   const nav = buildNav(current, brandId);
   const brand = (
     <Link href={`/w/${current.id}/overview`} className="flex items-center gap-2 rounded-md font-semibold tracking-[-0.01em]">
-      <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[13px] font-semibold text-white">G</span>
-      <span>GEO Commerce</span>
+      <span aria-hidden className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[13px] font-semibold text-white">C</span>
+      <span>{APP_NAME}</span>
     </Link>
   );
   return (

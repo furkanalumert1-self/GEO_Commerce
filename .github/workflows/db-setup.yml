@@ -1,0 +1,31 @@
+name: DB setup (migrate + optional demo seed)
+
+# Elle çalıştırılır: GitHub → Actions → "DB setup" → Run workflow.
+# Repo secret gerekir: Settings → Secrets and variables → Actions → DATABASE_URL
+# (Supabase "Session pooler" adresi, sonuna ?sslmode=require&uselibpqcompat=true).
+on:
+  workflow_dispatch:
+    inputs:
+      seed_demo:
+        description: "Demo verisini (Örnek veri) de yükle"
+        type: boolean
+        default: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Migrate (tabloları oluştur / güncelle)
+        run: npx prisma migrate deploy --config prisma.config.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Demo seed
+        if: ${{ inputs.seed_demo }}
+        run: npx tsx prisma/seed.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DEMO_MODE: "true"

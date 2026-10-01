@@ -48,9 +48,16 @@ export interface SecretBox {
   decrypt(sealed: string): string;
 }
 
-export function createSecretBox(keyId: string, base64Key: string): SecretBox {
-  const key = Buffer.from(base64Key, "base64");
-  if (key.length !== 32) throw new Error("SECRETS_ENCRYPTION_KEY 32 byte (base64) olmalı");
+/** 32 baytlık anahtar: base64 (44 karakter) veya hex (64 karakter) kabul edilir. */
+export function decodeKey(raw: string): Buffer {
+  const v = raw.trim();
+  const key = /^[0-9a-fA-F]{64}$/.test(v) ? Buffer.from(v, "hex") : Buffer.from(v, "base64");
+  if (key.length !== 32) throw new Error("SECRETS_ENCRYPTION_KEY 32 bayt olmalı (base64 veya 64 karakter hex)");
+  return key;
+}
+
+export function createSecretBox(keyId: string, rawKey: string): SecretBox {
+  const key = decodeKey(rawKey);
   return {
     keyId,
     encrypt(plain) {

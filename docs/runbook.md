@@ -27,3 +27,7 @@ Günlük backup + PITR (sağlayıcı destekliyorsa); ayda bir restore testi.
 - Migration: deploy'dan önce yerelden `DATABASE_URL=<prod> npm run db:deploy`.
 - Worker Vercel'de çalışmaz (kalıcı süreç gerekir): Railway/Render/Fly üzerinde `npm run worker`, aynı env ile.
 - Demo yayını: `DEMO_MODE=true`, `DEMO_LOGIN=true`, ardından `DEMO_MODE=true npm run db:seed`. Canlı anahtarlarla birlikte kullanılamaz.
+
+## Supabase
+- `DATABASE_URL`: Supabase → Connect → **Session pooler** adresi (direct `db.<ref>.supabase.co` IPv6'dır; Vercel ve GitHub Actions'tan erişilemez). Sonuna `?sslmode=require&uselibpqcompat=true` ekleyin; şifredeki özel karakterler URL-encode edilmeli.
+- Tablolar: GitHub → Actions → "DB setup" → Run workflow (repo secret `DATABASE_URL` gerekli).

@@ -59,8 +59,8 @@ describe("log redaksiyonu", () => {
 
 describe("config", () => {
   it("prod'da demo + canlı anahtar birlikte fail", () => {
-    expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "k", DEMO_MODE: "true", OPENAI_API_KEY: "sk" })).toThrow();
-    expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "k", DEMO_MODE: "true" })).not.toThrow();
+    expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "ab".repeat(32), DEMO_MODE: "true", OPENAI_API_KEY: "sk" })).toThrow();
+    expect(() => parseConfig({ NODE_ENV: "production", DATABASE_URL: "x", AUTH_SECRET: "s", SECRETS_ENCRYPTION_KEY: "ab".repeat(32), DEMO_MODE: "true" })).not.toThrow();
   });
   it("boş string tanımsız sayılır", () => {
     expect(parseConfig({ DATABASE_URL: "x", OPENAI_API_KEY: "" }).OPENAI_API_KEY).toBeUndefined();
@@ -77,5 +77,14 @@ describe("RBAC", () => {
     expect(can({ role: "analyst", isApprover: false }, "actions.draft")).toBe(false);
     expect(can({ role: "billing", isApprover: false }, "brand.read")).toBe(false);
     expect(can({ role: "client", isApprover: true }, "actions.approve")).toBe(false);
+  });
+});
+
+describe("anahtar formatı", () => {
+  it("base64 ve hex 32 bayt kabul, diğerleri red", async () => {
+    const { decodeKey } = await import("@/lib/crypto");
+    expect(decodeKey(Buffer.alloc(32, 1).toString("base64")).length).toBe(32);
+    expect(decodeKey("ab".repeat(32)).length).toBe(32);
+    expect(() => decodeKey("kisa")).toThrow();
   });
 });

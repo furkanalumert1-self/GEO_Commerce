@@ -1,3 +1,4 @@
+import { decodeKey } from "@/lib/crypto";
 import { z } from "zod";
 
 /**
@@ -94,6 +95,7 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
     if (cfg.NODE_ENV === "production") {
       if (!cfg.AUTH_SECRET) missing.push("AUTH_SECRET");
       if (!cfg.SECRETS_ENCRYPTION_KEY) missing.push("SECRETS_ENCRYPTION_KEY");
+      else decodeKey(cfg.SECRETS_ENCRYPTION_KEY); // format hatası erken ve açık mesajla
     }
     if (missing.length) throw new Error(`Geçersiz ortam yapılandırması: eksik değişkenler: ${missing.join(", ")}`);
     if (cfg.NODE_ENV === "production" && cfg.DEMO_MODE && LIVE_CREDENTIAL_KEYS.some((k) => cfg[k])) {

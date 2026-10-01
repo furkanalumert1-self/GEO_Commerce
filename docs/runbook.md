@@ -20,3 +20,10 @@ Günlük backup + PITR (sağlayıcı destekliyorsa); ayda bir restore testi.
 - Billing: webhook imza hatası → 400; `InboxEvent.error` admin panelinde sayılır.
 - Sızıntı şüphesi: API anahtarlarını iptal et, `SECRETS_ENCRYPTION_KEY` rotasyonu (yeni `SECRETS_KEY_ID`), oturumları geçersiz kıl (`AUTH_SECRET` rotasyonu).
 - Platform admin: `PLATFORM_ADMIN_ALLOWLIST` + IdP tarafında MFA zorunlu.
+
+## Vercel (yalnız web)
+- Framework: Next.js (`vercel.json`). Build env gerektirmez; runtime env'leri Project Settings → Environment Variables'a girilir.
+- Zorunlu: `DATABASE_URL` (yönetilen Postgres, ör. Neon/Supabase), `AUTH_SECRET`, `SECRETS_ENCRYPTION_KEY`, `SECRETS_KEY_ID`, `APP_URL`, `REDIS_URL`.
+- Migration: deploy'dan önce yerelden `DATABASE_URL=<prod> npm run db:deploy`.
+- Worker Vercel'de çalışmaz (kalıcı süreç gerekir): Railway/Render/Fly üzerinde `npm run worker`, aynı env ile.
+- Demo yayını: `DEMO_MODE=true`, `DEMO_LOGIN=true`, ardından `DEMO_MODE=true npm run db:seed`. Canlı anahtarlarla birlikte kullanılamaz.

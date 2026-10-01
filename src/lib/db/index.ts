@@ -12,8 +12,21 @@ export function createPrismaClient(url = process.env.DATABASE_URL): PrismaClient
   return new PrismaClient({ adapter });
 }
 
-/** Process başına tek client (connection pool). */
-export const db: PrismaClient = globalForPrisma.__prisma ?? createPrismaClient();
-if (process.env.NODE_ENV !== "production") globalForPrisma.__prisma = db;
+function instance(): PrismaClient {
+  globalForPrisma.__prisma ??= createPrismaClient();
+  return globalForPrisma.__prisma;
+}
+
+/**
+ * Process başına tek client (connection pool). İlk kullanımda oluşturulur; böylece `next build`
+ * DATABASE_URL olmadan da modülleri yükleyebilir.
+ */
+export const db: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_t, prop) {
+    const c = instance();
+    const v = Reflect.get(c, prop, c);
+    return typeof v === "function" ? v.bind(c) : v;
+  },
+});
 
 export { Prisma } from "@/generated/prisma/client";

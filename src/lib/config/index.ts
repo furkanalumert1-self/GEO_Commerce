@@ -17,7 +17,7 @@ const bool = z
 export const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
-  DATABASE_URL: z.string().min(1, "DATABASE_URL zorunlu"),
+  DATABASE_URL: z.string().default(""),
   REDIS_URL: optional,
   AUTH_SECRET: optional,
   AUTH_GOOGLE_ID: optional,
@@ -85,7 +85,10 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
     throw new Error(`Geçersiz ortam yapılandırması: ${issues}`);
   }
   const cfg = parsed.data;
-  if (cfg.NODE_ENV === "production") {
+  // `next build` sırasında runtime sırları gerekmez; kontroller sunucu çalışırken uygulanır.
+  const building = env.NEXT_PHASE === "phase-production-build";
+  if (!building && !cfg.DATABASE_URL) throw new Error("Geçersiz ortam yapılandırması: DATABASE_URL zorunlu");
+  if (cfg.NODE_ENV === "production" && !building) {
     if (cfg.DEMO_MODE && LIVE_CREDENTIAL_KEYS.some((k) => cfg[k])) {
       throw new Error("Prod'da DEMO_MODE canlı sağlayıcı anahtarlarıyla birlikte açılamaz.");
     }

@@ -2,24 +2,33 @@
 
 /* §9 Görsel tasarım sözleşmesi — açık, sakin, profesyonel B2B. Koyu tema/neon/gradient yok. */
 @theme {
-  --color-bg: #f7f8fa;
+  /* Warm editorial SaaS — tek orman yeşili accent; koyu tema/neon/gradient yok. */
+  --color-bg: #f7f6f2;
   --color-surface: #ffffff;
-  --color-text: #182230;
-  --color-muted: #526070;
-  --color-border: #dce2e8;
-  --color-primary: #2458a6;
-  --color-primary-hover: #1d4887;
-  --color-primary-soft: #e8eef8;
-  --color-success: #26704b;
-  --color-success-soft: #e6f2ec;
-  --color-warning: #875a16;
-  --color-warning-soft: #f7efe1;
-  --color-danger: #b42318;
-  --color-danger-soft: #fbeae8;
-  --color-focus: #2458a6;
+  --color-surface-subtle: #f1f0eb;
+  --color-text: #242722;
+  --color-text-secondary: #596057;
+  /* #6C7268 subtle zeminde 4.5:1 altına düştüğü için bir ton koyulaştırıldı. */
+  --color-muted: #62685e;
+  --color-border: #e3e5dd;
+  --color-border-strong: #8f9589;
+  --color-primary: #3d6248;
+  --color-primary-hover: #304f39;
+  --color-primary-soft: #eaf0e7;
+  --color-success: #2f6542;
+  --color-success-soft: #e8f1ea;
+  --color-warning: #8a570b;
+  --color-warning-soft: #f8f0e0;
+  --color-danger: #b13e37;
+  --color-danger-soft: #f9ebe9;
+  --color-focus: #3d6248;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --radius-sm: 6px;
   --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-card: 0 1px 2px rgb(24 32 24 / 4%);
+  --shadow-overlay: 0 16px 48px rgb(24 32 24 / 14%);
 }
 
 :root {
@@ -36,6 +45,20 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a,
+button,
+input,
+select,
+textarea,
+summary {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
 }
 
 :focus-visible {
@@ -57,6 +80,18 @@ body {
 }
 
 .skeleton {
-  background: #eef1f4;
-  border-radius: 6px;
+  background: var(--color-surface-subtle);
+  border-radius: 8px;
+}
+
+summary.no-marker {
+  list-style: none;
+}
+summary.no-marker::-webkit-details-marker {
+  display: none;
+}
+
+/* Kapalı <details> içeriği (popover, tablo alternatifi) yerleşime ve yatay taşmaya katılmaz. */
+details:not([open]) > :not(summary) {
+  display: none;
 }

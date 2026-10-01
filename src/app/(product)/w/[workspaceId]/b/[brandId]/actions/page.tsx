@@ -1,10 +1,12 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Badge, Card, EmptyState, PageHeader, TableWrap, Td, Th } from "@/components/ui";
+import { Card, EmptyState, PageHeader, TableWrap, Td, Th } from "@/components/ui";
+import { ActionStatusBadge } from "@/components/data/growth";
+import { actionCta } from "@/lib/view-models";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { hasFeature } from "@/modules/billing/plans";
-import { ACTION_STATUS_LABEL, fmtDate } from "@/lib/format";
+import { fmtDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Aksiyonlar" };
 
@@ -15,20 +17,20 @@ export default async function ActionsPage({ params }: { params: Promise<{ worksp
   const fix = hasFeature(access.entitlements, "fix_with_ai");
   return (
     <>
-      <PageHeader title="Aksiyonlar" description="Taslak → inceleme → onay → yayın/export → ölçüm. Varsayılan yalnız taslak ve export; yayın için yazma destekli, doğrulanmış bağlantı ve onay gerekir." />
+      <PageHeader title="Aksiyonlar" description="Hazırlanan değişiklikler: taslak → inceleme → onay → uygulama → ölçüm. Onay içeriği yayınlamaz; mağazada yayın için yazma destekli doğrulanmış bağlantı gerekir, yoksa dışa aktarıp manuel uygulayabilirsiniz." />
       {!fix ? <p className="mb-4 text-sm text-muted">Fix with AI Growth ve üzeri paketlerde. Mevcut aksiyonları görüntüleyebilir ve dışa aktarabilirsiniz.</p> : null}
       <Card>
         {actions.length === 0 ? <EmptyState title="Aksiyon yok" description="Bir fırsat sayfasından Fix with AI ile taslak oluşturun." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/opportunities`}>Fırsatlara git</Link>} /> : (
           <TableWrap label="Aksiyonlar">
-            <thead><tr><Th>Aksiyon</Th><Th>Tür</Th><Th>Durum</Th><Th>Fırsat</Th><Th>Güncellendi</Th></tr></thead>
+            <thead><tr><Th>Aksiyon</Th><Th>Hedef / fırsat</Th><Th>Durum</Th><Th>Son işlem</Th><Th><span className="sr-only">İşlem</span></Th></tr></thead>
             <tbody>
               {actions.map((a) => (
                 <tr key={a.id}>
-                  <Td><Link className="font-medium text-primary hover:underline" href={`/w/${workspaceId}/b/${brandId}/actions/${a.id}`}>{a.title}</Link></Td>
-                  <Td>{a.type}</Td>
-                  <Td><Badge tone={a.status === "approved" || a.status === "completed" ? "success" : a.status === "rejected" || a.status === "failed" ? "danger" : "primary"}>{ACTION_STATUS_LABEL[a.status]}</Badge></Td>
-                  <Td className="text-muted">{a.opportunity?.title ?? "—"}</Td>
-                  <Td className="text-muted">{fmtDate(a.updatedAt, access.brand.timezone, "tr-TR", true)}</Td>
+                  <Td className="max-w-[24rem]"><Link className="font-medium hover:underline underline-offset-2" href={`/w/${workspaceId}/b/${brandId}/actions/${a.id}`}>{a.title}</Link></Td>
+                  <Td className="max-w-[20rem] truncate text-text-secondary" title={a.targetUrl ?? a.opportunity?.title ?? undefined}>{a.targetUrl ?? a.opportunity?.title ?? "—"}</Td>
+                  <Td><ActionStatusBadge status={a.status} manual={Boolean((a.measurement as { manualPublish?: boolean } | null)?.manualPublish)} /></Td>
+                  <Td className="whitespace-nowrap text-text-secondary">{fmtDate(a.updatedAt, access.brand.timezone, "tr-TR", true)}</Td>
+                  <Td className="text-right"><Link className="inline-flex min-h-11 items-center whitespace-nowrap text-sm font-medium text-primary hover:underline sm:min-h-0" href={`/w/${workspaceId}/b/${brandId}/actions/${a.id}`} aria-label={`${actionCta(a.status)}: ${a.title}`}>{actionCta(a.status)} →</Link></Td>
                 </tr>
               ))}
             </tbody>

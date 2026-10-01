@@ -27,7 +27,8 @@ test("public sayfalar erişilebilir ve yatay taşma yok", async ({ page }) => {
 test("pano: 3 viewport ekran görüntüsü, axe, klavye ile menü", async ({ page }, info) => {
   const { ws, brand } = await loginAs(page, /Marka sahibi/);
   await page.goto(`/w/${ws}/b/${brand}/dashboard`);
-  await expect(page.getByText("AI Visibility Score")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Genel Bakış" })).toBeVisible();
+  await expect(page.getByText("Bugün odaklanmanız gerekenler")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: `test-results/dashboard-${info.project.name}.png`, fullPage: true });
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).exclude(".recharts-wrapper").analyze();

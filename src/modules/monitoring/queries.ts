@@ -11,6 +11,8 @@ export interface MetricFilters {
   to: Date;
   engines?: string[];
   locale?: string;
+  /** Yalnız bu prompt'ların gözlemleri (ör. bir fırsatın soru kümesi için önce/sonra ölçümü). */
+  promptIds?: string[];
 }
 
 export async function loadObservations(db: PrismaClient, workspaceId: string, brandId: string, f: MetricFilters) {
@@ -21,6 +23,7 @@ export async function loadObservations(db: PrismaClient, workspaceId: string, br
       sampledAt: { gte: f.from, lte: f.to },
       ...(f.engines?.length ? { engine: { in: f.engines } } : {}),
       ...(f.locale ? { language: f.locale.split("-")[0], country: f.locale.split("-")[1] } : {}),
+      ...(f.promptIds ? { promptVersion: { promptId: { in: f.promptIds } } } : {}),
     },
     include: { mentions: true, citations: true, promptVersion: { select: { id: true, promptId: true } } },
     orderBy: { sampledAt: "asc" },

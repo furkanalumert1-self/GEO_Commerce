@@ -1,0 +1,145 @@
+import Link from "next/link";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Check, Minus, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { Badge, Card, cn } from "@/components/ui";
+import { ACTION_STATUS_LABEL } from "@/lib/format";
+import { deltaText, IMPACT_LABEL, WORKFLOW_STEPS, type Delta, type ImpactLevel, type WorkflowView } from "@/lib/view-models";
+
+/** Değer/birim, önceki döneme göre fark ve eksik veri ayrımı. Kart tümüyle ilgili sayfaya bağlanır. */
+export function MetricCard({
+  label,
+  value,
+  unit,
+  delta,
+  missing,
+  scope,
+  href,
+  linkLabel,
+  action,
+}: {
+  label: string;
+  value?: ReactNode;
+  unit?: string;
+  delta?: Delta;
+  /** Değer yoksa: "Henüz ölçülmüyor" / "Entegrasyon gerekli" gibi; değer `—` gösterilir, 0 değil. */
+  missing?: string;
+  scope?: ReactNode;
+  href: string;
+  linkLabel: string;
+  action?: ReactNode;
+}) {
+  return (
+    <Card className="group relative flex min-h-[148px] flex-col p-5 hover:border-border-strong/60">
+      <p className="text-sm font-medium text-text-secondary">{label}</p>
+      <p className="tabular mt-3 text-[32px] font-semibold leading-[1.15] tracking-[-0.01em]">
+        {missing ? <span aria-label="Değer yok">—</span> : value}
+        {!missing && unit ? <span className="ml-1 text-base font-normal text-text-secondary">{unit}</span> : null}
+      </p>
+      <div className="mt-1 text-[13px] leading-snug text-text-secondary">
+        {missing ? <span>{missing}</span> : delta ? <DeltaLine delta={delta} /> : null}
+        {scope ? <p className="mt-0.5 text-muted">{scope}</p> : null}
+      </div>
+      <div className="mt-auto pt-3 text-sm">
+        {action ?? (
+          <Link href={href} className="inline-flex items-center gap-1 font-medium text-primary after:absolute after:inset-0 after:rounded-[var(--radius-lg)] hover:underline underline-offset-2">
+            {linkLabel}
+            <ArrowRight size={14} aria-hidden />
+          </Link>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+export function DeltaLine({ delta }: { delta: Delta }) {
+  if (delta.kind === "none") return <span>{deltaText(delta)}</span>;
+  const Icon = delta.direction === "up" ? ArrowUpRight : delta.direction === "down" ? ArrowDownRight : Minus;
+  return (
+    <span className={cn("inline-flex items-center gap-1", delta.direction === "up" && "text-success", delta.direction === "down" && "text-danger")}>
+      <Icon size={14} aria-hidden />
+      {deltaText(delta)}
+    </span>
+  );
+}
+
+export function ImpactBadge({ level }: { level: ImpactLevel }) {
+  return (
+    <Badge tone={level === "high" ? "primary" : level === "unknown" ? "neutral" : "neutral"}>
+      {level === "unknown" ? IMPACT_LABEL.unknown : `Tahmini etki: ${IMPACT_LABEL[level]}`}
+    </Badge>
+  );
+}
+
+const ACTION_TONE: Record<string, "neutral" | "primary" | "success" | "warning" | "danger"> = {
+  draft: "neutral",
+  review: "warning",
+  approved: "primary",
+  publishing: "warning",
+  published: "success",
+  measuring: "primary",
+  completed: "success",
+  failed: "danger",
+  rejected: "danger",
+  rolled_back: "danger",
+};
+
+export function ActionStatusBadge({ status, manual }: { status: string; manual?: boolean }) {
+  const label = status === "approved" ? "Onaylandı · yayına hazır" : manual && status === "measuring" ? "Haricen uygulandı · ölçülüyor" : (ACTION_STATUS_LABEL[status] ?? status);
+  return <Badge tone={ACTION_TONE[status] ?? "neutral"}>{label}</Badge>;
+}
+
+/** Teşhis → Taslak → İnceleme → Uygulama → Ölçüm. Durum metinle de anlatılır (yalnız renk değil). */
+export function WorkflowStepper({ view }: { view: WorkflowView }) {
+  return (
+    <nav aria-label="İş akışı adımları">
+      <ol className="grid grid-cols-5 gap-1.5 sm:gap-2">
+        {WORKFLOW_STEPS.map((step, i) => {
+          const st = view.states[i]!;
+          const srState = st === "done" ? "tamamlandı" : st === "current" ? "geçerli adım" : st === "blocked" ? "engellendi" : "sırada";
+          return (
+            <li key={step} aria-current={st === "current" || st === "blocked" ? "step" : undefined} className="flex min-w-0 flex-col gap-1.5">
+              <span
+                aria-hidden
+                className={cn(
+                  "h-1 rounded-full",
+                  st === "done" && "bg-primary",
+                  st === "current" && "bg-primary/55",
+                  st === "blocked" && "bg-danger",
+                  st === "upcoming" && "bg-border",
+                )}
+              />
+              <span className={cn("flex min-w-0 items-center gap-1 text-xs sm:text-[13px]", st === "upcoming" ? "text-muted" : "font-medium text-text")}>
+                {st === "done" ? <Check size={14} aria-hidden className="shrink-0 text-primary" /> : st === "blocked" ? <X size={14} aria-hidden className="shrink-0 text-danger" /> : <span aria-hidden className="tabular shrink-0 text-muted">{i + 1}</span>}
+                <span className="truncate">{step}</span>
+                <span className="sr-only"> — {srState}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+export function PlatformBreakdown({ rows }: { rows: Array<{ key: string; label: string; score: number | null; samples: number; note?: string }> }) {
+  if (!rows.length) return <p className="px-5 py-6 text-sm text-text-secondary">Seçili dönemde platform verisi yok.</p>;
+  return (
+    <ul className="flex flex-col gap-4 px-5 py-5">
+      {rows.map((r) => (
+        <li key={r.key}>
+          <div className="flex items-baseline justify-between gap-2 text-sm">
+            <span className="font-medium">{r.label}</span>
+            <span className="tabular font-semibold">{r.score ?? "—"}<span className="font-normal text-text-secondary"> / 100</span></span>
+          </div>
+          <div className="mt-1.5 h-2 rounded-full bg-surface-subtle" aria-hidden>
+            {r.score !== null ? <div className="h-2 rounded-full bg-primary" style={{ width: `${Math.max(2, r.score)}%` }} /> : null}
+          </div>
+          <p className="mt-1 text-xs text-text-secondary">
+            {r.samples} geçerli yanıt{r.note ? ` · ${r.note}` : ""}
+            {r.score === null ? " · ölçülemedi" : ""}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}

@@ -5,6 +5,9 @@ import { createActionDraft } from "@/modules/actions/service";
 import { assertOpportunityUnlocked } from "@/modules/opportunities/access";
 import { ACTION_TYPES } from "@/modules/actions/workflow";
 
+/** Fix with AI taslak üretimi istek içinde çalışır; üretim zaman aşımı (inline: 50 sn) bu sınırın altında. */
+export const maxDuration = 60;
+
 const body = z.object({ opportunityId: z.string().uuid(), type: z.enum(ACTION_TYPES), targetURL: z.string().url().max(500).nullable().optional() });
 
 export const GET = brandRoute(async ({ access, requestId }) => {

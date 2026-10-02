@@ -20,6 +20,7 @@ interface Summary {
   visibility: { score: number | null; smallSample: boolean; sampleCount: number; scheduled: number; partial: boolean; missingEngines: string[] };
   engines: Array<{ engine: string; score: number | null; coverage: number | null }>;
   unavailableEngines: Array<{ engine: string; reason: string | null }>;
+  failedCalls?: string[];
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
   readiness: { geoScore: number | null; adsScore: number | null; checks: Check[] };
   crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[] };
@@ -56,9 +57,32 @@ const STATUS_BADGE: Record<Check["status"], { tone: "success" | "danger" | "neut
   requires_verification: { tone: "warning", label: "Doğrulama gerekli" },
 };
 
+const CALL_ERROR: Record<string, string> = {
+  auth: "API anahtarı reddedildi",
+  not_configured: "yapılandırılmamış",
+  http_400: "istek/model reddedildi",
+  http_404: "model bulunamadı",
+  http_429: "kota/hız sınırı",
+  timeout: "zaman aşımı",
+  network: "ağ hatası",
+};
+
 const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", perplexity: "Perplexity API" };
 
-export function AuditResult({ token, initial, signedIn }: { token: string; initial: View; signedIn: boolean }) {
+interface StepInfo {
+  outcome: string;
+  progress: { done: number; total: number } | null;
+  resumable: boolean;
+  error: string | null;
+}
+
+/**
+ * `inline`: Redis'siz geçici dağıtım — audit, bu sayfa açıkken açık POST adımlarıyla ilerler (sekme kapanırsa
+ * duraklar, geri gelince devam eder). Aksi halde worker yürütür ve sayfa yalnız durumu sorgular (GET).
+ */
+export function AuditResult({ token, initial, signedIn, inline = false }: { token: string; initial: View; signedIn: boolean; inline?: boolean }) {
+  const [step, setStep] = useState<StepInfo | null>(null);
+  const [paused, setPaused] = useState(false);
   const [view, setView] = useState<View>(initial);
   const [pollError, setPollError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
@@ -68,27 +92,39 @@ export function AuditResult({ token, initial, signedIn }: { token: string; initi
   const running = view.status === "queued" || view.status === "running";
 
   useEffect(() => {
-    if (!running) return;
+    if (!running || paused) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/v1/audits/${encodeURIComponent(token)}`, { cache: "no-store" });
+        // Inline: sıradaki adımı yürüt (POST). Worker modu: yalnız durumu oku (GET iş başlatmaz).
+        const res = inline
+          ? await fetch(`/api/v1/audits/${encodeURIComponent(token)}/advance`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", cache: "no-store" })
+          : await fetch(`/api/v1/audits/${encodeURIComponent(token)}`, { cache: "no-store" });
         const body = await res.json();
         if (!res.ok) throw new Error(body?.error?.message ?? "Durum alınamadı");
         if (!cancelled) {
-          setView(body.data);
+          const { step: st, ...v } = body.data as View & { step?: StepInfo };
+          setView(v);
           setPollError(null);
+          if (st) {
+            setStep(st);
+            if (st.error && st.outcome !== "busy" && st.outcome !== "continue") setPaused(true);
+          }
         }
       } catch (e) {
-        if (!cancelled) setPollError((e as Error).message);
+        if (!cancelled) {
+          setPollError((e as Error).message);
+          if (inline) setPaused(true);
+        }
       }
-      delay.current = Math.min(10_000, Math.round(delay.current * 1.5)); // 2s→10s backoff
-    }, delay.current);
+      // Inline: adımlar ardışık (meşgulse 3 sn bekle); worker: 2s→10s artan sorgu aralığı.
+      delay.current = inline ? 300 : Math.min(10_000, Math.round(delay.current * 1.5));
+    }, inline && step?.outcome === "busy" ? 3000 : delay.current);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [running, token, view]);
+  }, [running, token, view, inline, paused, step?.outcome]);
 
   const claim = async () => {
     setClaiming(true);
@@ -123,8 +159,31 @@ export function AuditResult({ token, initial, signedIn }: { token: string; initi
           <div className="mt-3 h-2 w-full rounded-sm bg-bg" role="progressbar" aria-valuemin={0} aria-valuemax={view.progress.total} aria-valuenow={view.progress.done} aria-label="Audit ilerlemesi">
             <div className="h-2 rounded-sm bg-primary" style={{ width: `${(view.progress.done / Math.max(1, view.progress.total)) * 100}%` }} />
           </div>
-          <p className="mt-3 text-xs text-muted">Bu sayfayı kapatabilirsiniz; bağlantı {new Date(view.expiresAt).toLocaleDateString("tr-TR")} tarihine kadar geçerlidir.</p>
-          {pollError ? <p className="mt-2 text-sm text-danger" role="alert">{pollError} — otomatik yeniden deneniyor.</p> : null}
+          {inline && step?.progress && step.progress.total > 0 && view.stage === "asking_engines" ? (
+            <p className="tabular mt-2 text-sm text-text-secondary">AI yanıtları: {step.progress.done} / {step.progress.total}</p>
+          ) : null}
+          <p className="mt-3 text-xs text-muted">
+            {inline
+              ? "Hızlı analiz: sınırlı sayfa ve küçük örneklem. Analiz bu sekme açıkken adım adım ilerler; sekme kapatılırsa duraklar, bağlantıya geri döndüğünüzde kaldığı yerden devam eder."
+              : "Bu sayfayı kapatabilirsiniz; analiz arka planda sürer."}{" "}
+            Bağlantı {new Date(view.expiresAt).toLocaleDateString("tr-TR")} tarihine kadar geçerlidir.
+          </p>
+          {pollError || (paused && step?.error) ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
+              <span>{pollError ?? step?.error}{inline ? "" : " — otomatik yeniden deneniyor."}</span>
+              {inline && paused ? (
+                <Button
+                  onClick={() => {
+                    setPaused(false);
+                    setPollError(null);
+                    setStep(null);
+                  }}
+                >
+                  Devam et
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </Card>
       ) : null}
 
@@ -173,6 +232,7 @@ export function AuditResult({ token, initial, signedIn }: { token: string; initi
               <p><span className="text-muted">Örneklem:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
               <p><span className="text-muted">Tarama:</span> {r.crawl.pages} sayfa, {r.crawl.products} ürün, robots ile atlanan {r.crawl.skippedByRobots}</p>
               {r.unavailableEngines.length ? <p><span className="text-muted">Bağlı olmayan motorlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
+              {r.failedCalls?.length ? <p><span className="text-muted">Yanıt alınamayan çağrılar:</span> {r.failedCalls.map((f) => { const [e, c] = f.split(":"); return `${ENGINE[e!] ?? e} (${CALL_ERROR[c ?? ""] ?? c})`; }).join("; ")} — başarısız sorgular görünürlük sıfırı sayılmaz.</p> : null}
             </div>
           </Card>
 

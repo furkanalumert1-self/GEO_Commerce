@@ -22,7 +22,9 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
       signal: signal ?? AbortSignal.timeout(60_000),
     });
   } catch (e) {
-    throw new ProviderError(`Ağ hatası: ${(e as Error).message}`, true);
+    const name = (e as Error).name;
+    if (name === "TimeoutError" || name === "AbortError") throw new ProviderError("Sağlayıcı zaman aşımı", true, undefined, "timeout");
+    throw new ProviderError(`Ağ hatası: ${(e as Error).message}`, true, undefined, "network");
   }
   const latencyMs = Date.now() - started;
   if (res.status === 429 || res.status >= 500) {

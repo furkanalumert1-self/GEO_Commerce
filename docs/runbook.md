@@ -49,3 +49,13 @@ Shopify bağlantı akışı: Entegrasyon → mağaza adresi (`*.myshopify.com`) 
 
 ## Sağlayıcı testi (kuyruk/worker gerekmez)
 `PLATFORM_ADMIN_ALLOWLIST` içindeki e-posta ile gerçek girişten sonra `/admin` → "Sağlayıcı testi": her yapılandırılmış AI platformuna tek kısa çağrı yapar (model, gecikme, kaynak sayısı veya hata kodu) ve isteğe bağlı olarak yöneticiye test e-postası gönderir. Anahtar değerleri hiçbir yerde gösterilmez.
+
+## Redis'siz geçici mod (`JOB_EXECUTION_MODE=inline`)
+Redis ve ayrı worker olmadan Vercel + mevcut veritabanı üzerinde gerçek audit, ölçüm, tarama ve Fix with AI.
+
+- Ayar: `JOB_EXECUTION_MODE=inline` (REDIS_URL gerekmez). Varsayılan `queue`; queue modunda REDIS_URL yoksa iş başlatma açık `not_configured` hatası verir (iş sonsuza kadar "sırada" kalmaz), `/api/v1/health/ready` 503 döner.
+- Yürütme: işler `JobRecord`'a yazılır (outbox'a değil). Açık sayfa, iş bitene kadar `POST /api/v1/jobs/:id/advance` (girişli kullanıcı, işi başlatma yetkisiyle) veya `POST /api/v1/audits/:token/advance` (anonim audit, süreli bağlantı) ile sıradaki adımı ister. GET uç noktaları iş başlatmaz.
+- Sınırlar (`src/lib/queue/inline.ts`): adım bütçesi 20 sn (sonrasında yeni dış çağrı başlamaz), sağlayıcı çağrısı zaman aşımı 30 sn, adım rotaları `maxDuration = 60` (Vercel Hobby dahil tüm planlarda geçerli üst sınır). Audit taraması en fazla 10 sayfa ("Hızlı analiz": 5 soru × ChatGPT/Gemini), marka taraması tek adımda en fazla 25 sayfa (aşarsa "kısmi"), Fix with AI üretimi 50 sn zaman aşımı.
+- Güvenlik: aynı işe paralel/çift istek kilit (lease) ile engellenir; yarıda kalan adımın kilidi 2 dk sonra düşer ve iş kaldığı yerden devam eder. Tamamlanmış çağrılar tekrar edilmez; kesinti anında yanıtı alınmış ama kaydedilememiş tek çağrı yeniden yapılabilir (en fazla bir ek maliyet). Geçici hata/zaman aşımı/429 sınırlı yeniden denenir; anahtar/model hatası (auth, 400, 404) alan platform o işte tekrar çağrılmaz. Başarısız sorgu görünürlük sıfırı sayılmaz.
+- Sınırlamalar: analiz yalnız sayfa açıkken ilerler (sekme kapanırsa duraklar, geri gelince devam eder); zamanlanmış/otomatik ölçüm yoktur; örneklem küçüktür. Kalıcı çözüm: Redis + worker ile `JOB_EXECUTION_MODE=queue`. Inline modda açılmış işler queue moduna geçişte otomatik yeniden çalıştırılmaz.
+- Ödeme sağlayıcısı yokken uçtan uca test: `/admin` → Tenant'lar → "7 gün Fix with AI" (yalnız `PLATFORM_ADMIN_ALLOWLIST` yöneticisi; süreli, gerekçeli, audit log'lu; demo workspace'e verilmez).

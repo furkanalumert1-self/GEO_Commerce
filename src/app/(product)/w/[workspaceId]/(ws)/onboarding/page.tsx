@@ -10,6 +10,8 @@ import { db } from "@/lib/db";
 import { pageBrand, pageWorkspace } from "@/lib/page-access";
 import { engineAvailability } from "@/modules/monitoring/start";
 import { isUuid } from "@/modules/tenancy/access";
+import { JobStartButton } from "@/components/forms/job-start-button";
+import { executionMode } from "@/lib/queue";
 
 export const metadata: Metadata = { title: "Kurulum" };
 
@@ -78,7 +80,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
             <div className="flex flex-col gap-3">
               <p>{pages} sayfa ve {products} ürün keşfedildi. Hatalı veya hariç tutulacak URL&apos;leri katalogda düzeltin.</p>
               <div className="flex flex-wrap gap-2">
-                <ApiButton url={`${api}/crawls`} body={{ maxPages: 50 }} idempotent label="Siteyi tara" onSuccessMessage="Tarama kuyruğa alındı" />
+                <JobStartButton url={`${api}/crawls`} body={{ maxPages: 50 }} label="Siteyi tara" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />
                 <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog`}>Kataloğu incele</Link>
               </div>
             </div>
@@ -100,7 +102,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
               <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Niyet listesini düzenle</Link>
             </div>
           ) : null}
-          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce en az bir prompt ekleyin (adım 5).</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} />) : null}
+          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce en az bir prompt ekleyin (adım 5).</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
           {step === 7 ? (
             <div className="flex flex-col gap-2">
               <p>Gözlemlenen gelir için mağazanızı bağlayın veya CSV sipariş importu kullanın. Reklam erişimi olmaması GEO kullanımını engellemez.</p>

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { engineAvailability } from "@/modules/monitoring/start";
 import { fmtNumber } from "@/lib/format";
+import { executionMode } from "@/lib/queue";
 
 export const metadata: Metadata = { title: "Promptlar" };
 
@@ -101,7 +102,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
           <Card>
             <CardHeader title="Ölçüm planı" description="soru × platform × ülke/dil × tekrar. Kota yetmezse öncelikli sorular sırayla örneklenir." />
             <div className="p-4">
-              <RunPlanner url={`${api}/runs`} engines={engines.all} locale={`${access.brand.language}-${access.brand.country}`} />
+              <RunPlanner url={`${api}/runs`} engines={engines.all} locale={`${access.brand.language}-${access.brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />
             </div>
           </Card>
         </div>

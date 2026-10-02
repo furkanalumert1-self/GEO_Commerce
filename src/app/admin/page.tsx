@@ -6,6 +6,7 @@ import { config } from "@/lib/config";
 import { requireUser } from "@/lib/page-access";
 import { daysAgo, fmtDate } from "@/lib/format";
 import { ProviderCheck } from "@/components/forms/provider-check";
+import { ApiButton } from "@/components/forms/api-button";
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
@@ -16,7 +17,7 @@ export default async function AdminPage() {
   if (!user || !config().platformAdmins.includes(user.email.toLowerCase())) notFound();
   const since = daysAgo(30);
   const [tenants, dead, costs, inboxErrors] = await Promise.all([
-    db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }),
+    db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true, overrideExpiresAt: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }),
     db.jobRecord.findMany({ where: { status: "dead" }, orderBy: { updatedAt: "desc" }, take: 25, select: { id: true, type: true, deadReason: true, lastError: true, workspaceId: true, updatedAt: true } }),
     db.costLedger.groupBy({ by: ["provider", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } }),
     db.inboxEvent.count({ where: { error: { not: null } } }),
@@ -27,8 +28,8 @@ export default async function AdminPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader title="Tenant'lar" description="Kimlikler pseudonymous gösterilir" />
-          <TableWrap label="Tenantlar"><thead><tr><Th>Workspace</Th><Th>Paket</Th><Th numeric>Marka</Th><Th>Oluşturma</Th></tr></thead>
-            <tbody>{tenants.map((t) => <tr key={t.id}><Td className="font-mono text-xs">{t.id.slice(0, 8)}{t.isDemo ? " (demo)" : ""}</Td><Td>{t.subscription ? `${t.subscription.planKey} · ${t.subscription.status}` : "—"}</Td><Td numeric>{t._count.brands}</Td><Td className="text-muted">{fmtDate(t.createdAt)}</Td></tr>)}</tbody>
+          <TableWrap label="Tenantlar"><thead><tr><Th>Workspace</Th><Th>Paket</Th><Th numeric>Marka</Th><Th>Oluşturma</Th><Th>Test erişimi</Th></tr></thead>
+            <tbody>{tenants.map((t) => <tr key={t.id}><Td className="font-mono text-xs">{t.id.slice(0, 8)}{t.isDemo ? " (demo)" : ""}</Td><Td>{t.subscription ? `${t.subscription.planKey} · ${t.subscription.status}` : "—"}{t.subscription?.overrideExpiresAt && t.subscription.overrideExpiresAt > new Date() ? <span className="block text-xs text-warning">Test erişimi: {fmtDate(t.subscription.overrideExpiresAt)}</span> : null}</Td><Td numeric>{t._count.brands}</Td><Td className="text-muted">{fmtDate(t.createdAt)}</Td><Td>{!t.isDemo && t.subscription ? <ApiButton url={`/api/v1/admin/workspaces/${t.id}/override`} body={{ days: 7, reason: "Ödeme öncesi uçtan uca test (teşhis + Fix with AI)" }} label="7 gün Fix with AI" onSuccessMessage="Verildi" /> : "—"}</Td></tr>)}</tbody>
           </TableWrap>
         </Card>
         <Card>

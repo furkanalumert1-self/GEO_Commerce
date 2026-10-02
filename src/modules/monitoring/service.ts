@@ -50,8 +50,17 @@ export async function executeRun(
   runId: string,
   plan: RunPlan,
   adapters: Record<EngineKey, AiMonitorAdapter>,
-  opts: { maxAttempts?: number; now?: () => Date; onProgress?: (done: number, total: number) => Promise<void> | void; quotaOperationId?: string | null } = {},
-) {
+  opts: {
+    maxAttempts?: number;
+    now?: () => Date;
+    onProgress?: (done: number, total: number) => Promise<void> | void;
+    quotaOperationId?: string | null;
+    /** Adım modu: bu zamandan sonra yeni sağlayıcı çağrısı başlatılmaz; ilerleme kalıcıdır, sonraki adım kaldığı yerden devam eder. */
+    deadline?: number;
+    /** Tek sağlayıcı çağrısı için zaman aşımı (adım modunda istek süresine sığmak için). */
+    callTimeoutMs?: number;
+  } = {},
+): Promise<{ ok: number; failed: number; total: number; coverage: number | null; status: string; incomplete: boolean; done: number }> {
   const run = await db.monitoringRun.findUniqueOrThrow({ where: { id: runId } });
   const brand = await db.brand.findUniqueOrThrow({ where: { id: run.brandId } });
   const entities = await brandEntities(db, brand.id);
@@ -63,6 +72,12 @@ export async function executeRun(
   await db.monitoringRun.update({ where: { id: runId }, data: { status: "running", startedAt: run.startedAt ?? now() } });
 
   let done = 0;
+  const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
+  // Kalıcı hata (anahtar/model/yapılandırma) alan platform bu çalıştırmada tekrar çağrılmaz (adımlar arası da).
+  const PERMANENT = ["auth", "not_configured", "unsupported", "http_400", "http_404"];
+  const deadEngines = new Map<string, string>(
+    (await db.observation.findMany({ where: { runId, status: "failed", errorCode: { in: PERMANENT } }, distinct: ["engine"], select: { engine: true, errorCode: true } })).map((o) => [o.engine, o.errorCode!]),
+  );
   for (const v of versions) {
     for (const engine of plan.engines) {
       const adapter = adapters[engine];
@@ -96,11 +111,23 @@ export async function executeRun(
             }));
           let attempt = existing?.attempt ?? 0;
           let lastErr: ProviderError | null = null;
+          const deadCode = deadEngines.get(engine);
+          if (deadCode) {
+            await db.observation.update({ where: { id: obs.id }, data: { status: "failed", attempt: maxAttempts, errorCode: deadCode } });
+            done++;
+            await opts.onProgress?.(done, total);
+            continue;
+          }
           while (attempt < maxAttempts) {
+            if (overBudget()) {
+              // Süre bütçesi doldu: gözlem ara durumda kalır, sonraki adım aynı sampleKey ile devam eder.
+              await db.observation.update({ where: { id: obs.id }, data: { attempt } });
+              return { incomplete: true, done, total, ok: 0, failed: 0, coverage: null, status: "running" };
+            }
             attempt++;
             const attemptId = `${key}:${attempt}`;
             try {
-              const answer = await adapter.ask({ prompt: v.text, country: country ?? brand.country, language: language ?? brand.language });
+              const answer = await adapter.ask({ prompt: v.text, country: country ?? brand.country, language: language ?? brand.language, signal: opts.callTimeoutMs ? AbortSignal.timeout(opts.callTimeoutMs) : undefined });
               await db.costLedger.upsert({
                 where: { attemptId },
                 update: {},
@@ -155,7 +182,10 @@ export async function executeRun(
             }
           }
           if (lastErr) {
-            await db.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt, errorCode: lastErr.code } });
+            const permanent = PERMANENT.includes(lastErr.code);
+            if (permanent) deadEngines.set(engine, lastErr.code);
+            // Kalıcı/yeniden denenemez hata: deneme hakkı tükendi sayılır, sonraki adımlarda tekrar çağrılmaz.
+            await db.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt: lastErr.retryable ? attempt : maxAttempts, errorCode: lastErr.code } });
           }
           done++;
           await opts.onProgress?.(done, total);
@@ -179,7 +209,7 @@ export async function executeRun(
     });
   }
   await writeRunSnapshots(db, runId);
-  return { ok, failed, total, coverage, status };
+  return { ok, failed, total, coverage, status, incomplete: false, done: total };
 }
 
 /** Run bitiminde immutable MetricSnapshot (formül sürümüyle). */

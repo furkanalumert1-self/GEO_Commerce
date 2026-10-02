@@ -2,12 +2,29 @@ import { Queue } from "bullmq";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { config } from "@/lib/config";
 import { log } from "@/lib/observability/log";
+import { AppError } from "@/lib/http/errors";
 
 /**
  * İş kuyruğu: DB JobRecord + OutboxEvent (kaynak gerçeklik) → BullMQ.
  * Crash sonrası outbox relay yeniden enqueue eder; handler'lar operationId ile idempotenttir.
  * Uzun işler HTTP isteği içinde çalıştırılmaz.
+ *
+ * JOB_EXECUTION_MODE=inline (geçici, Redis'siz): JobRecord yine kaynak gerçekliktir; outbox'a yazılmaz ve
+ * iş, kimliği doğrulanmış "advance" istekleriyle sınırlı adımlar halinde yürütülür (src/workers/runner.ts).
  */
+export type ExecutionMode = "queue" | "inline";
+export const executionMode = (): ExecutionMode => config().JOB_EXECUTION_MODE;
+
+/**
+ * İş başlatmadan önce çağrılır: queue modunda Redis yoksa iş sonsuza kadar "sırada" kalacağı için açık
+ * yapılandırma hatası verilir. (Testler JobRecord'u doğrudan runJob ile yürütür; orada kontrol yapılmaz.)
+ */
+export function assertJobsRunnable() {
+  const cfg = config();
+  if (cfg.JOB_EXECUTION_MODE === "queue" && !cfg.REDIS_URL && cfg.NODE_ENV !== "test") {
+    throw new AppError("not_configured", "İş kuyruğu yapılandırılmamış: JOB_EXECUTION_MODE=queue için REDIS_URL ve worker gerekir. Redis'siz geçici dağıtımda JOB_EXECUTION_MODE=inline kullanın.");
+  }
+}
 export const QUEUE_NAME = "geo-jobs";
 
 export type JobType =
@@ -41,6 +58,7 @@ export interface EnqueueInput {
 }
 
 export function redisConnection() {
+  if (executionMode() === "inline") return null;
   const url = config().REDIS_URL;
   if (!url) return null;
   const u = new URL(url);
@@ -65,6 +83,8 @@ export function getQueue(): Queue | null {
 
 /** JobRecord oluşturur (operationId ile dedupe) ve outbox'a yazar; ardından en iyi çabayla kuyruğa iter. */
 export async function enqueue(db: PrismaClient, input: EnqueueInput) {
+  assertJobsRunnable();
+  const inline = executionMode() === "inline";
   const record = await db.$transaction(async (tx) => {
     const existing = await tx.jobRecord.findUnique({ where: { operationId: input.operationId } });
     if (existing) return { job: existing, created: false };
@@ -78,9 +98,11 @@ export async function enqueue(db: PrismaClient, input: EnqueueInput) {
         configVersion: input.configVersion,
         payloadRef: input.payload as object,
         maxAttempts: input.maxAttempts ?? 5,
+        // Inline işler sonradan queue moduna geçilse de outbox üzerinden toplu yeniden çalıştırılmaz.
+        cursor: inline ? { execution: "inline" } : undefined,
       },
     });
-    await tx.outboxEvent.create({ data: { workspaceId: input.workspaceId ?? null, eventType: "job.enqueue", payload: { jobId: job.id } } });
+    if (!inline) await tx.outboxEvent.create({ data: { workspaceId: input.workspaceId ?? null, eventType: "job.enqueue", payload: { jobId: job.id } } });
     return { job, created: true };
   });
   if (record.created) await relayOutbox(db, 20).catch((e) => log.warn("queue.relay_deferred", { error: e }));
@@ -116,6 +138,8 @@ export async function jobStatus(db: PrismaClient, jobId: string, workspaceId: st
     type: job.type,
     status: job.status,
     progress: { done: job.progressDone, total: job.progressTotal },
+    execution: (job.cursor as { execution?: string } | null)?.execution === "inline" ? "inline" : "queue",
+    resumable: job.status === "queued" || job.status === "failed" || (job.status === "running" && (!job.lockedUntil || job.lockedUntil < new Date())),
     attempts: job.attempts,
     error: job.status === "failed" || job.status === "dead" ? (job.lastError ?? "Bilinmeyen hata") : null,
     startedAt: job.startedAt,

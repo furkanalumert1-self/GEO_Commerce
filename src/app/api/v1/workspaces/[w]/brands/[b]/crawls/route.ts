@@ -2,7 +2,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { AppError } from "@/lib/http/errors";
 import { brandRoute, json, readJson, withIdempotency } from "@/lib/http/api";
-import { enqueue } from "@/lib/queue";
+import { assertJobsRunnable, enqueue } from "@/lib/queue";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
 import { ensureBucket, periodKey, reserve } from "@/modules/billing/quota";
 
@@ -11,6 +11,7 @@ const body = z.object({ maxPages: z.number().int().min(1).max(1000).default(50) 
 export const POST = brandRoute(async ({ req, access, requestId }) => {
   assertCan(access, "brand.manage");
   assertCanRunPaidJob(access);
+  assertJobsRunnable();
   const input = await readJson(req, body);
   const key = req.headers.get("idempotency-key") ?? "";
   return withIdempotency(req, access.workspaceId, `crawls:${access.brandId}`, input, requestId, async () => {

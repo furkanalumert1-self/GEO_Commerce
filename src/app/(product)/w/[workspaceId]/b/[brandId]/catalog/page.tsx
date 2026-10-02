@@ -7,6 +7,8 @@ import { CsvImportForm } from "@/components/forms/csv-import";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
+import { JobStartButton } from "@/components/forms/job-start-button";
+import { executionMode } from "@/lib/queue";
 
 export const metadata: Metadata = { title: "Katalog" };
 
@@ -47,7 +49,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
       <PageHeader
         title="Katalog"
         description={`Ürünler, kategoriler ve taranan URL'ler. Son tarama: ${lastCrawl ? fmtDate(lastCrawl.finishedAt ?? lastCrawl.createdAt, access.brand.timezone, "tr-TR", true) : "henüz yok"}.`}
-        action={<ApiButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} idempotent label="Siteyi yeniden tara" onSuccessMessage="Tarama kuyruğa alındı" />}
+        action={<JobStartButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} label="Siteyi yeniden tara" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />}
       />
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         {integrations.map((i) => (

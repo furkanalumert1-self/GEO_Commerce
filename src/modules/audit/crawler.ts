@@ -40,6 +40,8 @@ export interface CrawlOptions {
   fetcher?: Fetcher;
   onProgress?: (done: number, total: number) => void | Promise<void>;
   previous?: Map<string, { etag: string | null; contentHash: string }>;
+  /** Süre bütçesi (epoch ms): aşılınca yeni istek başlatılmaz, sonuç `truncated` işaretlenir. */
+  deadline?: number;
 }
 
 export function normalizeDomain(input: string): string {
@@ -76,7 +78,8 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   const queue: Array<{ url: string; depth: number }> = [{ url: `${origin}/`, depth: 0 }];
   // Sitemap (index paginasyonu dahil, sınırlı)
   const seenSitemaps = new Set<string>();
-  while (sitemapUrls.length && seenSitemaps.size < 5) {
+  const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
+  while (sitemapUrls.length && seenSitemaps.size < 5 && !overBudget()) {
     const sm = sitemapUrls.shift()!;
     if (seenSitemaps.has(sm)) continue;
     seenSitemaps.add(sm);
@@ -95,6 +98,10 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   const visited = new Set<string>();
   const canonicals = new Set<string>();
   while (queue.length && result.pages.length < opts.maxPages) {
+    if (overBudget()) {
+      result.truncated = true;
+      break;
+    }
     const { url, depth } = queue.shift()!;
     let u: URL;
     try {

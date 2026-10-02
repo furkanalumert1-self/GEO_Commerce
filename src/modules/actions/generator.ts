@@ -81,7 +81,7 @@ export function templateDraft(input: GenerationInput): ActionContent {
 }
 
 /** Canlı üretim: OpenAI Responses + JSON şema zorunlu çıktı. Model adı config'ten. */
-export async function generateDraft(input: GenerationInput, opts: { demo?: boolean } = {}): Promise<ActionContent> {
+export async function generateDraft(input: GenerationInput, opts: { demo?: boolean; timeoutMs?: number } = {}): Promise<ActionContent> {
   const status = generationStatus(opts);
   if (status === "demo") return templateDraft(input);
   if (status === "not_configured") throw new AppError("not_configured", "İçerik üretimi için GENERATION_MODEL ve OPENAI_API_KEY gerekli");
@@ -106,8 +106,13 @@ export async function generateDraft(input: GenerationInput, opts: { demo?: boole
       input: user,
       text: { format: { type: "json_schema", name: "action_content", schema: z.toJSONSchema(actionContentSchema), strict: false } },
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 120_000),
+  }).catch((e: Error) => {
+    if (e.name === "TimeoutError" || e.name === "AbortError") throw new AppError("dependency_unavailable", "İçerik üretimi zaman aşımına uğradı; tekrar deneyin", { retryable: true });
+    throw new AppError("dependency_unavailable", "Üretim sağlayıcısına ulaşılamadı", { retryable: true });
   });
+  if (res.status === 401 || res.status === 403) throw new AppError("not_configured", "Üretim sağlayıcısı API anahtarını reddetti (OPENAI_API_KEY)");
+  if (res.status === 404) throw new AppError("not_configured", "GENERATION_MODEL bulunamadı veya bu anahtarla erişilemiyor");
   if (!res.ok) throw new AppError("dependency_unavailable", `Üretim sağlayıcısı hata döndürdü (${res.status})`, { retryable: res.status >= 500 || res.status === 429 });
   const json = (await res.json()) as { output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }> };
   const text = json.output?.flatMap((o) => o.content ?? []).find((c) => c.type === "output_text")?.text;

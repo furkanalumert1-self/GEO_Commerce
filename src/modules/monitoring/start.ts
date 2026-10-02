@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import { AppError } from "@/lib/http/errors";
-import { enqueue } from "@/lib/queue";
+import { assertJobsRunnable, enqueue } from "@/lib/queue";
 import { getAiAdapters } from "@/adapters/ai/providers";
 import type { EngineKey } from "@/adapters/ai/types";
 import { allowedEngines } from "@/modules/billing/plans";
@@ -52,6 +52,7 @@ export async function startMonitoringRun(db: PrismaClient, access: BrandAccess, 
   const preview = { unitsRequested: est.unitsPerRun, unitsPlanned: unitsFor(plan), available, fits: est.fits, sampledFraction: est.sampledFraction, rejectedEngines: rejected, promptCount: selected.length };
   if (input.previewOnly) return { preview, run: null, jobId: null };
   assertCanRunPaidJob(access);
+  assertJobsRunnable();
   if (unitsFor(plan) === 0) throw new AppError("quota_exceeded", "Bu dönem için answer unit kotası doldu", { limit: bucket.limit, used: bucket.used, resetAt: sub?.currentPeriodEnd.toISOString() });
   const operationId = `run:${access.workspaceId}:${input.idempotencyKey}`;
   await reserve(db, { workspaceId: access.workspaceId, metric: "answer_units", period, limit: access.entitlements.answerUnits, amount: unitsFor(plan), operationId, ttlMs: 2 * 3600_000 });

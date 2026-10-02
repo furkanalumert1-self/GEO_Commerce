@@ -4,7 +4,8 @@ import { hasFeature } from "@/modules/billing/plans";
 import { commit, ensureBucket, periodKey, release, reserve } from "@/modules/billing/quota";
 import type { BrandAccess } from "@/modules/tenancy/access";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
-import { generateDraft, type GenerationInput } from "./generator";
+import { generateDraft, generationStatus, type GenerationInput } from "./generator";
+import { executionMode } from "@/lib/queue";
 import { blockingIssues, canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
 import { minimumPlanFor } from "@/modules/billing/plans";
 import { fixturesAllowed } from "@/lib/demo";
@@ -30,6 +31,10 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
   assertCanRunPaidJob(access);
   const opp = await db.opportunity.findFirst({ where: { id: input.opportunityId, brandId: access.brandId, workspaceId: access.workspaceId }, include: { cluster: true, evidence: true } });
   if (!opp) throw notFound("Fırsat");
+  // Üretim yapılandırılmamışsa kota ayırmadan önce açık hata (gerçek workspace'te şablon/mock yok).
+  if (generationStatus({ demo: fixturesAllowed(access) }) === "not_configured") {
+    throw new AppError("not_configured", "İçerik üretimi için OPENAI_API_KEY ve GENERATION_MODEL gerekli");
+  }
   const period = await currentPeriod(db, access.workspaceId);
   await ensureBucket(db, access.workspaceId, "fix_units", period, access.entitlements.fixUnits);
   await reserve(db, { workspaceId: access.workspaceId, metric: "fix_units", period, limit: access.entitlements.fixUnits, amount: 1, operationId: input.operationId });
@@ -49,7 +54,8 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       catalog: catalog.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null })),
       allowedClaims: [],
     };
-    const content = await generateDraft(genInput, { demo: fixturesAllowed(access) });
+    // Redis'siz (inline) dağıtımda istek süresi sınırına (60 sn) sığmak için daha kısa zaman aşımı.
+    const content = await generateDraft(genInput, { demo: fixturesAllowed(access), timeoutMs: executionMode() === "inline" ? 50_000 : undefined });
     const action = await db.$transaction(async (tx) => {
       const a = await tx.action.create({
         data: { workspaceId: access.workspaceId, brandId: access.brandId, opportunityId: opp.id, type: input.type, title: content.title ?? opp.title, targetUrl: genInput.targetUrl, status: "draft", version: 1 },

@@ -139,8 +139,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
             body={{ engines: ["chatgpt", "gemini", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1 }}
             idempotent
             label="Ölçüm başlat"
-            pendingLabel="Kuyruğa alınıyor…"
-            onSuccessMessage="Ölçüm kuyruğa alındı"
+            pendingLabel="Başlatılıyor…"
+            redirectTo={`${base}/runs/{runId}`}
           />
         }
       />

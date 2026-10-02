@@ -20,6 +20,11 @@ export const envSchema = z.object({
   APP_URL: z.string().url().default("http://localhost:3000"),
   DATABASE_URL: z.string().default(""),
   REDIS_URL: optional,
+  /**
+   * queue: JobRecord → Redis/BullMQ → ayrı worker. inline: Redis/worker yok; işler kimliği doğrulanmış
+   * isteklerle sınırlı adımlar halinde sunucuda yürütülür (geçici dağıtım). Sessiz geri dönüş yoktur.
+   */
+  JOB_EXECUTION_MODE: z.enum(["queue", "inline"]).default("queue"),
   AUTH_SECRET: optional,
   AUTH_GOOGLE_ID: optional,
   AUTH_GOOGLE_SECRET: optional,
@@ -115,7 +120,8 @@ export function featureStatus(cfg: AppConfig = config()) {
     googleOAuth: Boolean(cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET),
     storage: Boolean(cfg.STORAGE_BUCKET && cfg.STORAGE_ACCESS_KEY_ID),
     billing: Boolean(cfg.STRIPE_SECRET_KEY && cfg.STRIPE_WEBHOOK_SECRET),
-    queue: Boolean(cfg.REDIS_URL),
+    queue: cfg.JOB_EXECUTION_MODE === "inline" || Boolean(cfg.REDIS_URL),
+    jobExecutionMode: cfg.JOB_EXECUTION_MODE,
     openai: Boolean(cfg.OPENAI_API_KEY && cfg.OPENAI_MONITOR_MODEL),
     gemini: Boolean(cfg.GOOGLE_AI_API_KEY && cfg.GOOGLE_MONITOR_MODEL),
     perplexity: Boolean(cfg.PERPLEXITY_API_KEY && cfg.PERPLEXITY_MONITOR_MODEL),

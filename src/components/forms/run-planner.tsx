@@ -15,7 +15,7 @@ interface EngineInfo {
 const LABEL: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", perplexity: "Perplexity API", google_ai_overviews: "Google AI Overviews", copilot: "Microsoft Copilot" };
 
 /** Maliyet önizleme → onay → başlat. Kullanılamayan motorlar gerekçesiyle devre dışı. */
-export function RunPlanner({ url, engines, locale }: { url: string; engines: EngineInfo[]; locale: string }) {
+export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false }: { url: string; engines: EngineInfo[]; locale: string; runPagePrefix?: string; inline?: boolean }) {
   const router = useRouter();
   const usable = engines.filter((e) => (e.status === "ready" || e.status === "demo") && e.inPlan).map((e) => e.engine);
   const [selected, setSelected] = useState<string[]>(usable);
@@ -37,7 +37,10 @@ export function RunPlanner({ url, engines, locale }: { url: string; engines: Eng
     setPending(false);
     if (!res.ok) return setError(`${body?.error?.message ?? "İşlem başarısız"}${body?.requestId ? ` · istek no: ${body.requestId}` : ""}`);
     if (doPreview) setPreview(body.data);
-    else {
+    else if (inline && runPagePrefix && body.data.runId) {
+      // Redis'siz modda ölçüm, çalıştırma sayfası açıkken adım adım ilerler.
+      router.push(`${runPagePrefix}/${body.data.runId}`);
+    } else {
       setQueued(`Ölçüm kuyruğa alındı (${body.data.preview.unitsPlanned} yanıt birimi ayrıldı).`);
       setPreview(null);
       router.refresh();

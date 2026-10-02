@@ -37,7 +37,7 @@ Değerleri sohbete/repo'ya yazmayın; Vercel (web) ve worker ortamına girin. Pr
 
 | Amaç | Değişkenler | Panelde yapılacak |
 |---|---|---|
-| Gerçek giriş (e-posta bağlantısı) | `SMTP_URL`, `EMAIL_FROM` (ör. `Callypso AI Growth <no-reply@alanadiniz>`) veya `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` | Gönderen alan adını doğrulayın (SPF/DKIM). |
+| Gerçek giriş (e-posta bağlantısı) | `EMAIL_PROVIDER=resend` + `RESEND_API_KEY` + `EMAIL_FROM` (ör. `Callypso AI Growth <no-reply@alanadiniz>`), veya `SMTP_URL` | Resend'de gönderen alan adını doğrulayın (SPF/DKIM); doğrulanmamış alan adıyla yalnız Resend hesap sahibine gönderim yapılabilir. |
 | Google ile giriş | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google Cloud OAuth istemcisi; yetkili yönlendirme: `{APP_URL}/api/auth/callback/google`; uygulama adı **Callypso AI Growth**. |
 | Entegrasyon sırları | `SECRETS_ENCRYPTION_KEY` (32 bayt), `SECRETS_KEY_ID` (ör. `k1`) | Canlıya çıktıktan sonra anahtar değiştirilmez (rotasyon prosedürü yukarıda). |
 | Shopify | `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` | Shopify Partner/Dev Dashboard'da uygulama: App URL `{APP_URL}`, Redirect URL `{APP_URL}/api/v1/integrations/shopify/callback`, kapsamlar `read_products, read_inventory, read_orders`, uygulama adı **Callypso AI Growth**. Public dağıtımda zorunlu GDPR webhook'ları Partner panelinde tanımlanmalı. Sipariş webhook'ları bağlantıda otomatik kaydedilir: `{APP_URL}/api/v1/webhooks/shopify/{integrationId}`. |
@@ -46,3 +46,6 @@ Değerleri sohbete/repo'ya yazmayın; Vercel (web) ve worker ortamına girin. Pr
 | Kuyruk/worker | `REDIS_URL` + worker süreci | Audit, ölçüm ve mağaza senkronizasyonu worker olmadan kuyrukta bekler. |
 
 Shopify bağlantı akışı: Entegrasyon → mağaza adresi (`*.myshopify.com`) → Shopify onayı → callback'te HMAC + tek kullanımlık state + oturum kullanıcısı doğrulanır → token şifreli saklanır → mağaza API'si ve kapsamlar kontrol edilir → yalnız bundan sonra **Bağlı** → katalog/sipariş senkronizasyonu kuyruğa alınır. İçerik yayınlama (yazma kapsamı) istenmez; onaylı içerik dışa aktarılıp manuel uygulanır ve "kullanıcı bildirimi" olarak ölçülür.
+
+## Sağlayıcı testi (kuyruk/worker gerekmez)
+`PLATFORM_ADMIN_ALLOWLIST` içindeki e-posta ile gerçek girişten sonra `/admin` → "Sağlayıcı testi": her yapılandırılmış AI platformuna tek kısa çağrı yapar (model, gecikme, kaynak sayısı veya hata kodu) ve isteğe bağlı olarak yöneticiye test e-postası gönderir. Anahtar değerleri hiçbir yerde gösterilmez.

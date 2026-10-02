@@ -25,7 +25,7 @@ export function LoginForm({ providers, next }: { providers: { email: boolean; go
       return;
     }
     setPending(true);
-    await signIn("nodemailer", { email, callbackUrl: next });
+    await signIn("email", { email, callbackUrl: next });
   };
 
   const none = !providers.email && !providers.google && !providers.demo;
@@ -33,7 +33,7 @@ export function LoginForm({ providers, next }: { providers: { email: boolean; go
     <div className="flex flex-col gap-4">
       {none ? (
         <div role="alert" className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
-          Giriş sağlayıcısı yapılandırılmamış (not_configured). SMTP_URL veya AUTH_GOOGLE_ID/SECRET ayarlayın.
+          Giriş sağlayıcısı yapılandırılmamış (not_configured). RESEND_API_KEY (EMAIL_PROVIDER=resend), SMTP_URL veya AUTH_GOOGLE_ID/SECRET ayarlayın.
         </div>
       ) : null}
       {providers.email ? (
@@ -49,7 +49,7 @@ export function LoginForm({ providers, next }: { providers: { email: boolean; go
       ) : null}
       {!providers.email && !providers.google && providers.demo ? (
         <div role="status" className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm">
-          Gerçek hesap girişi henüz yapılandırılmadı (e-posta bağlantısı için SMTP_URL veya Google OAuth gerekli). Aşağıdaki demo hesapları yalnız örnek veri içerir.
+          Gerçek hesap girişi henüz yapılandırılmadı (e-posta bağlantısı için RESEND_API_KEY veya SMTP_URL, ya da Google OAuth gerekli). Aşağıdaki demo hesapları yalnız örnek veri içerir.
         </div>
       ) : null}
       {providers.demo ? (

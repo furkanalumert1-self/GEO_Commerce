@@ -7,9 +7,10 @@ export const metadata: Metadata = { title: "Giriş", robots: { index: false } };
 
 const ERROR_TEXT: Record<string, string> = {
   CredentialsSignin: "Demo kullanıcısı bulunamadı. Veritabanına demo verisi yüklenmemiş olabilir (DB setup → demo seed).",
-  Configuration: "Sunucu tarafında bir yapılandırma veya veritabanı hatası oluştu. Yönetici: Vercel Logs'ta \"auth.\" ile başlayan satıra bakın.",
+  Configuration: "Sunucu tarafında bir yapılandırma hatası oluştu (veritabanı veya giriş e-postası gönderimi). Yönetici: Vercel Logs'ta \"[auth]\" içeren satıra bakın.",
   Verification: "Giriş bağlantısının süresi dolmuş veya daha önce kullanılmış. Yeni bir bağlantı isteyin.",
   AccessDenied: "Bu hesapla giriş izni yok.",
+  EmailSignin: "Giriş e-postası gönderilemedi. Yönetici: RESEND_API_KEY ve EMAIL_FROM (Resend'de doğrulanmış alan adı) ayarlarını kontrol edin.",
 };
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {

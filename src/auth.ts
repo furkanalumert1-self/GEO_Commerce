@@ -2,12 +2,14 @@ import NextAuth, { type NextAuthConfig } from "next-auth";
 import type { Provider } from "next-auth/providers";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
+import Resend from "next-auth/providers/resend";
+import { getEmailAdapter } from "@/adapters/email";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { log } from "@/lib/observability/log";
-import { defaultEmailFrom } from "@/lib/brand";
+import { APP_NAME, defaultEmailFrom } from "@/lib/brand";
 
 /**
  * Auth.js: e-posta bağlantısı + Google OAuth. Kendi parola kripto sistemi yok.
@@ -16,8 +18,23 @@ import { defaultEmailFrom } from "@/lib/brand";
 const cfg = config();
 
 const providers: Provider[] = [];
-if (cfg.SMTP_URL) {
-  providers.push(Nodemailer({ server: cfg.SMTP_URL, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60 }));
+/** Giriş bağlantısı e-postası (Türkçe); gönderim ortak e-posta adapter'ı ile (Resend veya SMTP). */
+async function sendLoginLink({ identifier, url }: { identifier: string; url: string }) {
+  const host = new URL(url).host;
+  await getEmailAdapter().send({
+    to: identifier,
+    subject: `${APP_NAME} giriş bağlantınız`,
+    text: `${APP_NAME} hesabınıza giriş yapmak için bağlantı (15 dakika geçerli):\n${url}\n\nBu isteği siz yapmadıysanız e-postayı yok sayın. (${host})`,
+    html: `<p>${APP_NAME} hesabınıza giriş yapmak için aşağıdaki bağlantıyı kullanın (15 dakika geçerli):</p><p><a href="${url}">Giriş yap</a></p><p style="color:#596057;font-size:13px">Bu isteği siz yapmadıysanız e-postayı yok sayın.</p>`,
+  });
+}
+
+// E-posta ile giriş: EMAIL_PROVIDER=resend + RESEND_API_KEY veya SMTP_URL. Sağlayıcı kimliği her iki durumda "email".
+const resendLogin = cfg.EMAIL_PROVIDER === "resend" && Boolean(cfg.RESEND_API_KEY);
+if (resendLogin) {
+  providers.push(Resend({ id: "email", apiKey: cfg.RESEND_API_KEY, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
+} else if (cfg.SMTP_URL) {
+  providers.push(Nodemailer({ id: "email", server: cfg.SMTP_URL, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
 }
 if (cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET) {
   providers.push(Google({ clientId: cfg.AUTH_GOOGLE_ID, clientSecret: cfg.AUTH_GOOGLE_SECRET }));
@@ -80,7 +97,7 @@ export const authConfig: NextAuthConfig = {
 export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
 
 export const authProviders = {
-  email: Boolean(cfg.SMTP_URL),
+  email: resendLogin || Boolean(cfg.SMTP_URL),
   google: Boolean(cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET),
   demo: demoLoginEnabled,
 };

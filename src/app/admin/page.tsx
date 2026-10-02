@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { requireUser } from "@/lib/page-access";
 import { daysAgo, fmtDate } from "@/lib/format";
+import { ProviderCheck } from "@/components/forms/provider-check";
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
@@ -37,6 +38,10 @@ export default async function AdminPage() {
           </TableWrap>
         </Card>
       </div>
+      <Card className="mt-6">
+        <CardHeader title="Sağlayıcı testi" description="AI anahtarlarını ve e-posta gönderimini kuyruk/worker olmadan doğrular." />
+        <ProviderCheck />
+      </Card>
       <Card className="mt-6">
         <CardHeader title="DLQ (dead jobs)" description="Yeniden oynatma: POST /api/v1/admin/jobs/:id/retry (gerekçe zorunlu)" />
         <TableWrap label="DLQ"><thead><tr><Th>Job</Th><Th>Tür</Th><Th>Neden</Th><Th>Zaman</Th></tr></thead>

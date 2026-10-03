@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Giriş", robots: { index: false } };
 
 const ERROR_TEXT: Record<string, string> = {
   CredentialsSignin: "Demo kullanıcısı bulunamadı. Veritabanına demo verisi yüklenmemiş olabilir (DB setup → demo seed).",
-  Configuration: "Sunucu tarafında bir yapılandırma hatası oluştu (veritabanı veya giriş e-postası gönderimi). Yönetici: Vercel Logs'ta \"[auth]\" içeren satıra bakın.",
+  Configuration: "Giriş e-postası gönderilemedi veya sunucu yapılandırması eksik. En sık sebep: EMAIL_FROM alan adının Resend'de doğrulanmamış olması (doğrulanana kadar yalnız Resend hesabınızın kendi adresine gönderim yapılabilir). Yönetici: Vercel Logs'ta \"email.send_failed\" veya \"[auth]\" satırına bakın.",
   Verification: "Giriş bağlantısının süresi dolmuş veya daha önce kullanılmış. Yeni bir bağlantı isteyin.",
   AccessDenied: "Bu hesapla giriş izni yok.",
   EmailSignin: "Giriş e-postası gönderilemedi. Yönetici: RESEND_API_KEY ve EMAIL_FROM (Resend'de doğrulanmış alan adı) ayarlarını kontrol edin.",

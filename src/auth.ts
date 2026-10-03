@@ -3,7 +3,7 @@ import type { Provider } from "next-auth/providers";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
 import Resend from "next-auth/providers/resend";
-import { getEmailAdapter } from "@/adapters/email";
+import { getEmailAdapter, normalizeFrom } from "@/adapters/email";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { db } from "@/lib/db";
@@ -21,20 +21,26 @@ const providers: Provider[] = [];
 /** Giriş bağlantısı e-postası (Türkçe); gönderim ortak e-posta adapter'ı ile (Resend veya SMTP). */
 async function sendLoginLink({ identifier, url }: { identifier: string; url: string }) {
   const host = new URL(url).host;
-  await getEmailAdapter().send({
+  try {
+    await getEmailAdapter().send({
     to: identifier,
     subject: `${APP_NAME} giriş bağlantınız`,
     text: `${APP_NAME} hesabınıza giriş yapmak için bağlantı (15 dakika geçerli):\n${url}\n\nBu isteği siz yapmadıysanız e-postayı yok sayın. (${host})`,
     html: `<p>${APP_NAME} hesabınıza giriş yapmak için aşağıdaki bağlantıyı kullanın (15 dakika geçerli):</p><p><a href="${url}">Giriş yap</a></p><p style="color:#596057;font-size:13px">Bu isteği siz yapmadıysanız e-postayı yok sayın.</p>`,
-  });
+    });
+  } catch (e) {
+    // Auth.js istemciye yalnız "Configuration" döner; gerçek sebep (gizli bilgi olmadan) burada loglanır.
+    log.error("[auth] email.send_failed", { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
 }
 
 // E-posta ile giriş: EMAIL_PROVIDER=resend + RESEND_API_KEY veya SMTP_URL. Sağlayıcı kimliği her iki durumda "email".
 const resendLogin = cfg.EMAIL_PROVIDER === "resend" && Boolean(cfg.RESEND_API_KEY);
 if (resendLogin) {
-  providers.push(Resend({ id: "email", apiKey: cfg.RESEND_API_KEY, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
+  providers.push(Resend({ id: "email", apiKey: cfg.RESEND_API_KEY, from: normalizeFrom(cfg.EMAIL_FROM) ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
 } else if (cfg.SMTP_URL) {
-  providers.push(Nodemailer({ id: "email", server: cfg.SMTP_URL, from: cfg.EMAIL_FROM ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
+  providers.push(Nodemailer({ id: "email", server: cfg.SMTP_URL, from: normalizeFrom(cfg.EMAIL_FROM) ?? defaultEmailFrom, maxAge: 15 * 60, sendVerificationRequest: sendLoginLink }));
 }
 if (cfg.AUTH_GOOGLE_ID && cfg.AUTH_GOOGLE_SECRET) {
   providers.push(Google({ clientId: cfg.AUTH_GOOGLE_ID, clientSecret: cfg.AUTH_GOOGLE_SECRET }));

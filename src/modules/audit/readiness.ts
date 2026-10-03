@@ -27,12 +27,34 @@ function score(checks: ReadinessCheck[]): number | null {
   return Math.round((measurable.filter((c) => c.status === "pass").length / measurable.length) * 100);
 }
 
+const RETURN_RE = /(iade|degisim|değişim|cayma|return|refund)/;
+const PRIVACY_RE = /(gizlilik|kvkk|kisisel-veri|kişisel-veri|privacy)/;
+const CONTACT_RE = /(iletisim|iletişim|i̇letişim|contact)/;
+
 export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
   const pages = crawl.pages;
   const home = pages.find((p) => p.pageType === "home") ?? pages[0];
   const productPages = pages.filter((p) => p.pageType === "product");
   const products = pages.flatMap((p) => p.facts.products);
-  const hasPolicy = (re: RegExp) => pages.some((p) => re.test(p.url.toLowerCase()));
+  // Politika/iletişim sayfaları genellikle taranmaz (düşük öncelik); sayfa bağlantılarında da aranır.
+  const hostOf = (u: string) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+  const siteHost = home ? hostOf(home.url) : "";
+  const knownUrls = [...new Set(pages.flatMap((p) => [p.url, ...p.facts.links]))]
+    .filter((u) => hostOf(u) === siteHost)
+    .map((u) => {
+      try {
+        return decodeURIComponent(new URL(u).pathname).toLowerCase();
+      } catch {
+        return u.toLowerCase();
+      }
+    });
+  const hasPolicy = (re: RegExp) => knownUrls.some((u) => re.test(u));
   const allTypes = new Set(pages.flatMap((p) => p.facts.schemaTypes));
   const trackers = new Set(pages.flatMap((p) => p.facts.trackers));
   const noindexCount = pages.filter((p) => p.facts.robotsNoindex).length;
@@ -92,16 +114,16 @@ export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
       id: "policy_pages",
       group: "geo",
       label: "İade / kargo / gizlilik sayfaları",
-      status: hasPolicy(/(iade|return|refund)/) && hasPolicy(/(gizlilik|privacy|kvkk)/) ? "pass" : "not_detected",
-      detail: "Politika sayfaları bağlantılarda aranır; bulunamaması olmadığı anlamına gelmez",
+      status: hasPolicy(RETURN_RE) && hasPolicy(PRIVACY_RE) ? "pass" : "not_detected",
+      detail: hasPolicy(RETURN_RE) && hasPolicy(PRIVACY_RE) ? "İade ve gizlilik/KVKK sayfası bağlantısı bulundu" : "Politika sayfası bağlantısı bulunamadı; olmadığı anlamına gelmez",
       priority: "medium",
     },
     {
       id: "contact_page",
       group: "geo",
       label: "İletişim bilgisi",
-      status: hasPolicy(/(iletisim|contact)/) ? "pass" : "not_detected",
-      detail: hasPolicy(/(iletisim|contact)/) ? "İletişim sayfası bulundu" : "İletişim sayfası tespit edilemedi",
+      status: hasPolicy(CONTACT_RE) ? "pass" : "not_detected",
+      detail: hasPolicy(CONTACT_RE) ? "İletişim sayfası bulundu" : "İletişim sayfası tespit edilemedi",
       priority: "low",
     },
     {
@@ -132,7 +154,7 @@ export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
       id: "ads_policies",
       group: "ads",
       label: "İade/gizlilik politikaları erişilebilir",
-      status: hasPolicy(/(iade|return|refund)/) && hasPolicy(/(gizlilik|privacy|kvkk)/) ? "pass" : "not_detected",
+      status: hasPolicy(RETURN_RE) && hasPolicy(PRIVACY_RE) ? "pass" : "not_detected",
       detail: "Reklam platformları genellikle görünür politika sayfası ister",
       priority: "medium",
     },

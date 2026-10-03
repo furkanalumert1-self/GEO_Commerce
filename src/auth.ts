@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 import { log } from "@/lib/observability/log";
 import { APP_NAME, defaultEmailFrom } from "@/lib/brand";
+import { canonicalLoginUrl } from "@/lib/auth-url";
 
 /**
  * Auth.js: e-posta bağlantısı + Google OAuth. Kendi parola kripto sistemi yok.
@@ -19,7 +20,8 @@ const cfg = config();
 
 const providers: Provider[] = [];
 /** Giriş bağlantısı e-postası (Türkçe); gönderim ortak e-posta adapter'ı ile (Resend veya SMTP). */
-async function sendLoginLink({ identifier, url }: { identifier: string; url: string }) {
+async function sendLoginLink({ identifier, url: rawUrl }: { identifier: string; url: string }) {
+  const url = canonicalLoginUrl(rawUrl, cfg.APP_URL);
   const host = new URL(url).host;
   try {
     await getEmailAdapter().send({

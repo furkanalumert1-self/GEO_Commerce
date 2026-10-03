@@ -8,7 +8,10 @@ const globalForPrisma = globalThis as unknown as { __prisma?: PrismaClient };
 
 export function createPrismaClient(url = process.env.DATABASE_URL): PrismaClient {
   if (!url) throw new Error("DATABASE_URL tanımlı değil");
-  const adapter = new PrismaPg({ connectionString: url });
+  // Serverless'ta her fonksiyon örneği kendi havuzunu açar; Supabase pooler'ının istemci sınırına
+  // takılmamak için havuz küçük tutulur ve boştaki bağlantılar çabuk kapatılır (DB_POOL_MAX ile ayarlanabilir).
+  const max = Number(process.env.DB_POOL_MAX ?? (process.env.VERCEL ? 3 : 10)) || 3;
+  const adapter = new PrismaPg({ connectionString: url, max, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
   return new PrismaClient({ adapter });
 }
 

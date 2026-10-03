@@ -116,6 +116,17 @@ const TRACKER_PATTERNS: Array<[RegExp, string]> = [
   [/geo-commerce-tracker|\/t\.js\?k=/, "geo_commerce_tracker"],
 ];
 
+function microdataBreadcrumbs(html: string): string[] {
+  const start = html.search(/itemtype\s*=\s*["']https?:\/\/schema\.org\/BreadcrumbList["']/i);
+  if (start < 0) return [];
+  const rest = html.slice(start, start + 20_000);
+  const end = rest.search(/<\/(ol|ul|nav)>/i);
+  const block = end > 0 ? rest.slice(0, end) : rest.slice(0, 5_000);
+  return [...block.matchAll(/itemprop\s*=\s*["']name["'][^>]*>([^<]{1,120})</gi)]
+    .map((m) => decode(m[1]!).trim())
+    .filter((n) => n && !HOME_CRUMB.test(n));
+}
+
 export function extractPage(html: string, url: string): PageFacts {
   const titleM = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const h1M = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
@@ -127,6 +138,8 @@ export function extractPage(html: string, url: string): PageFacts {
   let lm: RegExpExecArray | null;
   while ((lm = linkRe.exec(html)) && links.length < 500) {
     const href = decode(lm[2] ?? lm[3] ?? "");
+    // İstemci şablonu yer tutucuları ({{url}}) gerçek bağlantı değildir.
+    if (/\{\{|\}\}|\$\{/.test(href)) continue;
     try {
       const abs = new URL(href, url);
       if (abs.protocol === "http:" || abs.protocol === "https:") {
@@ -151,6 +164,9 @@ export function extractPage(html: string, url: string): PageFacts {
   const products: ProductFacts[] = [];
   const breadcrumbs: string[] = [];
   collectTypes(jsonLd, types, products, url, breadcrumbs);
+  // Microdata (itemtype="https://schema.org/X"): tip listesi ve JSON-LD yoksa breadcrumb adları.
+  for (const m of html.matchAll(/itemtype\s*=\s*["']https?:\/\/schema\.org\/([A-Za-z]+)["']/gi)) types.add(m[1]!);
+  if (!breadcrumbs.length) breadcrumbs.push(...microdataBreadcrumbs(html));
   const text = visibleText(html);
   return {
     title: titleM ? visibleText(titleM[1]!) || null : null,

@@ -188,6 +188,8 @@ export interface AuditWork {
     skippedByRobots: number;
     truncated: boolean;
     failures?: Array<{ url: string; reason: string }>;
+    /** Yönlendirme sonrası taranan alan adı (girilenden farklıysa). */
+    siteDomain?: string;
   };
   prompts?: string[];
   answers: AuditAnswer[];
@@ -233,6 +235,7 @@ export async function runAudit(
       skippedByRobots: crawl.skippedByRobots,
       truncated: crawl.truncated,
       failures: crawl.failed.slice(0, 3),
+      ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
     };
     await save();
     if (overBudget()) return "continue";
@@ -251,7 +254,8 @@ export async function runAudit(
   await stage("asking_engines", 3);
   const available = AUDIT_ENGINES.map((e) => adapters[e]).filter((a) => a.status() === "ready" || a.status() === "demo");
   const unavailable = AUDIT_ENGINES.filter((e) => !available.some((a) => a.engine === e)).map((e) => ({ engine: e, reason: adapters[e].statusReason() }));
-  const entity = { id: "self", type: "brand" as const, name: brandName, aliases: [], domain: audit.domain };
+  const siteDomain = work.crawl.siteDomain ?? audit.domain;
+  const entity = { id: "self", type: "brand" as const, name: brandName, aliases: [], domain: siteDomain };
   const pairs = prompts.flatMap((prompt) => available.map((a) => ({ prompt, a })));
   while (work.answers.length < pairs.length) {
     if (overBudget()) {
@@ -299,7 +303,7 @@ export async function runAudit(
   const agg = aggregateScore(perEngine);
   const domainCounts = new Map<string, number>();
   // Kamu/eğitim, haber/medya, sosyal ağ ve pazaryeri alan adları kaynak olarak kalır, rakip önerilmez.
-  for (const x of answers) for (const d of new Set(x.citedDomains)) if (isCompetitorCandidate(d, audit.domain)) domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
+  for (const x of answers) for (const d of new Set(x.citedDomains)) if (isCompetitorCandidate(d, audit.domain) && isCompetitorCandidate(d, siteDomain)) domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
   const competitorCandidates = [...domainCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([domain, count]) => ({ domain, observations: count }));
   const lost = answers.filter((x) => x.ok && !x.mentioned && x.citedDomains.length > 0);
   const opportunityCount = new Set(lost.map((x) => x.prompt)).size;
@@ -328,7 +332,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [] },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null },
         competitorCandidates,
         opportunityCount,
         examples,

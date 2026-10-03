@@ -62,3 +62,52 @@ describe("breadcrumb ve başlıktan kategori", () => {
     expect(prompts.join(" ")).not.toMatch(/ürünler (markaları|modellerini)/);
   });
 });
+
+describe("aynı markanın başka uzantısına yönlendirme", () => {
+  const page = (url: string, body: string) => ({ status: 200, url, headers: { "content-type": "text/html" }, body, truncated: false });
+  it("avonni.com → avonni.com.tr yönlendirmesinde hedef alan adı taranır", async () => {
+    const { crawlSite } = await import("@/modules/audit/crawler");
+    const fetcher = async (url: string, opts: { sameSiteAs?: string }) => {
+      const u = new URL(url);
+      if (u.hostname === "avonni.com") {
+        if (opts.sameSiteAs) throw new Error("Redirect doğrulanmış domain dışına çıkıyor");
+        return page("https://avonni.com.tr/", "<html><title>Avonni</title></html>");
+      }
+      if (u.pathname === "/") return page(url, `<html><title>Avonni</title><a href="https://avonni.com.tr/iletisim">İletişim</a></html>`);
+      return { ...page(url, ""), status: 404 };
+    };
+    const r = await crawlSite({ domain: "avonni.com", maxPages: 3, fetcher, delayMs: 0 });
+    expect(r.domain).toBe("avonni.com.tr");
+    expect(r.redirectedFrom).toBe("avonni.com");
+    expect(r.pages.length).toBeGreaterThan(0);
+  });
+
+  it("farklı markaya yönlendirme izlenmez", async () => {
+    const { resolveSiteDomain } = await import("@/modules/audit/crawler");
+    const fetcher = async () => page("https://baskamarka.com/", "");
+    expect(await resolveSiteDomain(fetcher, "avonni.com")).toBe("avonni.com");
+  });
+
+  it("sayfa alınamazsa hazırlık puanı 0 değil 'ölçülemedi'", async () => {
+    const { evaluateReadiness } = await import("@/modules/audit/readiness");
+    const r = evaluateReadiness({ domain: "x.com", robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [{ url: "https://x.com/", reason: "x" }], skippedByRobots: 0, truncated: false });
+    expect(r.geoScore).toBeNull();
+    expect(r.adsScore).toBeNull();
+  });
+});
+
+describe("microdata breadcrumb ve şablon bağlantıları", () => {
+  it("microdata BreadcrumbList adlarını okur, {{url}} bağlantılarını atlar", async () => {
+    const { extractPage } = await import("@/modules/audit/html");
+    const html = `<html><title>Luxury Avizeler</title><ul class="breadcrumb" itemscope itemtype="https://schema.org/BreadcrumbList">
+      <li itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem"><a itemprop="item" href="/"><span itemprop='name'>Anasayfa</span></a></li>
+      <li itemprop='itemListElement' itemscope itemtype='https://schema.org/ListItem'><a itemprop='item' href='/avize'><span itemprop='name'>Avize</span></a></li>
+      <li itemprop='itemListElement' itemscope itemtype='https://schema.org/ListItem'><a itemprop='item' href='/luxury-avizeler'><span itemprop='name'>Luxury Avizeler</span></a></li>
+    </ul><a href="{{basketUrl}}">Sepet</a><a href="/iletisim">İletişim</a></html>`;
+    const f = extractPage(html, "https://avonni.com.tr/luxury-avizeler");
+    expect(f.breadcrumbs).toEqual(["Avize", "Luxury Avizeler"]);
+    expect(f.schemaTypes).toContain("BreadcrumbList");
+    expect(f.links.some((l) => l.includes("%7B%7B"))).toBe(false);
+    expect(f.links).toContain("https://avonni.com.tr/iletisim");
+  });
+});

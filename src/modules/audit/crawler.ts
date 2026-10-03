@@ -1,12 +1,14 @@
 import { safeFetch, type SafeResponse } from "@/lib/http/safe-fetch";
 import { sha256 } from "@/lib/crypto";
+import { registrableLabel } from "./competitor-filter";
 import { classifyPage, extractPage, isAllowedByRobots, parseRobots, parseSitemap, type PageFacts } from "./html";
 
 /**
  * Crawler (§4): robots'a uyar; yalnız public http(s), doğrulanmış domain altı; sitemap paginasyonu,
  * canonical dedupe, içerik hash'i, timeout/byte/page/depth/rate limit. Login/paywall bypass yok.
  */
-export type Fetcher = (url: string, opts: { sameSiteAs: string; headers?: Record<string, string> }) => Promise<SafeResponse>;
+/** `sameSiteAs` boşsa yönlendirmeler alan adı sınırı olmadan (yine SSRF korumalı) izlenir. */
+export type Fetcher = (url: string, opts: { sameSiteAs?: string; headers?: Record<string, string> }) => Promise<SafeResponse>;
 
 export const liveFetcher: Fetcher = (url, opts) =>
   safeFetch(url, { sameSiteAs: opts.sameSiteAs, headers: opts.headers, maxBytes: 1_500_000, timeoutMs: 10_000, maxRedirects: 4 });
@@ -30,6 +32,8 @@ export interface CrawlResult {
   failed: Array<{ url: string; reason: string }>;
   skippedByRobots: number;
   truncated: boolean;
+  /** Ana sayfa aynı markanın başka alan adına yönlendirdiyse (avonni.com → avonni.com.tr) asıl girilen alan adı. */
+  redirectedFrom?: string;
 }
 
 export interface CrawlOptions {
@@ -53,12 +57,28 @@ export function normalizeDomain(input: string): string {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Ana sayfa aynı marka adının başka bir uzantısına yönlendiriyorsa (avonni.com → avonni.com.tr) tarama
+ * hedef alan adında yapılır. Farklı markaya giden yönlendirme izlenmez; tarama mevcut kurallarla başarısız olur.
+ * Her adım safeFetch ile public IP doğrulamasından geçer.
+ */
+export async function resolveSiteDomain(fetcher: Fetcher, domain: string): Promise<string> {
+  try {
+    const r = await fetcher(`https://${domain}/`, {});
+    const host = new URL(r.url).hostname.toLowerCase().replace(/^www\./, "");
+    if (host === domain || host.endsWith(`.${domain}`) || domain.endsWith(`.${host}`)) return domain;
+    return registrableLabel(host) === registrableLabel(domain) ? host : domain;
+  } catch {
+    return domain;
+  }
+}
+
 export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   const fetcher = opts.fetcher ?? liveFetcher;
-  const domain = opts.domain;
+  const domain = await resolveSiteDomain(fetcher, opts.domain);
   const origin = `https://${domain}`;
   const maxDepth = opts.maxDepth ?? 3;
-  const result: CrawlResult = { domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false };
+  const result: CrawlResult = { domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false, ...(domain !== opts.domain ? { redirectedFrom: opts.domain } : {}) };
 
   let disallow: string[] = [];
   let sitemapUrls: string[] = [`${origin}/sitemap.xml`];

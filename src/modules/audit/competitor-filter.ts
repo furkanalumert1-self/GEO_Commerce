@@ -5,7 +5,7 @@
  */
 
 /** Kurumsal ikinci/üst düzey uzantılar (ör. tubitak.gov.tr, katalog.marmara.edu.tr). */
-const INSTITUTIONAL_SUFFIX = /\.(edu|gov|mil|k12|bel|pol|tsk|ac|gob|gouv|govt|int)(\.[a-z]{2})?$|\.(edu|gov|mil|int)$/;
+const INSTITUTIONAL_SUFFIX = /\.(edu|gov|mil|k12|bel|pol|tsk|ac|gob|gouv|govt|int)(\.[a-z]{2})?$|\.(edu|gov|mil|int)$|\.org\.tr$/;
 
 /** Kurumsal/akademik alt alan adı ve kelime işaretleri. */
 const INSTITUTIONAL_HINT = /(^|\.)(katalog|kutuphane|library|lib|dergi|dergipark|journal|scholar|akademik|academia|researchgate|universite|university|uni)\./;
@@ -25,7 +25,7 @@ const MEDIA_BRANDS = new Set([
   "wikipedia", "wikihow", "britannica", "dergipark", "researchgate", "academia", "springer", "sciencedirect", "ncbi", "nih", "jstor",
   "google", "youtube", "instagram", "facebook", "twitter", "x", "tiktok", "linkedin", "pinterest", "reddit", "medium", "substack", "wordpress", "blogspot",
   // Pazaryeri/fiyat karşılaştırma/şikâyet
-  "trendyol", "hepsiburada", "amazon", "n11", "ciceksepeti", "pttavm", "cimri", "akakce", "epey", "sikayetvar", "etsy", "ebay", "aliexpress", "temu",
+  "guvendamgasi", "etbis", "eticaret", "trustpilot", "trendyol", "hepsiburada", "amazon", "n11", "ciceksepeti", "pttavm", "cimri", "akakce", "epey", "sikayetvar", "etsy", "ebay", "aliexpress", "temu",
 ]);
 
 /** Alan adındaki genel içerik/medya kelimeleri. */
@@ -41,11 +41,13 @@ export function registrableLabel(domain: string): string {
   return parts[parts.length - tldParts - 1] ?? parts[0] ?? d;
 }
 
-export type NonCompetitorReason = "institutional" | "media" | "own";
+export type NonCompetitorReason = "institutional" | "media" | "own" | "invalid";
 
 /** Rakip adayı olamayacak alan adları için gerekçe döner; aday olabiliyorsa null. */
 export function nonCompetitorReason(domain: string, ownDomain?: string): NonCompetitorReason | null {
-  const d = domain.toLowerCase().replace(/^www\./, "");
+  const d = domain.toLowerCase().trim().replace(/^www\./, "");
+  // Boş/bozuk değerler (ör. ayrıştırılamayan atıf) aday olamaz.
+  if (!/^[\p{L}\p{N}-]+(\.[\p{L}\p{N}-]+)+$/u.test(d)) return "invalid";
   if (ownDomain) {
     const own = ownDomain.toLowerCase().replace(/^www\./, "");
     if (d === own || d.endsWith(`.${own}`) || own.endsWith(`.${d}`)) return "own";

@@ -176,9 +176,11 @@ export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
     },
   ];
 
+  // Hiç sayfa alınamadıysa site hakkında puan verilemez ("0" yanıltıcı olur); erişim sorunu listede gösterilir.
+  const reachable = pages.length > 0;
   return {
-    geoScore: score(checks.filter((c) => c.group === "geo")),
-    adsScore: score(checks.filter((c) => c.group === "ads")),
+    geoScore: reachable ? score(checks.filter((c) => c.group === "geo")) : null,
+    adsScore: reachable ? score(checks.filter((c) => c.group === "ads")) : null,
     checks,
   };
 }

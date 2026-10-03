@@ -32,3 +32,13 @@ describe("rakip adayı filtresi", () => {
     expect(registrableLabel("cnbce.com")).toBe("cnbce");
   });
 });
+
+describe("ek filtreler", () => {
+  it("güven damgası, .org.tr ve bozuk değerler aday olmaz", () => {
+    expect(isCompetitorCandidate("guvendamgasi.org.tr")).toBe(false);
+    expect(isCompetitorCandidate("tobb.org.tr")).toBe(false);
+    expect(nonCompetitorReason("")).toBe("invalid");
+    expect(nonCompetitorReason("·")).toBe("invalid");
+    expect(isCompetitorCandidate("zara.com")).toBe(true);
+  });
+});

@@ -32,9 +32,9 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
 
 export function CardHeader({ title, description, action, id }: { title: ReactNode; description?: ReactNode; action?: ReactNode; id?: string }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+    <div className="flex flex-wrap items-start justify-between gap-3 px-5 pb-3 pt-5 sm:px-6">
       <div className="min-w-0">
-        <h2 id={id} className="text-[17px] font-semibold leading-snug">{title}</h2>
+        <h2 id={id} className="text-lg font-semibold leading-snug">{title}</h2>
         {description ? <p className="mt-0.5 text-sm text-text-secondary">{description}</p> : null}
       </div>
       {action}
@@ -111,7 +111,7 @@ export function EmptyState({ title, description, action }: { title: string; desc
 export function TableWrap({ children, label }: { children: ReactNode; label: string }) {
   return (
     <div className="relative overflow-x-auto" role="region" aria-label={label} tabIndex={0}>
-      <table className="w-full min-w-[640px] border-collapse text-sm">{children}</table>
+      <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   );
 }
@@ -130,7 +130,7 @@ export function Skeleton({ className }: { className?: string }) {
 
 export function Stat({ label, value, unit, hint, badge, footnote }: { label: string; value: ReactNode; unit?: string; hint?: ReactNode; badge?: ReactNode; footnote?: ReactNode }) {
   return (
-    <Card className="flex min-h-[132px] flex-col justify-between p-5">
+    <Card className="flex min-h-[140px] flex-col justify-between p-5">
       <div className="flex items-start justify-between gap-2">
         <p className="text-sm font-medium text-text-secondary">{label}</p>
         {badge}

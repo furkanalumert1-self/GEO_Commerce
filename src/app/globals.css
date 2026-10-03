@@ -2,33 +2,33 @@
 
 /* §9 Görsel tasarım sözleşmesi — açık, sakin, profesyonel B2B. Koyu tema/neon/gradient yok. */
 @theme {
-  /* Warm editorial SaaS — tek orman yeşili accent; koyu tema/neon/gradient yok. */
-  --color-bg: #f7f6f2;
+  /* Sıcak kiremit — tek accent; Sendly referanslı sade yüzeyler. Koyu tema/neon/gradient yok. */
+  --color-bg: #f8f6f3;
   --color-surface: #ffffff;
-  --color-surface-subtle: #f1f0eb;
-  --color-text: #242722;
-  --color-text-secondary: #596057;
-  /* #6C7268 subtle zeminde 4.5:1 altına düştüğü için bir ton koyulaştırıldı. */
-  --color-muted: #62685e;
-  --color-border: #e3e5dd;
-  --color-border-strong: #8f9589;
-  --color-primary: #3d6248;
-  --color-primary-hover: #304f39;
-  --color-primary-soft: #eaf0e7;
-  --color-success: #2f6542;
-  --color-success-soft: #e8f1ea;
-  --color-warning: #8a570b;
-  --color-warning-soft: #f8f0e0;
-  --color-danger: #b13e37;
-  --color-danger-soft: #f9ebe9;
-  --color-focus: #3d6248;
+  --color-surface-subtle: #f2efeb;
+  --color-text: #282522;
+  --color-text-secondary: #68615c;
+  /* Zemin ve ikincil yüzeyde ≥4.5:1. */
+  --color-muted: #68615c;
+  --color-border: #e7e1db;
+  --color-border-strong: #8f857c;
+  --color-primary: #a44732;
+  --color-primary-hover: #873725;
+  --color-primary-soft: #f8eae4;
+  --color-success: #2f6b45;
+  --color-success-soft: #e7f2ea;
+  --color-warning: #8a5a0b;
+  --color-warning-soft: #fbf1df;
+  --color-danger: #b23a34;
+  --color-danger-soft: #fbe9e7;
+  --color-focus: #a44732;
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --shadow-card: 0 1px 2px rgb(24 32 24 / 4%);
-  --shadow-overlay: 0 16px 48px rgb(24 32 24 / 14%);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --shadow-card: 0 1px 2px #28252206, 0 4px 14px #2825220a;
+  --shadow-overlay: 0 16px 48px rgb(40 37 34 / 14%);
 }
 
 :root {

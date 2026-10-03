@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { brandEntities } from "@/modules/monitoring/service";
 import { isUuid } from "@/modules/tenancy/access";
-import { ENGINE_SHORT, fmtDate, fmtPct } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate, fmtPct, RUN_STATUS_LABEL } from "@/lib/format";
 import { executionMode } from "@/lib/queue";
 import { InlineJobDriver } from "@/components/data/inline-job-driver";
 
@@ -30,7 +30,7 @@ export default async function RunPage({ params }: { params: Promise<{ workspaceI
     <>
       <PageHeader
         title={`Ölçüm · ${fmtDate(run.scheduledAt, access.brand.timezone, "tr-TR", true)}`}
-        badges={<Badge tone={run.status === "succeeded" ? "success" : run.status === "partial" ? "warning" : run.status === "failed" ? "danger" : "primary"}>{run.status}</Badge>}
+        badges={<Badge tone={run.status === "succeeded" ? "success" : run.status === "partial" ? "warning" : run.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[run.status] ?? run.status}</Badge>}
         description={`${run.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")} · ${run.locales.join(", ")} · ${run.repetitions} tekrar`}
       />
       <Card className="mb-6 p-4" aria-live="polite">

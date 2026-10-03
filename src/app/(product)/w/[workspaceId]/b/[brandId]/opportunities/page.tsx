@@ -40,11 +40,11 @@ export default async function OpportunitiesPage({ params, searchParams }: { para
   };
   return (
     <>
-      <PageHeader title="Fırsatlar" description="Rakiplere kaybedilen sorular, öncelik sırasıyla. Fırsatı açın, kanıtı ve teşhisi inceleyin, Fix with AI ile değişiklik hazırlayın." />
+      <PageHeader title="Fırsatlar" description="Rakiplere kaybedilen sorular, öncelik sırasıyla. Fırsatı açın, kanıtı ve teşhisi inceleyin, AI ile iyileştir ile değişiklik hazırlayın." />
       {lockedCount > 0 ? (
         <div className="mb-4">
           <Alert tone="primary" title={`${lockedCount} fırsatın detayı paketinizde kilitli`}>
-            {access.entitlements.planKey === "starter" ? "Starter ilk 10 fırsatın detayını gösterir. Tüm üretilen fırsatlar ve Fix with AI Growth paketinde." : "Detaylar için paketinizi yükseltin."}{" "}
+            {access.entitlements.planKey === "starter" ? "Starter ilk 10 fırsatın detayını gösterir. Tüm üretilen fırsatlar ve AI ile iyileştir Growth paketinde." : "Detaylar için paketinizi yükseltin."}{" "}
             <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri karşılaştır</Link>
           </Alert>
         </div>

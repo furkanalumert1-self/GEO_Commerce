@@ -41,6 +41,8 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const diagnosis = (o.diagnosis ?? []) as unknown as DiagnosisStep[];
   const members = await db.membership.findMany({ where: { workspaceId }, include: { user: { select: { id: true, name: true, email: true } } } });
   const fixAllowed = hasFeature(access.entitlements, "fix_with_ai");
+  const productCount = await db.product.count({ where: { brandId, active: true } });
+  const setupHref = `/w/${workspaceId}/onboarding?brand=${brandId}&step=3`;
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
@@ -52,36 +54,43 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
       url={`${api}/actions`}
       body={{ opportunityId: o.id, type: o.gapType === "structured_data" ? "schema" : o.gapType === "citation_gap" ? "citation_task" : o.gapType === "missing_comparison" ? "comparison" : "content", targetURL: o.targetUrl }}
       idempotent
-      variant={activeAction ? "secondary" : "primary"}
-      label={activeAction ? "Fix with AI: yeni taslak" : "Fix with AI: taslak oluştur"}
+      variant={activeAction || productCount === 0 ? "secondary" : "primary"}
+      label={activeAction ? "AI ile iyileştir: yeni taslak" : "AI ile iyileştir: taslak hazırla"}
       pendingLabel="Taslak hazırlanıyor…"
       redirectTo={`${base}/actions/{id}`}
     />
   ) : (
     <span className="flex flex-col items-end gap-1">
-      <button className="min-h-11 cursor-not-allowed rounded-md border border-border px-4 text-sm opacity-60 sm:min-h-10" disabled>Fix with AI</button>
+      <button className="min-h-11 cursor-not-allowed rounded-md border border-border px-4 text-sm opacity-60 sm:min-h-10" disabled>AI ile iyileştir</button>
       <span className="text-xs text-text-secondary">Growth ve üzeri paketlerde · <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Yükselt</Link></span>
     </span>
   );
+  const first = diagnosis[0] ?? null;
+  const weakEvidence = first?.verification === "insufficient_evidence";
+  const intent = components.intent?.value ?? null;
+  const setupLink = (
+    <Link className="inline-flex min-h-11 items-center rounded-[var(--radius-md)] border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary-hover sm:min-h-10" href={setupHref}>
+      Ürün bilgilerini tamamla
+    </Link>
+  );
   const summary = (
     <Card>
-      <CardHeader title="Özet" />
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2.5 px-5 py-4 text-sm">
-        <dt className="text-text-secondary">Fırsat takibi</dt>
-        <dd><Badge tone="primary">{OPP_STATUS_LABEL[o.status]}</Badge></dd>
+      <CardHeader title="Kısa özet" />
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 px-5 pb-5 text-sm sm:px-6">
+        <dt className="text-text-secondary">Durum</dt>
+        <dd className="text-right"><Badge>{OPP_STATUS_LABEL[o.status]}</Badge></dd>
+        <dt className="text-text-secondary">Kanıt</dt>
+        <dd className="text-right">{first ? <Badge tone={weakEvidence ? "warning" : "success"}>{VERIF[first.verification]} · {o.evidence.length} kayıt</Badge> : <Badge tone="warning">Kanıt yok</Badge>}</dd>
+        <dt className="text-text-secondary">Tahmini etki</dt>
+        <dd className="text-right"><ImpactBadge level={impactLevel(o)} /></dd>
         <dt className="text-text-secondary">Son aksiyon</dt>
-        <dd>{latest ? <ActionStatusBadge status={latest.status} manual={Boolean((latest.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(latest.id)} /> : "Henüz yok"}</dd>
-        <dt className="text-text-secondary">Etki</dt>
-        <dd><ImpactBadge level={impactLevel(o)} /></dd>
-        <dt className="text-text-secondary">Fırsat skoru</dt>
-        <dd className="tabular">{o.score ?? "Hesaplanamadı"}{o.provisional ? " (geçici)" : ""}</dd>
-        <dt className="text-text-secondary">Efor</dt>
-        <dd>{o.expectedEffort ?? "Belirtilmedi"}</dd>
+        <dd className="text-right">{latest ? <ActionStatusBadge status={latest.status} manual={Boolean((latest.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(latest.id)} /> : "Henüz yok"}</dd>
         <dt className="text-text-secondary">Hedef sayfa</dt>
-        <dd className="min-w-0 break-all">{o.targetUrl ? <a className="text-primary underline" href={o.targetUrl} target="_blank" rel="noopener noreferrer nofollow">{o.targetUrl}</a> : "Belirlenmedi"}</dd>
+        <dd className="min-w-0 break-all text-right">{o.targetUrl ? <a className="text-primary underline" href={o.targetUrl} target="_blank" rel="noopener noreferrer nofollow">{o.targetUrl}</a> : "Belirlenmedi"}</dd>
         <dt className="text-text-secondary">Soru kümesi</dt>
-        <dd>{o.cluster.label} · {o.locale}</dd>
+        <dd className="text-right">{o.cluster.label}</dd>
       </dl>
+      {weakEvidence ? <p className="border-t border-border px-5 py-3 text-xs text-text-secondary sm:px-6">Kanıt az olduğu için sonucu kesin kabul etmeyin; yeni bir ölçüm sonucu güçlendirir.</p> : null}
     </Card>
   );
   return (
@@ -89,12 +98,12 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
       <PageHeader
         breadcrumb={[{ label: "Büyüme Fırsatları" }, { label: "Fırsatlar", href: `${base}/opportunities` }, { label: o.title }]}
         title={o.title}
-        badges={<><Badge tone="primary">Takip: {OPP_STATUS_LABEL[o.status]}</Badge><Badge>{GAP_LABEL[o.gapType]}</Badge>{o.provisional ? <Badge tone="warning">Geçici skor</Badge> : null}</>}
-        description={`${o.cluster.label} · ${o.locale}${o.targetUrl ? ` · ${o.targetUrl}` : ""}`}
+        badges={<><Badge>{OPP_STATUS_LABEL[o.status]}</Badge>{o.provisional ? <Badge tone="warning">Geçici puan</Badge> : null}</>}
+        description={`${o.cluster.label} sorularında rakipleriniz AI yanıtlarında öne çıkıyor.`}
         action={
           <>
-            {activeAction ? (
-              <Link className="inline-flex min-h-11 items-center rounded-md border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary-hover sm:min-h-10" href={`${base}/actions/${activeAction.id}`}>
+            {productCount === 0 ? setupLink : activeAction ? (
+              <Link className="inline-flex min-h-11 items-center rounded-[var(--radius-md)] border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary-hover sm:min-h-10" href={`${base}/actions/${activeAction.id}`}>
                 Aksiyona devam et
               </Link>
             ) : null}
@@ -102,77 +111,95 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
           </>
         }
       />
-      <Card className="mb-6 p-5">
-        <p className="mb-3 text-sm font-semibold">{latest ? "Son aksiyonun aşaması" : "Sonraki adım"}</p>
+      <Card className="mb-6 p-5 sm:px-6">
         <WorkflowStepper view={flow} />
         <p className="mt-3 text-sm text-text-secondary">{latest ? <>{latest.title}: </> : null}<span className="font-medium text-text">{flow.label}.</span> {flow.next}</p>
-        <p className="mt-1 text-xs text-text-secondary">Fırsat takibi ({OPP_STATUS_LABEL[o.status]}) ekip içi iş durumudur; aksiyon aşamasından ayrı güncellenir.</p>
       </Card>
-      <div className="mb-6 xl:hidden">{summary}</div>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex min-w-0 flex-col gap-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="flex min-w-0 flex-col gap-4">
           <Card>
-            <CardHeader title="Neden kaybediyorum?" description="Teşhis: gözlem, olası neden ve önerilen aksiyon ayrı gösterilir. Korelasyon nedensellik değildir." />
-            <ol className="divide-y divide-border">
-              {diagnosis.length === 0 ? <li className="px-5 py-4 text-sm text-text-secondary">Bu öneri henüz kanıtla doğrulanmadı.</li> : null}
-              {diagnosis.map((d, i) => (
-                <li key={i} className="grid gap-4 px-5 py-5 text-sm">
-                  <div>
-                    <p className="text-xs font-semibold text-text-secondary">Gözlem</p>
-                    {d.observation ? (
-                      <>
-                        <blockquote className="mt-1.5 border-l-2 border-primary/40 pl-3 text-text">&ldquo;{cleanQuote(d.observation.quote)}&rdquo;</blockquote>
-                        <p className="mt-1.5 text-xs text-text-secondary">
-                          {ENGINE_SHORT[d.observation.engine] ?? d.observation.engine} · {fmtDate(d.observation.sampledAt, access.brand.timezone)}
-                          {d.observation.url ? <> · <a className="break-all text-primary underline" href={d.observation.url} target="_blank" rel="noopener noreferrer nofollow">{d.observation.url}</a></> : null}
-                          {" · "}
-                          <Link className="text-primary underline" href={`${base}/visibility?obs=${d.observation.observationId}`}>Ham yanıtı aç</Link>
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-text-secondary">Bu öneri henüz kanıtla doğrulanmadı.</p>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-text-secondary">Olası neden <span className="font-normal">(hipotez)</span></p>
-                    <p className="mt-1">{d.possibleCause}</p>
-                    <p className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-                      Doğrulama: <Badge tone={d.verification === "insufficient_evidence" ? "warning" : "neutral"}>{VERIF[d.verification]}</Badge> güven %{Math.round(d.confidence * 100)}
-                    </p>
-                  </div>
-                  <div className="rounded-md bg-surface-subtle px-4 py-3">
-                    <p className="text-xs font-semibold text-text-secondary">Önerilen aksiyon</p>
-                    <p className="mt-1">{d.recommendation}</p>
-                  </div>
-                </li>
-              ))}
-            </ol>
+            <CardHeader title="Ne oldu?" />
+            <div className="px-5 pb-5 text-sm sm:px-6">
+              {first?.observation ? (
+                <>
+                  <p>{ENGINE_SHORT[first.observation.engine] ?? first.observation.engine} yanıtında rakipler öne çıktı; markanız bu yanıtta önerilmedi.</p>
+                  <blockquote className="mt-3 rounded-r-[12px] border-l-[3px] border-primary bg-surface-subtle px-4 py-3 text-text">&ldquo;{cleanQuote(first.observation.quote, 2000)}&rdquo;</blockquote>
+                  <p className="mt-2 text-xs text-text-secondary">
+                    {ENGINE_SHORT[first.observation.engine] ?? first.observation.engine} · {fmtDate(first.observation.sampledAt, access.brand.timezone)}
+                    {first.observation.url ? <> · <a className="break-all text-primary underline" href={first.observation.url} target="_blank" rel="noopener noreferrer nofollow">Kaynak</a></> : null}
+                    {" · "}
+                    <Link className="text-primary underline" href={`${base}/visibility?obs=${first.observation.observationId}`}>Yanıtın tamamını gör</Link>
+                  </p>
+                </>
+              ) : (
+                <p className="text-text-secondary">Bu öneri henüz kanıtla doğrulanmadı.</p>
+              )}
+            </div>
           </Card>
           <Card>
-            <CardHeader title={`Kanıt (${o.evidence.length})`} description="Soru yanıtları ve tarama bulguları; kaynak bağlantıları dış sitelere gider." />
-            {o.evidence.length === 0 ? <p className="px-5 py-4 text-sm text-text-secondary">Kanıt kaydı yok.</p> : null}
-            <ul className="divide-y divide-border">
-              {o.evidence.map((e) => (
-                <li key={e.id} className="px-5 py-3 text-sm">
-                  {e.quote ? <p>&ldquo;{cleanQuote(e.quote)}&rdquo;</p> : null}
-                  {e.note ? <p className="text-text-secondary">{e.note}</p> : null}
-                  <p className="mt-1 text-xs text-text-secondary">
-                    {e.observation ? `${ENGINE_SHORT[e.observation.engine] ?? e.observation.engine} · ${fmtDate(e.observation.sampledAt, access.brand.timezone)}` : "Tarama bulgusu"}
-                    {e.pageUrl ? <> · <a className="break-all text-primary underline" href={e.pageUrl} target="_blank" rel="noopener noreferrer nofollow">{e.pageUrl}</a></> : null}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <CardHeader title="Neden önemli?" />
+            <div className="px-5 pb-5 text-sm sm:px-6">
+              <p>{intent !== null ? `Bu soru grubu satın almaya yakın bir niyet taşıyor (ticari niyet ${intent}/100). ` : ""}AI yanıtında görünmemek, bu soruyu soran müşterinin markanızı hiç görmemesi demek.</p>
+              {first ? <p className="mt-2 text-text-secondary"><span className="font-medium text-text">Olası neden (hipotez):</span> {first.possibleCause}</p> : null}
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Ne yapabilirim?" />
+            <div className="px-5 pb-5 text-sm sm:px-6">
+              <p>{first?.recommendation ?? o.recommendedAction ?? "Öneri henüz oluşturulmadı."}</p>
+              {productCount === 0 ? (
+                <div className="mt-4"><Alert tone="warning" title="Önce ürün bilgilerinizi tamamlayın">Katalogda ürün yok; AI ile iyileştir taslağı ürün ayrıntısı içeremez ve eksik alanlarla gelir. Siteyi tarayın veya ürünlerinizi aktarın.</Alert></div>
+              ) : null}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {productCount === 0 ? setupLink : null}
+                {fixButton}
+              </div>
+            </div>
+            <details className="border-t border-border">
+              <summary className="no-marker flex min-h-11 cursor-pointer items-center justify-between px-5 py-3 text-sm font-medium text-primary sm:px-6">Ayrıntıları gör <span aria-hidden>▾</span></summary>
+              <div className="flex flex-col gap-5 px-5 pb-5 text-sm sm:px-6">
+                <div>
+                  <p className="font-medium">Fırsat puanı: {o.score ?? "hesaplanamadı"}{o.provisional ? " (geçici)" : ""}</p>
+                  <ul className="mt-2 divide-y divide-border">
+                    {(Object.keys(OPPORTUNITY_WEIGHTS) as Array<keyof typeof OPPORTUNITY_WEIGHTS>).map((k) => (
+                      <li key={k} className="py-2">
+                        <div className="flex items-baseline justify-between gap-2"><span>{COMP_LABEL[k]}</span><span className="tabular">{components[k]?.value ?? "Bilinmiyor"}</span></div>
+                        {components[k]?.rationale ? <p className="mt-0.5 text-xs text-text-secondary">{plainTr(components[k].rationale)}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {diagnosis.length > 1 || o.evidence.length > 1 ? (
+                  <div>
+                    <p className="font-medium">Tüm kanıtlar ({o.evidence.length})</p>
+                    <ul className="mt-2 divide-y divide-border">
+                      {o.evidence.map((e) => (
+                        <li key={e.id} className="py-2">
+                          {e.quote ? <p>&ldquo;{cleanQuote(e.quote, 2000)}&rdquo;</p> : null}
+                          {e.note ? <p className="text-text-secondary">{e.note}</p> : null}
+                          <p className="mt-1 text-xs text-text-secondary">{e.observation ? `${ENGINE_SHORT[e.observation.engine] ?? e.observation.engine} · ${fmtDate(e.observation.sampledAt, access.brand.timezone)}` : "Tarama bulgusu"}{e.pageUrl ? <> · <a className="break-all text-primary underline" href={e.pageUrl} target="_blank" rel="noopener noreferrer nofollow">{e.pageUrl}</a></> : null}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <div className="text-text-secondary">
+                  <p><span className="font-medium text-text">Tür:</span> {GAP_LABEL[o.gapType]} · <span className="font-medium text-text">Doğrulama:</span> {first ? `${VERIF[first.verification]} (güven %${Math.round(first.confidence * 100)})` : "—"}</p>
+                  <p className="mt-1"><span className="font-medium text-text">Ücretli kanal:</span> {o.paidBlockedReason ?? "Uygun"}</p>
+                  <p className="mt-1 text-xs">Teşhis bir hipotezdir; korelasyon nedensellik değildir.</p>
+                </div>
+              </div>
+            </details>
           </Card>
         </div>
-        <div className="flex min-w-0 flex-col gap-6">
-          <div className="hidden xl:block">{summary}</div>
+        <div className="flex min-w-0 flex-col gap-4">
+          {summary}
           {o.actions.length ? (
             <Card>
               <CardHeader title="Aksiyonlar" />
               <ul className="divide-y divide-border">
                 {o.actions.map((a) => (
-                  <li key={a.id} className="flex flex-col gap-1 px-5 py-3 text-sm">
+                  <li key={a.id} className="flex flex-col gap-1 px-5 py-3 text-sm sm:px-6">
                     <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`${base}/actions/${a.id}`}>{a.title}</Link>
                     <span><ActionStatusBadge status={a.status} manual={Boolean((a.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(a.id)} /></span>
                   </li>
@@ -181,30 +208,9 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
             </Card>
           ) : null}
           <Card>
-            <CardHeader title={`Skor: ${o.score ?? "hesaplanamadı"}`} description="Bileşenler ve gerekçeleri" />
-            <ul className="divide-y divide-border">
-              {(Object.keys(OPPORTUNITY_WEIGHTS) as Array<keyof typeof OPPORTUNITY_WEIGHTS>).map((k) => (
-                <li key={k} className="px-5 py-3 text-sm">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="font-medium">{COMP_LABEL[k]}</span>
-                    <span className="tabular">{components[k]?.value ?? "Eksik"} <span className="text-xs text-text-secondary">× {OPPORTUNITY_WEIGHTS[k].toFixed(2)}</span></span>
-                  </div>
-                  <p className="mt-0.5 text-xs text-text-secondary">{components[k]?.rationale ? plainTr(components[k].rationale) : null}</p>
-                </li>
-              ))}
-            </ul>
-          </Card>
-          <Card>
-            <CardHeader title="Takip" />
-            <div className="p-5">
+            <CardHeader title="Takip" description="Ekip içi iş durumu; aksiyon aşamasından ayrı güncellenir." />
+            <div className="px-5 pb-5 sm:px-6">
               <OpportunityControls url={`${api}/opportunities/${o.id}`} status={o.status} ownerId={o.ownerId} priority={o.priority} dueAt={o.dueAt?.toISOString().slice(0, 10) ?? ""} members={members.map((m) => ({ id: m.user.id, name: m.user.name ?? m.user.email }))} />
-            </div>
-          </Card>
-          <Card>
-            <CardHeader title="Kanal" />
-            <div className="p-5 text-sm">
-              <p>Organik: {o.recommendedAction}</p>
-              <p className="mt-2 text-text-secondary">Ücretli: {o.paidBlockedReason ?? "Uygun"}</p>
             </div>
           </Card>
         </div>

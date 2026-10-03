@@ -63,7 +63,7 @@ export function impactLevel(o: { priority?: string | null; score?: number | null
 
 // ── İş akışı adımları ───────────────────────────────────────────────────────
 
-export const WORKFLOW_STEPS = ["Teşhis", "Taslak", "İnceleme", "Uygulama", "Ölçüm"] as const;
+export const WORKFLOW_STEPS = ["İncele", "Taslak hazırla", "Değişiklikleri onayla", "Sitenizde uygula", "Sonucu izle"] as const;
 export type StepState = "done" | "current" | "upcoming" | "blocked";
 
 export interface WorkflowView {
@@ -92,7 +92,7 @@ export function workflowView(actionStatus: string | null | undefined, opts: { ma
   switch (actionStatus) {
     case null:
     case undefined:
-      return { current: 0, states: states(0), label: "Teşhis hazır", tone: "neutral", next: "Kanıtı inceleyin, ardından Fix with AI ile taslak oluşturun." };
+      return { current: 0, states: states(0), label: "Teşhis hazır", tone: "neutral", next: "Kanıtı inceleyin, ardından AI ile iyileştir ile taslak hazırlayın." };
     case "draft":
       return { current: 1, states: states(1), label: "Taslak", tone: "neutral", next: "Taslağı düzenleyin ve incelemeye gönderin veya onaylayın." };
     case "rejected":
@@ -108,14 +108,14 @@ export function workflowView(actionStatus: string | null | undefined, opts: { ma
     case "rolled_back":
       return { current: 3, states: states(3, 3), label: "Geri alındı", tone: "danger", next: "Değişiklik geri alındı; taslağa döndürüp yeniden değerlendirin." };
     case "published":
-      return { current: 4, states: states(4), label: "Yayınlandı", tone: "success", next: "Ölçümü başlatın; önce/sonra karşılaştırması eş uzunlukta dönemlerle yapılır." };
+      return { current: 4, states: states(4), label: "Yayınlandı", tone: "success", next: "Sonucu izlemeye alın ve aynı soruları yeniden ölçün; karşılaştırma eş uzunlukta dönemlerle yapılır." };
     case "measuring":
       return {
         current: 4,
         states: states(4),
-        label: opts.manualPublish ? "Haricen uygulandı · ölçülüyor" : "Ölçülüyor",
+        label: opts.manualPublish ? "Sitenizde uygulandı (sizin bildiriminiz) · izleniyor" : "Sonuç izleniyor",
         tone: "primary",
-        next: "Sonraki dönem doldukça önce/sonra farkı güncellenir; veri oluşmadan başarı iddiası yoktur.",
+        next: "Sonucu görmek için aynı soruları yeniden ölçün; önce/sonra farkı yeni ölçümler geldikçe güncellenir. Veri oluşmadan başarı iddiası yoktur.",
       };
     case "completed":
       return { current: 4, states: states(4, undefined, true), label: "Ölçüm tamamlandı", tone: "success", next: "Gözlenen farkı inceleyin; sonuç zayıfsa teşhisi yeniden değerlendirin." };

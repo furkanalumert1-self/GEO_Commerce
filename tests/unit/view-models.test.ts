@@ -48,7 +48,7 @@ describe("iş akışı görünümü", () => {
   });
 
   it("manuel uygulama kullanıcı bildirimi olarak etiketlenir", () => {
-    expect(workflowView("measuring", { manualPublish: true }).label).toMatch(/Haricen uygulandı/);
+    expect(workflowView("measuring", { manualPublish: true }).label).toMatch(/Sitenizde uygulandı \(sizin bildiriminiz\)/);
     expect(workflowView("completed").states.every((s) => s === "done")).toBe(true);
   });
 
@@ -90,7 +90,7 @@ describe("zorunlu eksik", () => {
     const v = workflowView("approved", { needsFix: true });
     expect(v.label).toBe("Düzeltme gerekli");
     expect(v.states[1]).toBe("blocked");
-    expect(workflowView("measuring", { needsFix: true }).label).toBe("Ölçülüyor");
+    expect(workflowView("measuring", { needsFix: true }).label).toBe("Sonuç izleniyor");
   });
 });
 

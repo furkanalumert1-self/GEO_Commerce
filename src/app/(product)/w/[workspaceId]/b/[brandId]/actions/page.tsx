@@ -20,9 +20,9 @@ export default async function ActionsPage({ params }: { params: Promise<{ worksp
   return (
     <>
       <PageHeader title="Aksiyonlar" description="Hazırlanan değişiklikler: taslak → inceleme → onay → uygulama → ölçüm. Onay içeriği yayınlamaz; mağazada yayın için yazma destekli doğrulanmış bağlantı gerekir, yoksa dışa aktarıp manuel uygulayabilirsiniz." />
-      {!fix ? <p className="mb-4 text-sm text-muted">Fix with AI Growth ve üzeri paketlerde. Mevcut aksiyonları görüntüleyebilir ve dışa aktarabilirsiniz.</p> : null}
+      {!fix ? <p className="mb-4 text-sm text-muted">AI ile iyileştir Growth ve üzeri paketlerde. Mevcut aksiyonları görüntüleyebilir ve dışa aktarabilirsiniz.</p> : null}
       <Card>
-        {actions.length === 0 ? <EmptyState title="Aksiyon yok" description="Bir fırsat sayfasından Fix with AI ile taslak oluşturun." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/opportunities`}>Fırsatlara git</Link>} /> : (
+        {actions.length === 0 ? <EmptyState title="Aksiyon yok" description="Bir fırsat sayfasından AI ile iyileştir ile taslak oluşturun." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/opportunities`}>Fırsatlara git</Link>} /> : (
           <TableWrap label="Aksiyonlar">
             <thead><tr><Th>Aksiyon</Th><Th>Hedef / fırsat</Th><Th>Durum</Th><Th>Son işlem</Th><Th><span className="sr-only">İşlem</span></Th></tr></thead>
             <tbody>

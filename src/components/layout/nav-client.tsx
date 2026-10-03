@@ -84,13 +84,12 @@ function Leaf({ item, pathname, nested, onNavigate }: { item: NavItem; pathname:
       onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex min-h-11 items-center gap-2.5 rounded-md pr-2 text-sm lg:min-h-9",
-        nested ? "pl-9" : "pl-2.5",
-        active ? "bg-primary-soft font-medium text-text" : "text-text-secondary hover:bg-surface-subtle hover:text-text",
+        "relative flex min-h-11 items-center gap-2.5 rounded-full pr-3 text-sm lg:min-h-10",
+        nested ? "pl-9" : "pl-3",
+        active ? "bg-primary-soft font-semibold text-primary-hover shadow-[0_1px_2px_rgb(164_71_50/8%)]" : "text-text hover:bg-surface-subtle",
       )}
     >
-      {active ? <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" /> : null}
-      {Icon ? <Icon size={16} aria-hidden className={active ? "text-primary" : "text-muted"} /> : null}
+      {Icon ? <Icon size={18} aria-hidden className={active ? "text-primary" : "text-text-secondary"} /> : null}
       <span className="truncate">{item.label}</span>
     </Link>
   );
@@ -115,11 +114,11 @@ function Group({ group, pathname, onNavigate }: { group: NavGroup; pathname: str
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm lg:min-h-9",
-          containsActive ? "font-medium text-text" : "text-text-secondary hover:bg-surface-subtle hover:text-text",
+          "flex min-h-11 w-full items-center gap-2.5 rounded-full px-3 text-left text-sm lg:min-h-10",
+          containsActive ? "font-semibold text-text" : "text-text hover:bg-surface-subtle",
         )}
       >
-        <Icon size={16} aria-hidden className={containsActive ? "text-primary" : "text-muted"} />
+        <Icon size={18} aria-hidden className={containsActive ? "text-primary" : "text-text-secondary"} />
         <span className="flex-1 truncate">{group.label}</span>
         <ChevronDown size={16} aria-hidden className={cn("text-muted transition-transform duration-150", open && "rotate-180")} />
       </button>

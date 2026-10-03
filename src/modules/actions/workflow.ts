@@ -48,6 +48,9 @@ export const versionHash = (content: ActionContent) => hashObject(content);
 // [ÜRÜN ADI] gibi büyük harfli tokenlar ve [PLACEHOLDER: ...] / [EKSİK: ...] / [TODO ...] biçimleri.
 const PLACEHOLDER_RE = /\[(?:[A-ZÇĞİÖŞÜ0-9][A-ZÇĞİÖŞÜ0-9 _/-]{0,60}|(?:[Pp]laceholder|PLACEHOLDER|EKSİK|Eksik|EKSIK|TODO|TBD|DOLDUR|Doldur)\b[^\]]{0,160})\](?!\()/g;
 
+/** Önizlemede yer tutucuları işaretlemek için (her çağrıda yeni, durumsuz RegExp). */
+export const placeholderRegex = () => new RegExp(PLACEHOLDER_RE.source, "g");
+
 export interface ContentIssue {
   /** Editördeki alanın DOM id'si (bağlantı için). */
   fieldId: string;

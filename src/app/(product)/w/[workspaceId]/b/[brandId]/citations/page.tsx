@@ -7,6 +7,8 @@ import { pageBrand } from "@/lib/page-access";
 import { parseRange } from "@/modules/monitoring/queries";
 import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
 
+const SOURCE_TYPE_LABEL: Record<string, string> = { own: "Şirket sitesi", media: "Haber / medya", review: "İnceleme sitesi", blog: "Blog", directory: "Rehber / dizin", forum: "Forum", industry: "Sektör sitesi", other: "Diğer" };
+
 export const metadata: Metadata = { title: "Kaynaklar" };
 
 /**
@@ -48,7 +50,7 @@ export default async function CitationsPage({ params, searchParams }: { params: 
   const csvHref = `/api/v1/workspaces/${workspaceId}/brands/${brandId}/citations/export?days=${range.days}`;
   return (
     <>
-      <PageHeader title="Kaynaklar (citation)" description="Yanıtlarda atıf yapılan siteler. Bir bağlantının varlığı sayfanın belirli markayı önerdiğini tek başına kanıtlamaz." action={<a className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm hover:bg-bg sm:min-h-9" href={csvHref}>Outreach CSV</a>} />
+      <PageHeader title="Kaynaklar (citation)" description="Yanıtlarda atıf yapılan siteler. Bir bağlantının varlığı sayfanın belirli markayı önerdiğini tek başına kanıtlamaz." action={<a className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm hover:bg-bg sm:min-h-9" href={csvHref}>Kaynak listesini indir</a>} />
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} showEngine={false} />
       <div className="mb-4 flex gap-2 text-sm">
         <Link href={`${base}?range=${sp.range ?? "30"}`} className={onlyGap ? "text-primary underline" : "font-medium"}>Tüm kaynaklar</Link>
@@ -59,12 +61,12 @@ export default async function CitationsPage({ params, searchParams }: { params: 
         <CardHeader title={`${rows.length} site · ${rows.reduce((s, r) => s + r.urls.size, 0)} URL`} description="Boşluk: rakip anılan yanıtlarda atıf yapılan, markanızın anıldığı hiçbir yanıtta görünmeyen yayın, pazaryeri ve inceleme siteleri (outreach hedefi). Olası rakip: başka bir markanın mağazası olabilir; Rakipler sayfasından ekleyebilirsiniz." />
         {rows.length === 0 ? <EmptyState title="Sonuç yok" description="Seçili dönemde kaynak bulunamadı." /> : (
           <TableWrap label="Kaynak siteleri">
-            <thead><tr><Th>Site</Th><Th>Tür</Th><Th>İlişki</Th><Th numeric>URL</Th><Th numeric>Yanıt</Th><Th numeric>Yalnız rakiple</Th><Th numeric>Markanızla</Th></tr></thead>
+            <thead><tr><Th>Site</Th><Th>Site türü</Th><Th>İlişki</Th><Th numeric>URL</Th><Th numeric>Yanıt</Th><Th numeric>Yalnız rakiple</Th><Th numeric>Markanızla</Th></tr></thead>
             <tbody>
               {rows.slice(0, 100).map((r) => (
                 <tr key={r.domain}>
                   <Td>{r.domain} {r.gap ? <Badge tone="warning">Boşluk</Badge> : r.likelyCompetitor ? <Badge>Olası rakip</Badge> : null}</Td>
-                  <Td className="text-muted">{r.sourceType ?? "—"}</Td>
+                  <Td className="text-muted">{SOURCE_TYPE_LABEL[r.sourceType ?? ""] ?? r.sourceType ?? "—"}</Td>
                   <Td>{r.association === "own" ? "Kendi" : r.association === "competitor" ? "Rakip sitesi" : r.likelyCompetitor ? "Ticari site (rakip olabilir)" : "Üçüncü taraf"}</Td>
                   <Td numeric>{r.urls.size}</Td>
                   <Td numeric>{r.obs.size}</Td>

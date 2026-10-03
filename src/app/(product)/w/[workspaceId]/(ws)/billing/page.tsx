@@ -11,7 +11,7 @@ import { fmtDate, fmtNumber } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Abonelik" };
 
-const METRIC: Record<string, string> = { answer_units: "Yanıt birimi", fix_units: "Fix with AI üretimi", crawl_urls: "Crawl URL", commerce_events: "Commerce event" };
+const METRIC: Record<string, string> = { answer_units: "Yanıt birimi", fix_units: "AI ile iyileştir üretimi", crawl_urls: "Crawl URL", commerce_events: "Commerce event" };
 
 export default async function BillingPage({ params, searchParams }: { params: Promise<{ workspaceId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId } = await params;

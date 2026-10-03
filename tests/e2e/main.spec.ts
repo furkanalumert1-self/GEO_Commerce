@@ -28,7 +28,7 @@ test("pano: 3 viewport ekran görüntüsü, axe, klavye ile menü", async ({ pag
   const { ws, brand } = await loginAs(page, /Marka sahibi/);
   await page.goto(`/w/${ws}/b/${brand}/dashboard`);
   await expect(page.getByRole("heading", { level: 1, name: "Genel Bakış" })).toBeVisible();
-  await expect(page.getByText("Bugün odaklanmanız gerekenler")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bugün yapabilecekleriniz" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: `test-results/dashboard-${info.project.name}.png`, fullPage: true });
   const axe = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).exclude(".recharts-wrapper").analyze();
@@ -68,24 +68,26 @@ test("ölçüm → fırsat → Fix taslağı → onay → export", async ({ page
   await expect(page.getByText(/kuyruğa alındı/)).toBeVisible();
   await page.goto(`/w/${ws}/b/${brand}/opportunities?status=new`);
   await page.locator('a[href*="/opportunities/"]').first().click();
-  await expect(page.getByText("Neden kaybediyorum?")).toBeVisible();
-  await page.getByRole("button", { name: /Fix with AI/ }).click();
+  await expect(page.getByRole("heading", { name: "Ne oldu?" })).toBeVisible();
+  await page.getByRole("button", { name: /AI ile iyileştir/ }).first().click();
   await page.waitForURL(/\/actions\//);
   // Zorunlu eksik (ör. [FİYAT]) varsa onay kapalıdır; alanlar doldurulup yeni sürüm kaydedilir.
-  await expect(page.getByRole("button", { name: "Bu sürümü onayla" })).toBeVisible();
-  if (await page.getByText(/Düzeltme gerekli \(/).isVisible()) {
-    await expect(page.getByRole("button", { name: "Bu sürümü onayla" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Değişiklikleri onayla" })).toBeVisible();
+  if (await page.getByText(/eksik bilgi var/).isVisible()) {
+    await expect(page.getByRole("button", { name: "Değişiklikleri onayla" })).toBeDisabled();
+    await page.getByRole("tab", { name: "Düzenle" }).click();
     for (const box of await page.locator("#pane-edit textarea, #pane-edit input").all()) {
       const v = await box.inputValue();
       if (/\[[A-ZÇĞİÖŞÜ]/.test(v)) await box.fill(v.replace(/\[[A-ZÇĞİÖŞÜ0-9 _/-]+\](?!\()/g, "₺100,00"));
     }
     await page.getByRole("button", { name: "Yeni sürüm olarak kaydet" }).click();
     await expect(page.getByRole("status").filter({ hasText: "Taslak kaydedildi" })).toBeVisible();
-    await expect(page.getByText(/Düzeltme gerekli \(/)).toBeHidden();
+    await expect(page.getByText(/eksik bilgi var/)).toBeHidden();
   }
-  await page.getByRole("button", { name: "Bu sürümü onayla" }).click();
+  await page.getByRole("button", { name: "Değişiklikleri onayla" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Onaylandı" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Mağazada yayımla" })).toBeDisabled();
+  await page.getByRole("tab", { name: "Teknik ayrıntılar" }).click();
   const dl = page.waitForEvent("download");
   await page.getByRole("link", { name: "MD indir" }).click();
   expect((await dl).suggestedFilename()).toMatch(/\.md$/);
@@ -94,8 +96,10 @@ test("ölçüm → fırsat → Fix taslağı → onay → export", async ({ page
 test("ajans müşterisi yalnız kendi markasını görür", async ({ page, request }, info) => {
   test.skip(info.project.name !== "desktop-1440", "tek viewport yeterli");
   await loginAs(page, /Ajans müşterisi/);
+  // Tek markada seçici yerine marka alanı gösterilir; çok markada yalnız yetkili marka seçeneği bulunur.
   const options = (await page.locator("#brand-switch option").allTextContents()).filter((o) => o !== "Marka seçin");
-  expect(options).toEqual(["Mira Ev Tekstili"]);
+  expect(options.length).toBeLessThanOrEqual(1);
+  expect(options.every((o) => o.startsWith("Mira Ev Tekstili"))).toBe(true);
   const res = await page.request.get(`/api/v1/workspaces/00000000-0000-0000-0000-000000000000/brands`);
   expect(res.status()).toBe(404);
   void request;

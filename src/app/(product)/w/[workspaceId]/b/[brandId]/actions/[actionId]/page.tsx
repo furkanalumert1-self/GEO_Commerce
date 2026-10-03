@@ -24,7 +24,7 @@ const TYPE_LABEL: Record<string, string> = {
   comparison: "Karşılaştırma sayfası",
   faq: "SSS",
   schema: "Yapılandırılmış veri",
-  citation_task: "Kaynak (outreach) görevi",
+  citation_task: "Kaynak sitelere ulaşma görevi",
   ad_draft: "Reklam taslağı",
 };
 
@@ -40,9 +40,10 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
   const base = `/w/${workspaceId}/b/${brandId}`;
   const tz = access.brand.timezone;
   const ctx = { role: access.brandRole, isApprover: access.isApprover };
-  const [writableConnector, failedPublication] = await Promise.all([
+  const [writableConnector, failedPublication, productCount] = await Promise.all([
     db.integration.findFirst({ where: { brandId, status: "healthy", capabilities: { path: ["contentWrite"], equals: true } } }),
     a.status === "failed" ? db.publication.findFirst({ where: { workspaceId, actionId: a.id, status: "failed" }, orderBy: { createdAt: "desc" } }) : null,
+    db.product.count({ where: { brandId, active: true } }),
   ]);
   const measurement = a.measurement as { publishAt?: string; baselineDays?: number; followUps?: number[]; manualPublish?: boolean } | null;
   const manual = Boolean(measurement?.manualPublish);
@@ -95,10 +96,19 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
         <p className="mt-3 text-sm text-text-secondary"><span className="font-medium text-text">{flow.label}.</span> {flow.next}</p>
         {measurement?.publishAt ? (
           <p className="mt-1 text-xs text-text-secondary">
-            {manual ? "Manuel uygulama bildirimi" : "Yayın"}: {fmtDate(measurement.publishAt, tz, "tr-TR", true)} · Baz dönem {measurement.baselineDays ?? 14} gün · Takip {measurement.followUps?.join(" / ") ?? "—"} gün
+            {manual ? "Sitenizde uygulandı bildirimi (sizin)" : "Yayın"}: {fmtDate(measurement.publishAt, tz, "tr-TR", true)} · Karşılaştırma dönemi {measurement.baselineDays ?? 14} gün · Sonuç için aynı soruları yeniden ölçün
           </p>
         ) : null}
       </Card>
+      {needsFix && ["measuring", "completed", "published"].includes(a.status) ? (
+        <div className="mb-6">
+          <Alert tone="warning" title="Bu kayıtta eksikler var">
+            Bu içerik uygulandı olarak işaretlenmiş, ancak kayıtlı sürümde doldurulmamış alanlar bulunuyor. Bu aşamada sürüm salt okunurdur; durumu geri almak yerine
+            {a.opportunity ? <> fırsattan <a className="font-medium text-primary underline" href={`${base}/opportunities/${a.opportunity.id}`}>yeni bir taslak oluşturun</a></> : " yeni bir taslak oluşturun"}
+            {productCount === 0 ? <> ve önce <a className="font-medium text-primary underline" href={`/w/${workspaceId}/onboarding?brand=${brandId}&step=3`}>ürün bilgilerini tamamlayın</a></> : null}.
+          </Alert>
+        </div>
+      ) : null}
       {failedPublication ? (
         <div className="mb-6">
           <Alert tone="danger" title="Yayın tamamlanamadı">
@@ -115,6 +125,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
         permissions={{ edit: can(ctx, "actions.draft"), approve: can(ctx, "actions.approve"), publish: can(ctx, "actions.publish"), export: can(ctx, "export") }}
         canPublishReason={writableConnector ? null : "Yazma destekli ve doğrulanmış mağaza bağlantısı yok — dışa aktarıp manuel uygulayabilirsiniz"}
         integrationsHref={`${base}/integrations`}
+        setupHref={productCount === 0 ? `/w/${workspaceId}/onboarding?brand=${brandId}&step=3` : undefined}
       />
     </>
   );

@@ -50,6 +50,15 @@ export const GAP_LABEL: Record<string, string> = {
   structured_data: "Yapılandırılmış veri",
 };
 
+export const RUN_STATUS_LABEL: Record<string, string> = {
+  queued: "Sırada",
+  running: "Çalışıyor",
+  partial: "Kısmen tamamlandı",
+  succeeded: "Tamamlandı",
+  failed: "Başarısız",
+  canceled: "İptal edildi",
+};
+
 export const OPP_STATUS_LABEL: Record<string, string> = {
   new: "Yeni",
   triaged: "Değerlendirildi",

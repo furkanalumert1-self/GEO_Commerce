@@ -40,20 +40,27 @@ export function ContextSwitcher({
   const qs = keep.toString() ? `?${keep.toString()}` : "";
   const section = pathname.match(/\/b\/[^/]+\/([^/]+)/)?.[1] ?? "dashboard";
 
+  // Aynı adlı çalışma alanları (ör. üç "Homedius") domain + kısa kimlikle ayırt edilir.
+  const dup = new Set(workspaces.map((w) => w.name).filter((n, i, a) => a.indexOf(n) !== i));
+  const wsLabel = (w: ShellWorkspace) => (dup.has(w.name) ? `${w.name} · ${w.brands[0]?.domain ?? w.id.slice(0, 8)} · ${w.id.slice(0, 8)}` : w.name);
+  const singleBrand = ws && ws.brands.length === 1 && currentBrandId === ws.brands[0]!.id ? ws.brands[0]! : null;
+
   return (
-    <div className={layout === "stacked" ? "flex flex-col gap-1.5" : "flex min-w-0 flex-1 items-center gap-2"}>
+    <div className={layout === "stacked" ? "flex flex-col gap-1 rounded-[var(--radius-md)] border border-border bg-surface p-2" : "flex min-w-0 flex-1 items-center gap-2"}>
       <label className={layout === "stacked" ? "px-1 text-xs font-medium text-text-secondary" : "sr-only"} htmlFor={`ws-switch${idSuffix}`}>Çalışma alanı</label>
       <select
         id={`ws-switch${idSuffix}`}
-        className={selectClass(layout)}
+        className={cn(selectClass(layout), layout === "stacked" && "border-transparent font-semibold hover:border-border")}
         value={currentWorkspaceId}
         onChange={(e) => router.push(`/w/${e.target.value}/overview`)}
       >
         {workspaces.map((w) => (
-          <option key={w.id} value={w.id}>{w.name}</option>
+          <option key={w.id} value={w.id}>{wsLabel(w)}</option>
         ))}
       </select>
-      {ws && ws.brands.length > 0 ? (
+      {singleBrand ? (
+        layout === "stacked" ? <p className="truncate px-2.5 text-xs text-text-secondary" title={singleBrand.domain}>{singleBrand.domain} · {currentWorkspaceId.slice(0, 8)}</p> : null
+      ) : ws && ws.brands.length > 0 ? (
         <>
           <label className={layout === "stacked" ? "mt-1 px-1 text-xs font-medium text-text-secondary" : "sr-only"} htmlFor={`brand-switch${idSuffix}`}>Marka</label>
           <select
@@ -64,7 +71,7 @@ export function ContextSwitcher({
           >
             {!currentBrandId ? <option value="">Marka seçin</option> : null}
             {ws.brands.map((b) => (
-              <option key={b.id} value={b.id}>{b.name}</option>
+              <option key={b.id} value={b.id}>{b.name} · {b.domain}</option>
             ))}
           </select>
         </>

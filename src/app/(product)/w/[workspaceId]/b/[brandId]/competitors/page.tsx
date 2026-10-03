@@ -25,7 +25,7 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ wo
           <CardHeader title="Rakip listesi" description="Rekabet payı: son 30 gün, aynı soru kümesi" />
           {comps.length === 0 ? <EmptyState title="Rakip yok" description="Formdan rakip ekleyin veya audit'teki adayları onaylayın." /> : (
             <TableWrap label="Rakipler">
-              <thead><tr><Th>Rakip</Th><Th>Kaynak</Th><Th>Durum</Th><Th numeric>SOV</Th><Th>İşlem</Th></tr></thead>
+              <thead><tr><Th>Rakip</Th><Th>Kaynak</Th><Th>Durum</Th><Th numeric>Görünürlük payı</Th><Th>İşlem</Th></tr></thead>
               <tbody>
                 {comps.map((c) => (
                   <tr key={c.id}>

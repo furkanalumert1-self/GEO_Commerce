@@ -11,7 +11,7 @@ import { pageBrand } from "@/lib/page-access";
 import { brandMetrics, parseRange } from "@/modules/monitoring/queries";
 import { brandEntities } from "@/modules/monitoring/service";
 import { isUuid } from "@/modules/tenancy/access";
-import { ENGINE_SHORT, fmtDate, fmtNumber, fmtPct, SURFACE_LABEL } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate, fmtNumber, fmtPct, SURFACE_LABEL, RUN_STATUS_LABEL } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Görünürlük" };
 
@@ -54,12 +54,12 @@ export default async function VisibilityPage({ params, searchParams }: { params:
           <TableWrap label="Motor kırılımı">
             <thead>
               <tr>
-                <Th>Motor</Th>
-                <Th numeric>Skor</Th>
-                <Th numeric>Mention</Th>
-                <Th numeric>Öneri</Th>
-                <Th numeric>Kendi citation</Th>
-                <Th numeric>Coverage</Th>
+                <Th>Platform</Th>
+                <Th numeric>Puan</Th>
+                <Th numeric title="Markanızın yanıtlarda anılma oranı">Markanızın anılması</Th>
+                <Th numeric>Önerilme</Th>
+                <Th numeric title="Sitenizin kaynak olarak gösterilme oranı">Kaynak gösterilme</Th>
+                <Th numeric title="Planlanan yanıtlardan alınabilenlerin oranı">Tamamlanan ölçüm</Th>
               </tr>
             </thead>
             <tbody>
@@ -87,12 +87,12 @@ export default async function VisibilityPage({ params, searchParams }: { params:
           </div>
         </Card>
         <Card>
-          <CardHeader title="Share of Voice" description="Aynı soru kümesi; her yanıtta bir marka en fazla bir kez sayılır. Rakip listesi değişirse karşılaştırma kümesi değişir." />
+          <CardHeader title="Rakiplere göre görünürlük payı" description="Aynı soru kümesi; her yanıtta bir marka en fazla bir kez sayılır. Rakip listesi değişirse karşılaştırma kümesi değişir." />
           <TableWrap label="Share of voice">
             <thead>
               <tr>
                 <Th>Marka</Th>
-                <Th numeric>SOV</Th>
+                <Th numeric>Pay</Th>
               </tr>
             </thead>
             <tbody>
@@ -120,9 +120,9 @@ export default async function VisibilityPage({ params, searchParams }: { params:
             <thead>
               <tr>
                 <Th>Soru</Th>
-                <Th>Motor</Th>
-                <Th>Marka</Th>
-                <Th numeric>Citation</Th>
+                <Th>Platform</Th>
+                <Th>Markanız</Th>
+                <Th numeric title="Yanıtta gösterilen kaynak sayısı">Kaynak</Th>
                 <Th>Tarih</Th>
               </tr>
             </thead>
@@ -156,7 +156,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
               <Link className="text-primary hover:underline" href={`/w/${workspaceId}/b/${brandId}/runs/${r.id}`}>{fmtDate(r.scheduledAt, access.brand.timezone, "tr-TR", true)} · {r.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")}</Link>
               <span className="flex items-center gap-2">
-                <Badge tone={r.status === "succeeded" ? "success" : r.status === "partial" ? "warning" : r.status === "failed" ? "danger" : "primary"}>{r.status}</Badge>
+                <Badge tone={r.status === "succeeded" ? "success" : r.status === "partial" ? "warning" : r.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[r.status] ?? r.status}</Badge>
                 <span className="tabular text-muted">{r.completedCount}/{r.scheduledCount}</span>
               </span>
             </li>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ArrowRight } from "lucide-react";
-import { Alert, Card, CardHeader, EmptyState, PageHeader, Provenance, SectionHeader, TableWrap, Td, Th, cn } from "@/components/ui";
+import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader, Provenance, SectionHeader, TableWrap, Td, Th, cn } from "@/components/ui";
 import { FilterBar } from "@/components/layout/filter-bar";
 import { TrendChart } from "@/components/data/trend-chart";
 import { ActionStatusBadge, ImpactBadge, MetricCard, PlatformBreakdown } from "@/components/data/growth";
@@ -73,7 +73,13 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     db.observation.findMany({ where: { workspaceId, brandId }, distinct: ["engine"], select: { engine: true } }),
     db.integration.count({ where: { brandId, capabilities: { path: ["ordersRead"], equals: true } } }),
   ]);
-  const needsFix = await actionsNeedingFix(db, recentActions);
+  const [needsFix, productCount, oppActions] = await Promise.all([
+    actionsNeedingFix(db, recentActions),
+    db.product.count({ where: { brandId, active: true } }),
+    db.action.findMany({ where: { workspaceId, brandId, opportunityId: { in: topOpps.map((o) => o.id) } }, orderBy: { updatedAt: "desc" }, select: { id: true, opportunityId: true } }),
+  ]);
+  const actionByOpp = new Map<string, string>();
+  for (const a of oppActions) if (a.opportunityId && !actionByOpp.has(a.opportunityId)) actionByOpp.set(a.opportunityId, a.id);
   const revenueAllowed = hasFeature(access.entitlements, "revenue");
   const revenue = revenueAllowed && orderSources > 0 ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
 
@@ -112,14 +118,23 @@ export default async function DashboardPage({ params, searchParams }: { params: 
   const coverages = metrics.perEngine.map((e) => e.coverage).filter((c): c is number => c !== null);
   const coverageVaries = coverages.length > 1 && Math.max(...coverages) - Math.min(...coverages) > 0.2;
 
-  // ── Tek cümle durum özeti (yalnız veriye dayalı ifadeler) ──
-  const summary: string[] = [];
-  if (newOpps > 0) summary.push(`${newOpps} fırsat incelemenizi bekliyor.`);
-  else if (openOpps > 0) summary.push(`${openOpps} açık fırsat üzerinde çalışılıyor.`);
-  else summary.push("Açık fırsat yok.");
-  if (scoreDelta.kind === "points" && scoreDelta.direction !== "flat") {
-    summary.push(`AI görünürlüğü önceki döneme göre ${Math.abs(scoreDelta.value)} puan ${scoreDelta.direction === "up" ? "arttı" : "azaldı"}.`);
-  }
+  // ── Günlük dilde özetler (yalnız gerçek veriden) ──
+  const validTotal = metrics.perEngine.reduce((a, e) => a + e.validObservations, 0);
+  const mentionedTotal = metrics.perEngine.reduce((a, e) => a + Math.round((e.M ?? 0) * e.validObservations), 0);
+  const visibilitySentence =
+    validTotal === 0 ? "Bu dönemde geçerli yanıt yok." : mentionedTotal === 0 ? `${fmtNumber(validTotal)} yanıtın hiçbirinde markanız anılmadı.` : `Markanız ${fmtNumber(validTotal)} yanıttan ${fmtNumber(mentionedTotal)} tanesinde anıldı.`;
+  const leaders = metrics.sov.filter((x) => x.type === "competitor" && (x.value ?? 0) > 0).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)).slice(0, 3).map((x) => x.name);
+  const sovSentence = competitorCount === 0 ? "Henüz onaylı rakip yok." : leaders.length ? `${leaders.join(", ")} öne çıkıyor.` : "Rakipleriniz de bu yanıtlarda anılmadı.";
+  const ongoing = openOpps - newOpps;
+  const oppSentence = openOpps === 0 ? "Şu an açık fırsat yok." : `${fmtNumber(newOpps)} yeni, ${fmtNumber(ongoing)} devam ediyor.`;
+  const engineName = (e: string) => ENGINE_SHORT[e] ?? e;
+  const missingDetail = metrics.aggregate.missingEngines.map((e) => {
+    const pe = metrics.perEngine.find((x) => x.engine === e);
+    if (!pe || pe.validObservations === 0) return `${engineName(e)} yanıt vermedi`;
+    return `${engineName(e)} yanıtlarının yalnız %${Math.round((pe.coverage ?? 0) * 100)}'i alınabildi`;
+  });
+  const usedEngines = metrics.perEngine.filter((e) => !metrics.aggregate.missingEngines.includes(e.engine) && e.validObservations > 0).map((e) => engineName(e.engine));
+  const scoredDays = trend.filter((d) => d.score !== null);
 
   return (
     <>
@@ -127,7 +142,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         title="Genel Bakış"
         description={
           <>
-            <span className="text-text">{summary.join(" ")}</span>
+            AI asistanlarında markanızın nasıl göründüğü ve bugün yapabilecekleriniz.
             <span className="mt-1 block text-[13px]">
               {access.brand.name} · Son güncelleme: {fmtDate(metrics.provenance.lastSampledAt, tz, "tr-TR", true)}
             </span>
@@ -138,7 +153,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
             url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/runs`}
             body={{ engines: ["chatgpt", "gemini", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1 }}
             idempotent
-            label="Ölçüm başlat"
+            variant="primary"
+            label="Yeni ölçüm başlat"
             pendingLabel="Başlatılıyor…"
             redirectTo={`${base}/runs/{runId}`}
           />
@@ -148,10 +164,10 @@ export default async function DashboardPage({ params, searchParams }: { params: 
 
       {metrics.aggregate.partial ? (
         <div className="mb-6">
-          <Alert tone="warning" title="Kısmi veri">
-            {metrics.aggregate.missingEngines.length
-              ? `Kapsamı %80 altında veya skorsuz platformlar toplam skora dahil edilmedi: ${metrics.aggregate.missingEngines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")}.`
-              : "Seçili dönemde yeterli gözlem yok."}
+          <Alert tone="warning" title="Ölçüm kısmen tamamlandı">
+            {missingDetail.length ? `${missingDetail.join("; ")}.` : "Seçili dönemde yeterli yanıt yok."}{" "}
+            {usedEngines.length ? `Sonuçlar yalnız ${usedEngines.join(", ")} yanıtlarına dayanıyor. ` : ""}
+            <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`${base}/visibility?status=failed`}>Alınamayan yanıtları gör</Link>
           </Alert>
         </div>
       ) : null}
@@ -161,44 +177,49 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           label="AI görünürlüğü"
           value={score ?? undefined}
           unit="/ 100"
-          missing={score === null ? (metrics.sampleCount ? "Yetersiz örneklem" : "Henüz ölçülmüyor") : undefined}
+          missing={score === null ? (metrics.sampleCount ? "Yetersiz veri" : "Henüz ölçülmüyor") : undefined}
+          badge={metrics.aggregate.smallSample && score !== null ? <Badge tone="warning">Az veri</Badge> : undefined}
+          sentence={visibilitySentence}
           delta={scoreDelta}
-          scope={`${fmtNumber(metrics.sampleCount)} geçerli yanıt · ${range.days} gün${metrics.aggregate.smallSample ? " · küçük örneklem" : ""}`}
+          scope={`${fmtNumber(metrics.sampleCount)} geçerli yanıt · ${range.days} gün`}
           href={`${base}/visibility${qs}`}
           linkLabel="Soruları gör"
         />
         <MetricCard
-          label="Rekabet payı (Share of Voice)"
+          label="Rakiplere göre görünürlük payınız"
           value={self === null ? undefined : fmtNumber(self, "tr-TR", 1)}
           unit="%"
           missing={self === null ? "Henüz ölçülmüyor" : undefined}
+          sentence={sovSentence}
           delta={sovDelta}
-          scope={`${competitorCount} onaylı rakiple aynı soru kümesi`}
+          scope={`Aynı sorularda markanızın ve ${competitorCount} onaylı rakibin anılma payı`}
           href={`${base}/competitors${qs}`}
           linkLabel="Rakipleri gör"
         />
         <MetricCard
-          label="Açık büyüme fırsatları"
+          label="Büyüme fırsatları"
           value={fmtNumber(openOpps)}
-          scope={highOpps > 0 ? `${highOpps} yüksek öncelikli` : "Yüksek öncelikli fırsat yok"}
+          sentence={oppSentence}
+          scope={highOpps > 0 ? `${highOpps} yüksek öncelikli` : undefined}
           href={`${base}/opportunities`}
           linkLabel="Fırsatları gör"
         />
         {revenue ? (
           <MetricCard
-            label="AI kaynaklı gelir"
+            label="AI kaynaklı satış"
             value={<CurrencyAmounts byCurrency={revenue.aiNetByCurrency} fallbackCurrency={access.brand.currency} />}
-            scope={`${fmtNumber(revenue.aiOrders)} sipariş · son dokunuş · kapsam ${fmtPct(revenue.attributionCoverage)}`}
+            sentence={`${fmtNumber(revenue.aiOrders)} sipariş AI ziyaretleriyle eşleşti.`}
+            scope={`Son dokunuş · eşleşen sipariş oranı ${fmtPct(revenue.attributionCoverage)}`}
             href={`${base}/revenue${qs}`}
             linkLabel="Geliri gör"
           />
         ) : (
           <MetricCard
-            label="AI kaynaklı gelir"
-            missing={revenueAllowed ? "Entegrasyon gerekli" : "Paketinizde yok"}
-            scope={revenueAllowed ? "Sipariş kaynağı bağlanınca gözlemlenen gelir gösterilir." : "Gelir ölçümü Commerce ve üzeri paketlerde."}
+            label="AI kaynaklı satış"
+            missing="Henüz ölçülmüyor"
+            sentence={revenueAllowed ? "Mağaza bağlantısı veya CSV sipariş aktarımı gerekiyor." : "Satış ölçümü Commerce ve üzeri paketlerde."}
             href={revenueAllowed ? `${base}/integrations` : `/w/${workspaceId}/billing`}
-            linkLabel={revenueAllowed ? "Mağazayı bağla" : "Paketleri gör"}
+            linkLabel={revenueAllowed ? "Kurulumu tamamla" : "Paketleri gör"}
           />
         )}
       </section>
@@ -206,10 +227,18 @@ export default async function DashboardPage({ params, searchParams }: { params: 
       <section aria-labelledby="focus" className="mt-10">
         <SectionHeader
           id="focus"
-          title="Bugün odaklanmanız gerekenler"
-          description={topOpps.length ? `Öncelik sırasına göre ${topOpps.length === 3 ? "ilk 3" : topOpps.length} fırsat` : undefined}
+          title="Bugün yapabilecekleriniz"
+          description={topOpps.length ? "Öncelik sırasına göre en fazla 3 adım." : undefined}
           action={<Link className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline underline-offset-2 sm:min-h-0" href={`${base}/opportunities`}>Tüm fırsatlar <ArrowRight size={14} aria-hidden /></Link>}
         />
+        {productCount === 0 && topOpps.length ? (
+          <div className="mb-3">
+            <Alert tone="warning" title="Ürün bilgileriniz eksik">
+              Katalogda ürün yok; bu yüzden AI ile iyileştir taslakları ürün ayrıntısı içeremez. Önce siteyi tarayın veya ürünlerinizi aktarın.{" "}
+              <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`/w/${workspaceId}/onboarding?brand=${brandId}&step=3`}>Ürün bilgilerini tamamla</Link>
+            </Alert>
+          </div>
+        ) : null}
         {topOpps.length === 0 ? (
           <Card>
             <EmptyState title="Şu an öncelikli fırsat yok" description="Yeni ölçümler tamamlandıkça rakiplere kaybedilen sorular burada listelenir." />
@@ -218,46 +247,46 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           <ol className="flex flex-col gap-3">
             {topOpps.map((o, i) => {
               const comps = o.components as Components;
-              const engine = (o.diagnosis as DiagnosisJson)?.[0]?.observation?.engine;
+              const diag = o.diagnosis as DiagnosisJson & Array<{ verification?: string }>;
+              const engine = diag?.[0]?.observation?.engine;
+              const weakEvidence = diag?.[0]?.verification === "insufficient_evidence";
               const rawEvidence = comps.visibilityGap?.rationale ?? comps.evidenceStrength?.rationale ?? null;
               const evidence = rawEvidence ? plainTr(rawEvidence) : null;
+              const actionId = actionByOpp.get(o.id);
+              const continuing = o.status === "in_progress" && actionId;
+              const href = continuing ? `${base}/actions/${actionId}` : `${base}/opportunities/${o.id}`;
               return (
                 <li key={o.id}>
-                  <Card className={cn("flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between", i === 0 && "border-l-[3px] border-l-primary")}>
+                  <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-                        <span className="tabular font-medium">Öncelik {i + 1}</span>
-                        <span aria-hidden>·</span>
-                        <span>{GAP_LABEL[o.gapType]}</span>
-                        <span aria-hidden>·</span>
+                        {continuing ? <Badge>Devam ediyor</Badge> : <Badge tone="primary">Öncelik {i + 1}</Badge>}
                         <span>{o.cluster.label}</span>
-                        {engine ? (
-                          <>
-                            <span aria-hidden>·</span>
-                            <span>{ENGINE_SHORT[engine] ?? engine}</span>
-                          </>
-                        ) : null}
+                        {engine ? <><span aria-hidden>·</span><span>{ENGINE_SHORT[engine] ?? engine}</span></> : null}
+                        {weakEvidence ? <Badge tone="warning">Kanıt az</Badge> : null}
+                        <ImpactBadge level={impactLevel(o)} />
                       </div>
-                      <h3 className="mt-1.5 text-base font-semibold leading-snug">
-                        <Link href={`${base}/opportunities/${o.id}`} className="hover:underline underline-offset-2">{o.title}</Link>
+                      <h3 className="mt-2 text-base font-semibold leading-snug">
+                        <Link href={href} className="hover:underline underline-offset-2">{o.title}</Link>
                       </h3>
-                      <p className="mt-1 text-sm text-text-secondary">{evidence ?? "Bu öneri henüz kanıtla doğrulanmadı."}</p>
+                      <p className="mt-1 text-sm text-text-secondary">{evidence ?? "Bu öneri henüz kanıtla doğrulanmadı."} <span className="text-xs">({GAP_LABEL[o.gapType]})</span></p>
                       {o.recommendedAction ? (
                         <p className="mt-2 text-sm">
-                          <span className="font-medium">Öneri: </span>
-                          {o.recommendedAction}
+                          <span className="font-semibold text-primary-hover">{continuing ? "Sıradaki adım: " : "Önerilen adım: "}</span>
+                          {continuing ? "Taslağı gözden geçirip tamamlayın." : o.recommendedAction}
                         </p>
                       ) : null}
                     </div>
-                    <div className="flex shrink-0 flex-row flex-wrap items-center gap-2 sm:flex-col sm:items-end">
-                      <ImpactBadge level={impactLevel(o)} />
-                      {o.expectedEffort ? <span className="text-xs text-text-secondary">Efor: {o.expectedEffort}</span> : null}
+                    <div className="flex shrink-0 flex-col gap-2 sm:items-end">
                       <Link
-                        href={`${base}/opportunities/${o.id}`}
-                        className="inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-sm font-medium text-primary hover:underline underline-offset-2 sm:min-h-9"
-                        aria-label={`İncele: ${o.title}`}
+                        href={href}
+                        className={cn(
+                          "inline-flex min-h-11 items-center justify-center gap-1 rounded-[var(--radius-md)] border px-4 text-sm font-medium sm:min-h-10",
+                          i === 0 && !continuing ? "border-primary bg-primary text-white hover:bg-primary-hover" : "border-border bg-surface hover:bg-surface-subtle",
+                        )}
+                        aria-label={`${continuing ? "Devam et" : "İncele"}: ${o.title}`}
                       >
-                        İncele <ArrowRight size={14} aria-hidden />
+                        {continuing ? "Devam et" : "İncele"}
                       </Link>
                     </div>
                   </Card>
@@ -270,8 +299,17 @@ export default async function DashboardPage({ params, searchParams }: { params: 
 
       <section aria-label="Görünürlük trendi ve platformlar" className="mt-10 grid gap-4 xl:grid-cols-12">
         <Card className="xl:col-span-8">
-          <CardHeader title="Görünürlük trendi" description={`Günlük AI görünürlük skoru (0–100) · kesik çizgi: önceki ${range.days} gün`} />
+          <CardHeader title="Görünürlük trendi" description={`Günlük AI görünürlük puanı (0–100) · kesik çizgi: önceki ${range.days} gün`} />
           <div className="px-5 pb-2 pt-4">
+            {scoredDays.length > 0 && scoredDays.length < 3 ? (
+              <div className="flex flex-wrap items-center gap-4 pb-4">
+                <ul className="flex flex-wrap gap-2">
+                  {scoredDays.map((d) => <li key={d.day} className="tabular rounded-[var(--radius-md)] bg-surface-subtle px-3 py-2 text-sm">{fmtDate(new Date(`${d.day}T12:00:00Z`), tz)} · <b>{d.score}</b></li>)}
+                </ul>
+                <div className="min-w-0 flex-1"><p className="font-medium">Trend için daha fazla ölçüm gerekiyor.</p><p className="text-sm text-text-secondary">Şu an {scoredDays.length} ölçüm günü var; düzenli ölçümle eğilim burada çizgi olarak görünür.</p></div>
+              </div>
+            ) : (
+            <>
             <p className="mb-3 text-sm text-text-secondary">{trendSummary}</p>
             {chartData.length ? (
               <TrendChart
@@ -284,6 +322,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
               />
             ) : (
               <EmptyState title="Sonuç yok" description="Seçili filtrelerde gözlem bulunamadı." action={<Link className="text-primary underline" href={`${base}/dashboard`}>Filtreleri sıfırla</Link>} />
+            )}
+            </>
             )}
           </div>
           <details className="border-t border-border px-5 py-3 text-xs">
@@ -302,14 +342,14 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           </details>
         </Card>
         <Card className="xl:col-span-4">
-          <CardHeader title="Platformlar" description="Aynı ölçek (0–100); platformlar ayrı ölçülür." />
+          <CardHeader title="Platformlar" description="Her platform ayrı ölçülür (0–100)." />
           <PlatformBreakdown
             rows={metrics.perEngine.map((e) => ({
               key: e.engine,
               label: ENGINE_SHORT[e.engine] ?? e.engine,
               score: e.score,
               samples: e.validObservations,
-              note: `kapsam ${fmtPct(e.coverage)}${e.smallSample ? " · küçük örneklem" : ""}`,
+              note: `tamamlanan ölçüm ${fmtPct(e.coverage)}${e.smallSample ? " · az veri" : ""}`,
             }))}
           />
           {coverageVaries ? (
@@ -321,12 +361,12 @@ export default async function DashboardPage({ params, searchParams }: { params: 
       <section aria-labelledby="works" className="mt-10">
         <SectionHeader
           id="works"
-          title="Devam eden ve son çalışmalar"
+          title="Son çalışmalar"
           action={<Link className="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary hover:underline underline-offset-2 sm:min-h-0" href={`${base}/actions`}>Tüm aksiyonlar <ArrowRight size={14} aria-hidden /></Link>}
         />
         <Card>
           {recentActions.length === 0 ? (
-            <EmptyState title="Henüz aksiyon yok" description="Bir fırsatı inceleyip Fix with AI ile taslak oluşturduğunuzda çalışmalarınız burada görünür." />
+            <EmptyState title="Henüz aksiyon yok" description="Bir fırsatı inceleyip AI ile iyileştir taslağı oluşturduğunuzda çalışmalarınız burada görünür." />
           ) : (
             <>
             <ul className="divide-y divide-border sm:hidden">

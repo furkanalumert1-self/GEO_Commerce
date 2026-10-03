@@ -4,15 +4,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, CardHeader, Field, inputClass } from "@/components/ui";
 import { blockingIssues, lineDiff, toMarkdown, validateJsonLd, type ActionContent } from "@/modules/actions/workflow";
+import { ContentPreview } from "@/components/data/content-preview";
 
 const STAGE_TITLE: Record<string, string> = {
   draft: "Taslak · sonraki adım",
   review: "İnceleme bekliyor",
   approved: "Uygulama: yayın kapsamını kontrol edin",
   publishing: "Yayınlanıyor",
-  published: "Yayınlandı · ölçüme hazır",
-  measuring: "Ölçülüyor",
-  completed: "Ölçüm tamamlandı",
+  published: "Yayınlandı · sonucu izlemeye hazır",
+  measuring: "Sonuç izleniyor",
+  completed: "İzleme tamamlandı",
   failed: "Yayın başarısız",
   rejected: "Reddedildi",
   rolled_back: "Geri alındı",
@@ -40,6 +41,7 @@ export function ActionEditor({
   permissions,
   canPublishReason,
   integrationsHref,
+  setupHref,
 }: {
   api: string;
   action: { id: string; status: string; version: number; currentVersionId: string | null; targetUrl: string | null };
@@ -48,6 +50,8 @@ export function ActionEditor({
   permissions: { edit: boolean; approve: boolean; publish: boolean; export: boolean };
   canPublishReason: string | null;
   integrationsHref?: string;
+  /** Katalog boşsa eksik bilgileri tamamlama yeri (kurulum). */
+  setupHref?: string;
 }) {
   const router = useRouter();
   const current = versions.find((v) => v.id === action.currentVersionId) ?? versions[0]!;
@@ -55,7 +59,7 @@ export function ActionEditor({
   const [draft, setDraft] = useState<ActionContent>(current.content);
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState(false);
-  const [pane, setPane] = useState<"edit" | "diff">("edit");
+  const [pane, setPane] = useState<"preview" | "edit" | "tech">("preview");
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string; conflict?: boolean } | null>(null);
   const editable = permissions.edit && ["draft", "review", "approved", "rejected", "failed", "rolled_back"].includes(action.status);
 
@@ -146,9 +150,10 @@ export function ActionEditor({
 
       {blocked ? (
         <Card className="border-danger/40 p-5 text-sm" role="region" aria-labelledby="fix-required">
-          <p id="fix-required" className="font-semibold text-danger">Düzeltme gerekli ({savedIssues.length})</p>
+          <p id="fix-required" className="font-semibold text-danger">Bu taslakta {savedIssues.length} eksik bilgi var</p>
           <p className="mt-0.5 text-text-secondary">
-            Kayıtlı sürümde doldurulmamış zorunlu alanlar var. Bunlar giderilip yeni sürüm kaydedilmeden onay, yayın, dışa aktarma ve manuel uygulama yapılamaz.
+            Eksikler tamamlanıp yeni sürüm kaydedilmeden onay, yayın, dışa aktarma ve “sitenizde uygulandı” bildirimi yapılamaz.
+            {setupHref ? <> Ürün bilgileri katalogda olmadığı için boş kaldı: <a className="font-medium text-primary underline" href={setupHref}>Ürün bilgilerini tamamla</a>.</> : null}
             {approvedButBlocked ? " Bu kayıt daha önce onaylanmış olsa da yayına hazır sayılmaz; düzenleme yeni onay gerektirir." : ""}
           </p>
           <ul className="mt-2 flex flex-col gap-1">
@@ -184,19 +189,18 @@ export function ActionEditor({
           ) : null}
           <div className="flex flex-wrap items-start gap-2" role="toolbar" aria-label="Aksiyon işlemleri">
             {permissions.approve && (action.status === "draft" || action.status === "review") ? (
-              <Button variant="primary" disabled={pending || dirty || blocked} onClick={() => call(`${api}/approve`, { versionId: current.id, expectedHash: current.contentHash }, "Onaylandı")}>Bu sürümü onayla</Button>
+              <Button variant="primary" disabled={pending || dirty || blocked} title={blocked ? "Eksik bilgiler tamamlanmadan onaylanamaz" : undefined} onClick={() => call(`${api}/approve`, { versionId: current.id, expectedHash: current.contentHash }, "Onaylandı")}>Değişiklikleri onayla</Button>
             ) : null}
             {permissions.edit && action.status === "draft" ? <Button variant={permissions.approve ? "secondary" : "primary"} disabled={pending || dirty} onClick={() => call(`${api}/transition`, { to: "review" }, "İncelemeye gönderildi")}>İncelemeye gönder</Button> : null}
             {permissions.approve && (action.status === "draft" || action.status === "review") ? <Button variant="danger" disabled={pending} onClick={() => call(`${api}/transition`, { to: "rejected" }, "Reddedildi")}>Reddet</Button> : null}
             {action.status === "approved" && permissions.publish ? (
               <Button variant={canPublishReason || blocked ? "secondary" : "primary"} disabled={pending || blocked || Boolean(canPublishReason)} onClick={() => call(`${api}/publish`, {}, "Yayın kuyruğa alındı")}>Mağazada yayımla</Button>
             ) : null}
-            {action.status === "approved" && permissions.approve ? <Button disabled={pending || blocked} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Manuel uygulama kaydedildi; ölçüm başladı")}>Manuel yayımlandı → ölçüme al</Button> : null}
-            {action.status === "published" && permissions.approve ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Ölçüm başladı")}>Ölçümü başlat</Button> : null}
+            {action.status === "approved" && permissions.approve ? <Button disabled={pending || blocked} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Uygulama bildiriminiz kaydedildi; sonuç izleniyor")}>Sitenizde uyguladım → sonucu izle</Button> : null}
+            {action.status === "published" && permissions.approve ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Sonuç izlemeye alındı")}>Sonucu izlemeye başla</Button> : null}
             {action.status === "publishing" ? <Button disabled={pending} onClick={() => router.refresh()}>Durumu yenile</Button> : null}
-            {action.status === "measuring" && permissions.approve ? <Button disabled={pending} onClick={() => call(`${api}/transition`, { to: "completed" }, "Tamamlandı")}>Ölçümü tamamla</Button> : null}
+            {action.status === "measuring" && permissions.approve ? <Button disabled={pending} onClick={() => call(`${api}/transition`, { to: "completed" }, "Tamamlandı")}>İzlemeyi tamamla</Button> : null}
             {(action.status === "rejected" || action.status === "rolled_back") && permissions.edit ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "draft" }, "Taslağa döndü")}>Taslağa döndür</Button> : null}
-            {exportLinks}
           </div>
           {blocked && (action.status === "draft" || action.status === "review" || action.status === "approved") ? (
             <p className="text-sm text-text-secondary"><span className="font-medium text-text">Onay ve uygulama kapalı:</span> önce yukarıdaki zorunlu alanları doldurup yeni sürüm olarak kaydedin.</p>
@@ -208,7 +212,7 @@ export function ActionEditor({
             </p>
           ) : null}
           {action.status === "approved" ? (
-            <p className="text-xs text-text-secondary">Onaylamak içeriği yayınlamaz. Manuel uygulama bir kullanıcı bildirimi olarak kaydedilir; doğrulanmış mağaza yayını değildir.</p>
+            <p className="text-xs text-text-secondary">Onaylamak içeriği yayınlamaz. “Sitenizde uygulandı” sizin bildiriminizdir; doğrulanmış mağaza yayını değildir.</p>
           ) : null}
           {approved ? (
             <details className="text-xs text-text-secondary">
@@ -227,8 +231,8 @@ export function ActionEditor({
         </Card>
       ) : null}
 
-      <div className="flex gap-1 rounded-md bg-surface-subtle p-0.5 xl:hidden" role="tablist" aria-label="Görünüm">
-        {(["edit", "diff"] as const).map((k) => (
+      <div className="flex gap-1 rounded-[var(--radius-md)] bg-surface-subtle p-1" role="tablist" aria-label="Görünüm">
+        {(["preview", "edit", "tech"] as const).map((k) => (
           <button
             key={k}
             type="button"
@@ -236,15 +240,20 @@ export function ActionEditor({
             aria-selected={pane === k}
             aria-controls={`pane-${k}`}
             onClick={() => setPane(k)}
-            className={pane === k ? "min-h-11 flex-1 rounded-[6px] bg-surface text-sm font-medium shadow-[var(--shadow-card)] ring-1 ring-border" : "min-h-11 flex-1 rounded-[6px] text-sm text-text-secondary"}
+            className={pane === k ? "min-h-11 min-w-0 flex-1 rounded-[8px] px-2 leading-tight bg-surface text-sm font-medium shadow-[var(--shadow-card)] ring-1 ring-border sm:min-h-10" : "min-h-11 min-w-0 flex-1 rounded-[8px] px-2 leading-tight text-sm text-text-secondary sm:min-h-10"}
           >
-            {k === "edit" ? "Önerilen (düzenle)" : firstVersion ? "Sürüm farkı" : `Fark (+${added} / −${removed})`}
+            {k === "preview" ? "Önizleme" : k === "edit" ? (editable ? "Düzenle" : "Metin") : "Teknik ayrıntılar"}
           </button>
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card id="pane-edit" className={pane === "edit" ? "" : "hidden xl:block"}>
+      <Card id="pane-preview" className={pane === "preview" ? "p-5 sm:p-6" : "hidden"}>
+        <ContentPreview content={dirty ? draft : current.content} />
+        {dirty ? <p className="mt-4 text-xs text-warning">Kaydedilmemiş değişiklikler önizlemede gösteriliyor.</p> : null}
+      </Card>
+
+      <div className={pane === "edit" ? "" : "hidden"}>
+        <Card id="pane-edit">
           <CardHeader
             title="Önerilen içerik"
             description={`Güncel: v${current.number}${current.generated ? " (AI taslağı)" : ""}${editable ? "" : " · salt okunur"}`}
@@ -276,7 +285,11 @@ export function ActionEditor({
             {editable && draftIssues.length ? <p className="text-xs text-danger" role="status">Taslakta {draftIssues.length} doldurulmamış yer tutucu var ({[...new Set(draftIssues.map((d) => d.token))].join(", ")}).</p> : null}
           </div>
         </Card>
-        <Card id="pane-diff" className={pane === "diff" ? "" : "hidden xl:block"}>
+      </div>
+      <div id="pane-tech" className={pane === "tech" ? "flex flex-col gap-6" : "hidden"}>
+        <p className="text-sm text-text-secondary">Uzmanlar için: sürüm karşılaştırması, dışa aktarma ve yapılandırılmış veri kontrolü.</p>
+        {exportLinks}
+        <Card>
           <CardHeader
             title="Sürüm farkı"
             description={firstVersion ? undefined : `+${added} eklenen / −${removed} silinen satır`}
@@ -303,11 +316,9 @@ export function ActionEditor({
           </div>
           )}
         </Card>
-      </div>
-
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <CardHeader title="JSON-LD doğrulama" description="Yapısal kontrol; rich result veya AI citation garantisi değildir." />
+          <CardHeader title="Yapılandırılmış veri (JSON-LD) kontrolü" description="Yapısal kontrol; rich result veya AI citation garantisi değildir." />
           <div className="p-5 text-sm">
             {!draft.jsonLd ? <p className="text-text-secondary">Bu aksiyonda JSON-LD yok.</p> : ldIssues.length === 0 ? <Badge tone="success">Sorun bulunmadı; SSS görünür metinle uyumlu</Badge> : (
               <ul className="flex flex-col gap-1">{ldIssues.map((i, k) => <li key={k}><Badge tone={i.severity === "error" ? "danger" : "warning"}>{i.path}</Badge> {i.message}</li>)}</ul>
@@ -328,6 +339,7 @@ export function ActionEditor({
             </ul>
           </div>
         </Card>
+      </div>
       </div>
     </div>
   );

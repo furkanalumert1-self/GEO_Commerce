@@ -45,7 +45,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
         <pre className="max-h-72 overflow-auto rounded-md border border-border bg-bg p-3 font-sans text-sm whitespace-pre-wrap">{o.rawText ?? "Ham yanıt saklama süresi (30 gün) dolduğu için silindi."}</pre>
       </div>
       <div>
-        <p className="mb-1 font-medium">Mention&apos;lar</p>
+        <p className="mb-1 font-medium">Markanın / rakiplerin anılması</p>
         {o.mentions.length === 0 ? <p className="text-muted">Takip edilen marka anılmadı.</p> : (
           <ul className="flex flex-col gap-2">
             {o.mentions.map((m) => (
@@ -64,7 +64,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
         )}
       </div>
       <div>
-        <p className="mb-1 font-medium">Citation&apos;lar</p>
+        <p className="mb-1 font-medium">Gösterilen kaynaklar</p>
         {o.citations.length === 0 ? <p className="text-muted">Kaynak gösterilmedi.</p> : (
           <ul className="flex flex-col gap-1">
             {o.citations.map((c) => (

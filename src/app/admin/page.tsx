@@ -12,13 +12,25 @@ import { AuditForm } from "@/components/forms/audit-form";
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
+function describeEmail(email: string) {
+  const [local = "", domain = ""] = email.split("@");
+  return { masked: `${local.slice(0, 3)}***@${domain}`, length: email.length, nonAscii: /[^\x21-\x7e]/.test(email) };
+}
+
 /** Platform operatörü: ayrı allowlist; kullanıcı içeriği ve PII varsayılan olarak gösterilmez. */
 export default async function AdminPage() {
   const u = await requireUser("/admin");
   const user = await db.user.findUnique({ where: { id: u.id } });
   if (!user || !config().platformAdmins.includes(user.email.toLowerCase())) {
-    // Sayfanın varlığı gizli kalır (404); teşhis için yalnız allowlist durumu loglanır, e-postalar yazılmaz.
-    log.warn("[admin] access_denied", { allowlistSize: config().platformAdmins.length, hint: config().platformAdmins.length ? "Oturumdaki e-posta listede değil" : "PLATFORM_ADMIN_ALLOWLIST boş veya okunamadı (Production ortamına eklenip redeploy edildi mi?)" });
+    // Sayfanın varlığı gizli kalır (404). Teşhis için e-postalar maskeli loglanır (ilk 3 karakter + alan adı,
+    // uzunluk ve görünmez/ASCII dışı karakter işareti); tam adres yazılmaz.
+    const admins = config().platformAdmins;
+    log.warn("[admin] access_denied", {
+      allowlistSize: admins.length,
+      session: user ? describeEmail(user.email) : "kullanıcı kaydı yok",
+      allowlist: admins.map(describeEmail),
+      hint: admins.length ? "Oturumdaki e-posta listede değil" : "PLATFORM_ADMIN_ALLOWLIST boş veya okunamadı (Production ortamına eklenip redeploy edildi mi?)",
+    });
     notFound();
   }
   const since = daysAgo(30);

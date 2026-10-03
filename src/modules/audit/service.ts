@@ -99,7 +99,18 @@ export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAudi
  * birden çok ürünün paylaştığı ortak son ek ("Katlanır Koltuk") ve üst kategoriler ("Mobilya") tercih edilir;
  * markanın kendi model adları (yalnız tek ürüne özgü) soruya taşınmaz.
  */
-export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1: string | null; title: string | null; products: Array<{ category?: string | null }> } }>): string[] {
+/** Kategori olarak kullanılamayacak gezinme/filtre etiketleri. */
+const NAV_LABEL = /(kategori|liste|site ?haritası|arama)|^(tümü|tümünü gör|tüm ürünler|kampanya.*|indirim.*|fırsat.*|yeni.*|outlet|çok satan.*|blog|hakkımızda|iletişim|.* göre)$/i;
+
+/** "Yatak Modelleri ve Fiyatları | Sleeptown" → "Yatak". */
+function titleCategory(raw: string): string {
+  return raw
+    .split(/\s[|–—-]\s/)[0]!
+    .replace(/\s+(modelleri|çeşitleri|fiyatları|ürünleri)(\s+ve\s+(fiyatları|modelleri|çeşitleri))?$/i, "")
+    .trim();
+}
+
+export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1: string | null; title: string | null; products: Array<{ category?: string | null }>; breadcrumbs?: string[] } }>): string[] {
   const paths = pages.flatMap((p) => p.facts.products.map((x) => x.category ?? "")).filter(Boolean).map((c) => c.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean));
   const leaves = [...new Set(paths.map((s) => s[s.length - 1]!))];
   const tops = paths.filter((s) => s.length > 1).map((s) => s[0]!);
@@ -110,8 +121,23 @@ export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1
   }
   const shared = [...suffixCount.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[0].split(" ").length - a[0].split(" ").length || b[1] - a[1]).map(([t]) => t);
   const pageCats = pages.filter((p) => p.pageType === "category").map((p) => p.facts.h1 ?? p.facts.title ?? "").filter(Boolean).map((c) => c.split("|")[0]!.trim());
+  // Ürün şeması olmayan sitelerde: breadcrumb'ın ilk düzeyi ("Yatak") en güvenilir kategori ipucudur.
+  const crumbCount = new Map<string, number>();
+  for (const p of pages) {
+    const top = (p.facts.breadcrumbs ?? []).find((c) => !NAV_LABEL.test(c));
+    if (top) crumbCount.set(top, (crumbCount.get(top) ?? 0) + 1);
+  }
+  // Birden çok sayfada tekrar eden üst düzey (asıl kategori) varsa tekil gürültü atlanır.
+  const repeated = [...crumbCount.values()].some((c) => c >= 2);
+  const crumbTops = [...crumbCount.entries()].filter(([, c]) => !repeated || c >= 2).sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  // "X Modelleri ve Fiyatları" kalıbındaki başlıklar kategori sayfasıdır.
+  const titled = pages
+    .map((p) => p.facts.title ?? "")
+    .filter((t) => /(modelleri|çeşitleri|fiyatları)/i.test(t))
+    .map(titleCategory)
+    .filter((t) => t && !NAV_LABEL.test(t));
   // Sayfa başlıkları çoğu zaman model/koleksiyon adıdır; yalnız ürün kategori verisi yoksa kullanılır.
-  const ordered = shared.length || tops.length ? [...shared, ...tops] : [...leaves, ...pageCats];
+  const ordered = shared.length || tops.length ? [...shared, ...tops, ...crumbTops] : [...leaves, ...crumbTops, ...titled, ...pageCats];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const t of ordered) {
@@ -126,7 +152,17 @@ export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1
 
 export function auditPrompts(categories: string[], country: string): string[] {
   const place = country === "TR" ? "Türkiye'de" : "";
-  const base = categories.length ? categories : ["ürünler"];
+  if (!categories.length) {
+    // Kategori tespit edilemediyse bozuk ("ürünler markaları") yerine genel ama doğal sorular.
+    return [
+      `${place} güvenilir online alışveriş siteleri hangileri?`,
+      `${place} kaliteli ürünleri uygun fiyata nereden alabilirim?`,
+      "Online alışverişte bir markanın güvenilir olduğunu nasıl anlarım?",
+      `${place} hızlı kargo ve kolay iade sunan e-ticaret siteleri hangileri?`,
+      "Yerli markalardan alışveriş yaparken nelere dikkat etmeliyim?",
+    ].slice(0, AUDIT_PROMPTS).map((x) => x.replace(/\s+/g, " ").trim());
+  }
+  const base = categories;
   const templates = [
     (c: string) => `${place} en iyi ${c.toLocaleLowerCase("tr-TR")} markaları hangileri?`,
     (c: string) => `Küçük bir ev için hangi ${c.toLocaleLowerCase("tr-TR")} modellerini önerirsin?`,

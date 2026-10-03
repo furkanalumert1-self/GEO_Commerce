@@ -35,3 +35,30 @@ describe("tarama sınıflandırması ve soru üretimi", () => {
     expect(prompts.join(" ")).not.toMatch(/mocca|magic|hassas cilt/i);
   });
 });
+
+describe("breadcrumb ve başlıktan kategori", () => {
+  it("ürün şeması olmayan sitede breadcrumb ilk düzeyini kullanır", async () => {
+    const { extractPage } = await import("@/modules/audit/html");
+    const { deriveCategoryTerms, auditPrompts } = await import("@/modules/audit/service");
+    const crumb = (names: string[]) => `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": [{ "@type": "Organization", name: "X" }, { "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: "Anasayfa" }, ...names.map((name, i) => ({ "@type": "ListItem", position: i + 2, name }))] }] })}</script>`;
+    const page = (path: string, title: string, names: string[]) => ({ pageType: "other", facts: extractPage(`<html><head><title>${title}</title>${crumb(names)}</head><body></body></html>`, `https://x.com.tr/${path}`) });
+    const pages = [
+      page("kategori-listesi", "Kategori Konu Listesi", ["Kategori(Konu) Liste"]),
+      page("yataklar", "Yatak Modelleri ve Fiyatları | X", ["Yatak"]),
+      page("ihtiyaca-gore", "İhtiyaca Göre", ["Yatak", "İhtiyaca Göre"]),
+      page("bel", "Bel Desteği", ["Yatak", "İhtiyaca Göre", "Bel Desteği"]),
+    ];
+    expect(pages[1]!.facts.breadcrumbs).toEqual(["Yatak"]);
+    const terms = deriveCategoryTerms(pages);
+    expect(terms[0]).toBe("Yatak");
+    expect(terms.some((t) => /kategori|göre/i.test(t))).toBe(false);
+    expect(auditPrompts(terms, "TR")[0]).toBe("Türkiye'de en iyi yatak markaları hangileri?");
+  });
+
+  it("kategori yoksa bozuk 'ürünler' sorusu üretmez", async () => {
+    const { auditPrompts } = await import("@/modules/audit/service");
+    const prompts = auditPrompts([], "TR");
+    expect(prompts).toHaveLength(5);
+    expect(prompts.join(" ")).not.toMatch(/ürünler (markaları|modellerini)/);
+  });
+});

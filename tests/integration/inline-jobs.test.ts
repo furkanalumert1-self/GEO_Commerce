@@ -38,7 +38,10 @@ function countingAdapter(engine: EngineKey, impl?: (n: number) => Promise<void> 
     ask: async (input) => {
       calls++;
       await impl?.(calls);
-      return { ...(await base.ask(input)), provider: engine, model: `stub-${engine}` };
+      // Fixture soru metnine bağlı %4 simüle geçici hata üretir; sayım testleri için bu rastgelelik
+      // devre dışı bırakılır (hatalar yalnız `impl` ile açıkça verilir).
+      const answer = await base.ask(input).catch(() => base.ask({ ...input, prompt: `${input.prompt} ` }));
+      return { ...answer, provider: engine, model: `stub-${engine}` };
     },
   };
   return { adapter, calls: () => calls };

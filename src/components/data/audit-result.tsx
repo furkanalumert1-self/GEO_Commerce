@@ -144,6 +144,14 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
 
   const r = view.result;
   // Eski raporlarda kalmış haber/kamu/eğitim alan adları da gösterilmez.
+  // Puan yalnız ölçülebilen kontrollerden hesaplanır; kaç kontrolün ölçüldüğü açıkça yazılır.
+  const coverage = (group: "geo" | "ads") => {
+    const list = r?.readiness.checks.filter((c) => c.group === group) ?? [];
+    const measured = list.filter((c) => c.status === "pass" || c.status === "fail");
+    const passed = measured.filter((c) => c.status === "pass").length;
+    const open = list.length - measured.length;
+    return `Ölçülen kontrol: ${measured.length}/${list.length}, geçen: ${passed}${open ? ` (tespit edilemeyen/doğrulama bekleyen: ${open})` : ""}.`;
+  };
   const candidates = (r?.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, view.domain));
   return (
     <div className="flex flex-col gap-6">
@@ -219,12 +227,12 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
             <Card className="p-4">
               <p className="text-sm text-muted">Site / GEO hazırlığı</p>
               <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.geoScore ?? "Ölçülemedi"}</p>
-              <p className="mt-2 text-xs text-muted">Ölçülebilen kontrollerin geçme oranı; görünürlük puanından ayrıdır.</p>
+              <p className="mt-2 text-xs text-muted">{coverage("geo")} Görünürlük puanından ayrıdır.</p>
             </Card>
             <Card className="p-4">
               <p className="text-sm text-muted">Ads hazırlığı</p>
               <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.adsScore ?? "Ölçülemedi"}</p>
-              <p className="mt-2 text-xs text-muted">Hesap/ülke/sektör uygunluğu ayrıca doğrulanmalıdır.</p>
+              <p className="mt-2 text-xs text-muted">{coverage("ads")} Hesap uygunluğu ve checkout ayrıca doğrulanmalıdır.</p>
             </Card>
           </div>
 

@@ -28,6 +28,8 @@ export interface PageFacts {
   products: ProductFacts[];
   ogSiteName: string | null;
   trackers: string[];
+  /** BreadcrumbList adları (ana sayfa hariç, sırayla); kategori ipucu olarak kullanılır. */
+  breadcrumbs?: string[];
 }
 
 const decode = (s: string) =>
@@ -66,13 +68,27 @@ export function visibleText(html: string): string {
     .trim();
 }
 
-function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[], baseUrl: string) {
-  if (Array.isArray(node)) return node.forEach((n) => collectTypes(n, out, products, baseUrl));
+const HOME_CRUMB = /^(ana ?sayfa|home|homepage|başlangıç)$/i;
+
+function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[], baseUrl: string, crumbs: string[] = []) {
+  if (Array.isArray(node)) return node.forEach((n) => collectTypes(n, out, products, baseUrl, crumbs));
   if (!node || typeof node !== "object") return;
   const o = node as Record<string, unknown>;
   const t = o["@type"];
   const types = Array.isArray(t) ? t : t ? [t] : [];
   for (const x of types) if (typeof x === "string") out.add(x);
+  if (types.includes("BreadcrumbList") && Array.isArray(o.itemListElement) && crumbs.length === 0) {
+    const items = (o.itemListElement as Array<Record<string, unknown>>)
+      .filter((x) => x && typeof x === "object")
+      .sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0))
+      .map((x) => {
+        const item = x.item as Record<string, unknown> | string | undefined;
+        const name = x.name ?? (typeof item === "object" ? item?.name : undefined);
+        return typeof name === "string" ? decode(name).trim() : "";
+      })
+      .filter((n) => n && !HOME_CRUMB.test(n));
+    crumbs.push(...items);
+  }
   if (types.includes("Product")) {
     const offers = (Array.isArray(o.offers) ? o.offers[0] : o.offers) as Record<string, unknown> | undefined;
     const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : null);
@@ -89,7 +105,7 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
       url: str(o.url) ?? baseUrl,
     });
   }
-  for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl);
+  for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl, crumbs);
 }
 
 const TRACKER_PATTERNS: Array<[RegExp, string]> = [
@@ -133,7 +149,8 @@ export function extractPage(html: string, url: string): PageFacts {
   }
   const types = new Set<string>();
   const products: ProductFacts[] = [];
-  collectTypes(jsonLd, types, products, url);
+  const breadcrumbs: string[] = [];
+  collectTypes(jsonLd, types, products, url, breadcrumbs);
   const text = visibleText(html);
   return {
     title: titleM ? visibleText(titleM[1]!) || null : null,
@@ -149,6 +166,7 @@ export function extractPage(html: string, url: string): PageFacts {
     products,
     ogSiteName: metaContent(html, "og:site_name", "property"),
     trackers: TRACKER_PATTERNS.filter(([re]) => re.test(html)).map(([, n]) => n),
+    breadcrumbs,
   };
 }
 

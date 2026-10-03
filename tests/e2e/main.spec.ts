@@ -44,8 +44,8 @@ test("pano: 3 viewport ekran görüntüsü, axe, klavye ile menü", async ({ pag
 test("audit → claim → trial onboarding", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-1440", "tek viewport yeterli");
   await page.goto("/audit");
-  await page.getByLabel("Alan adı").fill("lumabakim.example");
-  await page.getByRole("button", { name: /audit başlat/i }).click();
+  await page.getByLabel("Web siteniz").fill("lumabakim.example");
+  await page.getByRole("button", { name: /ölçümü başlat/i }).click();
   await page.waitForURL(/\/audit\/.+/);
   await expect(page.getByText(/Hesaplanan fırsat sayısı/)).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/Küçük örneklem/)).toBeVisible();

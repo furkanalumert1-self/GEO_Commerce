@@ -11,9 +11,9 @@ const schema = z.object({
   domain: z
     .string()
     .trim()
-    .min(3, "Alan adı girin")
+    .min(3, "Web sitenizi girin")
     .max(253)
-    .regex(/^(https?:\/\/)?[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i, "Geçerli bir alan adı girin (ör. magazaniz.com)"),
+    .regex(/^(https?:\/\/)?[a-z0-9.-]+\.[a-z]{2,}(\/.*)?$/i, "Geçerli bir web sitesi girin (ör. magazaniz.com)"),
   locale: z.enum(["tr-TR", "en-US"]),
 });
 
@@ -63,17 +63,17 @@ export function AuditForm({ demo }: { demo: boolean }) {
           {serverError.requestId ? <span className="block text-xs text-muted">İstek no: {serverError.requestId}</span> : null}
         </div>
       ) : null}
-      <Field label="Alan adı" htmlFor="domain" error={err} hint={demo ? "Gerçek alan adınız canlı taranır. Örnek veriyle denemek için lumabakim.example yazabilirsiniz." : "Yalnız herkese açık sayfalar taranır; robots.txt kurallarına uyulur."}>
+      <Field label="Web siteniz" htmlFor="domain" error={err} hint={demo ? "Web siteniz canlı taranır. Örnek veriyle denemek için lumabakim.example yazabilirsiniz." : "Yalnız herkese açık sayfalar taranır; robots.txt kurallarına uyulur."}>
         <input id="domain" placeholder="magazaniz.com" inputMode="url" autoComplete="url" className={inputClass} aria-invalid={Boolean(err)} aria-describedby={err ? "domain-error" : "domain-hint"} {...register("domain")} />
       </Field>
-      <Field label="Pazar / dil" htmlFor="locale">
+      <Field label="Hedef ülke ve dil" htmlFor="locale">
         <select id="locale" className={inputClass} {...register("locale")}>
           <option value="tr-TR">Türkiye · Türkçe</option>
           <option value="en-US">ABD · İngilizce</option>
         </select>
       </Field>
-      <Button type="submit" variant="primary" disabled={formState.isSubmitting}>
-        {formState.isSubmitting ? "Başlatılıyor…" : "Ücretsiz audit başlat"}
+      <Button type="submit" variant="primary" className="mt-1 min-h-12 text-base sm:min-h-12" disabled={formState.isSubmitting}>
+        {formState.isSubmitting ? "Başlatılıyor…" : "Ücretsiz ölçümü başlat"}
       </Button>
     </form>
   );

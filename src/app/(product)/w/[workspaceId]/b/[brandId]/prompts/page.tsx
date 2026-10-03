@@ -45,7 +45,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
             action={<a className="text-sm text-primary underline" href={`${base}?show=${show === "archived" ? "active" : "archived"}`}>{show === "archived" ? "Aktifleri göster" : "Arşivi göster"}</a>}
           />
           {prompts.length === 0 ? (
-            <EmptyState title="Prompt yok" description="Sağdaki formla ilk niyet sorusunu ekleyin." />
+            <EmptyState title="Prompt yok" description="Ürün kategorilerinizden otomatik soru üretin veya sağdaki formla kendiniz ekleyin." action={<ApiButton url={`${api}/prompts/generate`} variant="primary" label="Kategorilerden soru üret" onSuccessMessage="Sorular eklendi" />} />
           ) : (
             <TableWrap label="Promptlar">
               <thead>

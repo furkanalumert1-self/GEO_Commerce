@@ -98,11 +98,16 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           ) : null}
           {step === 5 ? (
             <div className="flex flex-col gap-2">
-              <p>{prompts} aktif prompt · paket limiti {access.entitlements.activePrompts}. Otomatik üretilen soruları düzenleyebilir veya arşivleyebilirsiniz.</p>
+              <p>{prompts} aktif prompt · paket limiti {access.entitlements.activePrompts}. Sorular ürün kategorilerinizden üretilir; düzenleyebilir veya arşivleyebilirsiniz.</p>
+              {prompts < access.entitlements.activePrompts ? (
+                <div>
+                  <ApiButton url={`${api}/prompts/generate`} variant={prompts === 0 ? "primary" : "secondary"} label={prompts === 0 ? `Kategorilerden soru üret (${brand.categories.join(", ") || "önce adım 2'de kategori girin"})` : "Kategorilerden soru ekle"} disabled={!brand.categories.length} disabledReason="Önce adım 2'de ürün kategorilerini girin" onSuccessMessage="Sorular eklendi" />
+                </div>
+              ) : null}
               <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Niyet listesini düzenle</Link>
             </div>
           ) : null}
-          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce en az bir prompt ekleyin (adım 5).</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
+          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce soru listesi oluşturun: <Link className="text-primary underline" href={`${base}&step=5`}>Adım 5 — Niyet listesi</Link> sayfasında &ldquo;Kategorilerden soru üret&rdquo;e basın.</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
           {step === 7 ? (
             <div className="flex flex-col gap-2">
               <p>Gözlemlenen gelir için mağazanızı bağlayın veya CSV sipariş importu kullanın. Reklam erişimi olmaması GEO kullanımını engellemez.</p>

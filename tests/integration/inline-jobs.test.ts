@@ -13,7 +13,8 @@ import { assertJobsRunnable, enqueue, executionMode } from "@/lib/queue";
 import { advanceJob } from "@/lib/queue/advance";
 import { runJob } from "@/workers/runner";
 import { handlers } from "@/workers/handlers";
-import { runAudit, startAudit, type AuditWork } from "@/modules/audit/service";
+import { claimAudit, runAudit, startAudit, type AuditWork } from "@/modules/audit/service";
+import { seedPrompts } from "@/modules/prompts/seed";
 import { createRun, executeRun } from "@/modules/monitoring/service";
 import { createFixtureAdapter } from "@/adapters/ai/fixture";
 import { ProviderError, type AiMonitorAdapter, type EngineKey } from "@/adapters/ai/types";
@@ -207,5 +208,22 @@ describe("Redis'siz (inline) yürütme", () => {
     await expect(startAudit(db, { domain, locale: "tr-TR", fingerprint: randomToken(12) })).rejects.toMatchObject({ code: "rate_limited" });
     const out = await startAudit(db, { domain, locale: "tr-TR", fingerprint: randomToken(12), adminBypass: true });
     expect(out.token).toBeTruthy();
+  });
+
+  it("rapor kaydedilince analiz soruları + kategori soruları aktif prompt olur; tekrar üretim limiti aşmaz", async () => {
+    const user = await db.user.create({ data: { email: `claim-${randomToken(4).toLowerCase()}@example.com` } });
+    const token = randomToken(24);
+    await db.audit.create({ data: { domain: `c-${randomToken(4).toLowerCase()}.com`, locale: "tr-TR", tokenHash: hashToken(token), fingerprintHash: randomToken(8), expiresAt: new Date(Date.now() + 86_400_000), status: "partial", resultSummary: { brandName: "Homedius", prompts: ["Türkiye'de en iyi katlanır koltuk markaları hangileri?"], crawl: { categories: ["Katlanır Koltuk", "Puf Seti"] }, competitorCandidates: [], visibility: { sampleCount: 5 } } } });
+    const out = await claimAudit(db, token, user.id);
+    const prompts = await db.prompt.findMany({ where: { brandId: out.brandId, active: true }, include: { versions: true, cluster: true } });
+    expect(prompts.length).toBe(10); // deneme paketi limiti
+    const texts = prompts.map((p) => p.versions[0]!.text);
+    expect(new Set(texts).size).toBe(texts.length);
+    expect(texts).toContain("Türkiye'de en iyi katlanır koltuk markaları hangileri?");
+    expect(texts.some((t) => t.includes("puf seti"))).toBe(true);
+    expect(prompts.every((p) => p.currentVersionId)).toBe(true);
+    // Limit dolu: yeniden üretim ekleme yapmaz.
+    const added = await seedPrompts(db, { workspaceId: out.workspaceId, brandId: out.brandId, brandName: "Homedius", locale: "tr-TR", source: "generated", activeLimit: 10, texts: [{ text: "Yeni bir soru metni burada mı?" }] });
+    expect(added).toBe(0);
   });
 });

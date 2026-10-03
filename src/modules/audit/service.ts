@@ -16,6 +16,7 @@ import { PLANS, TRIAL } from "@/modules/billing/plans";
 import { periodKey } from "@/modules/billing/quota";
 import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
 import { isCompetitorCandidate } from "./competitor-filter";
+import { seedPrompts } from "@/modules/prompts/seed";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -172,6 +173,16 @@ export function auditPrompts(categories: string[], country: string): string[] {
     (c: string) => `Popüler ${c.toLocaleLowerCase("tr-TR")} markalarına alternatif ne var?`,
   ];
   return templates.slice(0, AUDIT_PROMPTS).map((t, i) => t(base[i % base.length]!).replace(/\s+/g, " ").trim());
+}
+
+/** Kategorilerden ticari niyetli sorular: her şablon sırayla tüm kategorilere uygulanır (kategoriler dengeli dağılır). */
+export function categoryPrompts(categories: string[], country: string, max: number): string[] {
+  const cats = categories.map((c) => c.trim()).filter(Boolean);
+  if (!cats.length) return [];
+  const perCat = cats.map((c) => auditPrompts([c], country));
+  const out: string[] = [];
+  for (let t = 0; t < 5; t++) for (const list of perCat) if (list[t]) out.push(list[t]!);
+  return out.slice(0, max);
 }
 
 type AuditAnswer = { engine: string; model: string; surface: string; prompt: string; ok: boolean; mentioned: boolean; recommended: boolean; ownCitation: boolean; citedDomains: string[]; sampledAt: string; errorCode?: string; errorDetail?: string };
@@ -376,6 +387,19 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
       data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: summary.crawl?.categories ?? [], onboarding: { step: 2, fromAuditId: audit.id } },
     });
     await tx.audit.update({ where: { id: audit.id }, data: { workspaceId: ws.id } });
+    // Analizdeki sorular + kategorilerden üretilenler aktif prompt olarak eklenir; ilk ölçüm hemen başlatılabilir.
+    const country = audit.locale.split("-")[1] ?? "TR";
+    const categories = summary.crawl?.categories ?? [];
+    const promptLimit = existingTrial ? PLANS.free_audit.limits.activePrompts : TRIAL.activePrompts;
+    await seedPrompts(tx, {
+      workspaceId: ws.id,
+      brandId: brand.id,
+      brandName: brand.name,
+      locale: audit.locale,
+      source: "audit",
+      activeLimit: promptLimit,
+      texts: [...(summary.prompts ?? []).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) })), ...categoryPrompts(categories, country, promptLimit).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) }))],
+    });
     // Eski raporlardaki adaylar da aynı filtreden geçer.
     for (const c of (summary.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, audit.domain)).slice(0, PLANS.starter.limits.competitorsPerBrand)) {
       await tx.competitor.create({ data: { workspaceId: ws.id, brandId: brand.id, name: c.domain.split(".")[0]!, domain: c.domain, source: "domain_finding" } });

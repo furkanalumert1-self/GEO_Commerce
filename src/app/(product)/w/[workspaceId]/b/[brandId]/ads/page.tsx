@@ -7,6 +7,7 @@ import { pageBrand } from "@/lib/page-access";
 import { hasFeature } from "@/modules/billing/plans";
 import { config } from "@/lib/config";
 import { DEFAULT_RULE } from "@/modules/ads/rules";
+import { CHATGPT_ADS_SPEC, policyIssues } from "@/modules/ads/chatgpt";
 
 export const metadata: Metadata = { title: "Reklam" };
 
@@ -26,6 +27,9 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     db.opportunity.findMany({ where: { brandId, status: { in: ["new", "triaged", "in_progress"] } }, orderBy: [{ score: { sort: "desc", nulls: "last" } }], take: 8, include: { cluster: { select: { label: true, type: true } } } }),
     db.pageSnapshot.findMany({ where: { brandId }, select: { url: true, pageType: true, findings: true }, take: 200 }),
   ]);
+  const brandRow = await db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { country: true, categories: true } });
+  const market = CHATGPT_ADS_SPEC.markets[brandRow.country];
+  const policy2 = policyIssues(brandRow.categories, brandRow.country);
   const productPages = pages.filter((p) => p.pageType === "product");
   const missingOffer = productPages.filter((p) => (p.findings as { productComplete?: boolean } | null)?.productComplete === false).length;
   const policy = pages.some((p) => p.pageType === "policy");
@@ -47,6 +51,16 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
               <li><Badge tone="warning">Doğrulama gerekli</Badge> Ülke/sektör/hesap uygunluğu — güncel sağlayıcı kurallarıyla</li>
             </ul>
           </Card>
+          <Card className="p-4 text-sm md:col-span-2">
+            <p className="font-medium">ChatGPT Ads uygunluğu <span className="text-xs font-normal text-muted">· kurallar {CHATGPT_ADS_SPEC.version} itibarıyla</span></p>
+            <ul className="mt-2 flex flex-col gap-1">
+              <li>{market?.available ? <Badge tone="success">Açık</Badge> : <Badge tone="warning">Doğrulanmadı</Badge>} Pazar ({brandRow.country}){market?.available ? `: self-serve erişim ${market.since} tarihinden beri; ${market.personalization ? "kişiselleştirme var" : "yalnız sohbet bağlamı, genel konum ve cihaz (kişiselleştirme yok)"}` : ""}</li>
+              <li>{policy2.some((i) => i.level === "error") ? <Badge tone="danger">Risk</Badge> : policy2.length ? <Badge tone="warning">İnceleme</Badge> : <Badge tone="success">Uygun</Badge>} Kategori politikası{policy2.length ? `: ${policy2.map((i) => i.message).join("; ")}` : " (yasak/kısıtlı kategori tespit edilmedi)"}</li>
+              <li><Badge>Bilgi</Badge> Reklamlar yalnız Free ve Go kullanıcılarına, yanıtın altında sohbet kartı olarak gösterilir; 18 yaş altı ve sağlık/siyaset gibi hassas sohbetlerde gösterilmez</li>
+              <li><Badge>Bilgi</Badge> Sohbet kartı: başlık ≤{CHATGPT_ADS_SPEC.title.max}, metin ≤{CHATGPT_ADS_SPEC.body.max} karakter, kare görsel (≥{CHATGPT_ADS_SPEC.image.minPxApi}px, görselde metin yok), tek hedef URL (doğrulanmış alan adı)</li>
+              <li>{missingOffer === 0 && productPages.length > 0 ? <Badge tone="success">Hazır</Badge> : <Badge tone="warning">Eksik</Badge>} Ürün feed reklamları için Google Shopping biçiminde katalog feed&apos;i gerekir (alışveriş yerleşimleri yalnız feed gönderen markalara açık)</li>
+            </ul>
+          </Card>
           <Card className="p-4 text-sm">
             <p className="font-medium">Hesaplar</p>
             {accounts.length === 0 ? <p className="mt-2 text-muted">Bağlı reklam hesabı yok.</p> : accounts.map((a) => (
@@ -64,10 +78,10 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
         <div className="grid gap-6 xl:grid-cols-2">
           <Card>
             <CardHeader title="Ücretli kanal için niyet fırsatları" description="GEO niyet kümeleri ürün içi araştırma verisidir; sağlayıcıda keyword targeting karşılığı değildir. Rakip harcaması veya kullanıcı sohbeti gösterilmez." />
-            <ul className="divide-y divide-border">{opps.map((o) => <li key={o.id} className="px-4 py-3 text-sm"><p className="font-medium">{o.cluster.label}</p><p className="text-muted">Skor {o.score ?? "—"} · {o.paidBlockedReason ?? "Uygun"}</p></li>)}</ul>
+            <ul className="divide-y divide-border">{opps.map((o) => <li key={o.id} className="px-4 py-3 text-sm"><p className="font-medium">{o.cluster.label}</p><p className="text-muted">Skor {o.score ?? "—"} · {o.paidBlockedReason ?? "Uygun"} · ChatGPT Ads&apos;te bu niyet bağlam ipucu olarak kullanılabilir</p></li>)}</ul>
           </Card>
           <Card>
-            <CardHeader title="Kampanya brief / creative taslağı" description="CSV olarak dışa aktarılır. Karakter/bütçe limitleri sabitlenmez; sağlayıcı validasyonu hesap bağlanınca yapılır." />
+            <CardHeader title="Kampanya brief / creative taslağı" description="ChatGPT Ads: karakter sınırları, hedef URL ve kategori politikası yerel olarak kontrol edilir; kaybedilen AI sorularından bağlam ipuçları üretilir. CSV ve OpenAI Ads API (duraklatılmış) taslağı olarak indirilir; nihai inceleme Ads Manager'dadır." />
             <div className="p-4"><AdsDraftForm url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/ads/drafts`} opportunities={opps.map((o) => ({ id: o.id, label: o.cluster.label }))} domain={access.brand.domain} currency={access.brand.currency} /></div>
           </Card>
         </div>

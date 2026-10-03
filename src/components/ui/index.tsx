@@ -145,7 +145,7 @@ export function Stat({ label, value, unit, hint, badge, footnote }: { label: str
   );
 }
 
-export function Field({ label, htmlFor, error, hint, children }: { label: string; htmlFor: string; error?: string; hint?: string; children: ReactNode }) {
+export function Field({ label, htmlFor, error, hint, children }: { label: string; htmlFor: string; error?: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <label htmlFor={htmlFor} className="text-sm font-medium">{label}</label>

@@ -13,7 +13,7 @@ import { assertJobsRunnable, enqueue, executionMode } from "@/lib/queue";
 import { advanceJob } from "@/lib/queue/advance";
 import { runJob } from "@/workers/runner";
 import { handlers } from "@/workers/handlers";
-import { runAudit, type AuditWork } from "@/modules/audit/service";
+import { runAudit, startAudit, type AuditWork } from "@/modules/audit/service";
 import { createRun, executeRun } from "@/modules/monitoring/service";
 import { createFixtureAdapter } from "@/adapters/ai/fixture";
 import { ProviderError, type AiMonitorAdapter, type EngineKey } from "@/adapters/ai/types";
@@ -199,5 +199,13 @@ describe("Redis'siz (inline) yürütme", () => {
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { data: { job: { status: string } } }).data.job.status).toBe("succeeded");
     expect(runs).toBe(1);
+  });
+
+  it("30 gün kuralı: sonuç üretmiş audit tekrarı engeller; yalnız platform admin testi atlayabilir", async () => {
+    const domain = "example.com";
+    await db.audit.create({ data: { domain, locale: "tr-TR", tokenHash: hashToken(randomToken(24)), fingerprintHash: randomToken(8), expiresAt: new Date(Date.now() + 86_400_000), status: "succeeded", resultSummary: { visibility: { sampleCount: 5 } } } });
+    await expect(startAudit(db, { domain, locale: "tr-TR", fingerprint: randomToken(12) })).rejects.toMatchObject({ code: "rate_limited" });
+    const out = await startAudit(db, { domain, locale: "tr-TR", fingerprint: randomToken(12), adminBypass: true });
+    expect(out.token).toBeTruthy();
   });
 });

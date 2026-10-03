@@ -26,7 +26,8 @@ const FREE_WINDOW_DAYS = 30;
 const AUDIT_PROMPTS = 5;
 const AUDIT_ENGINES: EngineKey[] = ["chatgpt", "gemini"];
 
-export async function startAudit(db: PrismaClient, input: { domain: string; locale: string; fingerprint: string }) {
+/** `adminBypass`: platform admin testi — 30 günlük ücretsiz audit kuralını atlar; günlük maliyet tavanı yine geçerlidir. */
+export async function startAudit(db: PrismaClient, input: { domain: string; locale: string; fingerprint: string; adminBypass?: boolean }) {
   const cfg = config();
   assertJobsRunnable();
   let domain: string;
@@ -53,7 +54,7 @@ export async function startAudit(db: PrismaClient, input: { domain: string; loca
         AND: [{ OR: [{ status: { in: ["queued", "running"] } }, { status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["visibility", "sampleCount"], gt: 0 } }] }],
       },
     });
-    if (recent) throw new AppError("rate_limited", "Bu alan adı veya cihaz için son 30 günde ücretsiz audit yapıldı", { resetAt: new Date(recent.createdAt.getTime() + FREE_WINDOW_DAYS * 86_400_000).toISOString() });
+    if (recent && !input.adminBypass) throw new AppError("rate_limited", "Bu alan adı veya cihaz için son 30 günde ücretsiz audit yapıldı", { resetAt: new Date(recent.createdAt.getTime() + FREE_WINDOW_DAYS * 86_400_000).toISOString() });
     await assertDailyCostCap(db);
   }
   const token = randomToken(24);

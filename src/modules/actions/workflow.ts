@@ -45,7 +45,8 @@ export const versionHash = (content: ActionContent) => hashObject(content);
 // ── Zorunlu eksikler (yer tutucular) ──
 
 /** Büyük harfli köşeli parantez yer tutucusu: [FİYAT], [ONAYLI İDDİA EKLEYİN]. Markdown bağlantısı ([metin](url)) sayılmaz. */
-const PLACEHOLDER_RE = /\[([A-ZÇĞİÖŞÜ0-9][A-ZÇĞİÖŞÜ0-9 _/-]{0,60})\](?!\()/g;
+// [ÜRÜN ADI] gibi büyük harfli tokenlar ve [PLACEHOLDER: ...] / [EKSİK: ...] / [TODO ...] biçimleri.
+const PLACEHOLDER_RE = /\[(?:[A-ZÇĞİÖŞÜ0-9][A-ZÇĞİÖŞÜ0-9 _/-]{0,60}|(?:[Pp]laceholder|PLACEHOLDER|EKSİK|Eksik|EKSIK|TODO|TBD|DOLDUR|Doldur)\b[^\]]{0,160})\](?!\()/g;
 
 export interface ContentIssue {
   /** Editördeki alanın DOM id'si (bağlantı için). */

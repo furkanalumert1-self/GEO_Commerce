@@ -35,15 +35,22 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
   if (generationStatus({ demo: fixturesAllowed(access) }) === "not_configured") {
     throw new AppError("not_configured", "İçerik üretimi için OPENAI_API_KEY ve GENERATION_MODEL gerekli");
   }
+  // Ürün verisi yoksa taslak yalnız yer tutuculardan oluşur; kota harcamadan önce açıkça söylenir.
+  const productCount = await db.product.count({ where: { brandId: access.brandId, active: true } });
+  if (productCount === 0 && !fixturesAllowed(access)) {
+    throw new AppError("conflict", "Katalogda ürün yok: önce Kurulum › Keşfi onayla adımında siteyi tarayın veya mağazanızı bağlayın; ürün verisi olmadan taslak yer tutuculardan oluşur");
+  }
   const period = await currentPeriod(db, access.workspaceId);
   await ensureBucket(db, access.workspaceId, "fix_units", period, access.entitlements.fixUnits);
   await reserve(db, { workspaceId: access.workspaceId, metric: "fix_units", period, limit: access.entitlements.fixUnits, amount: 1, operationId: input.operationId });
   try {
-    const catalog = await db.product.findMany({
-      where: { brandId: access.brandId, active: true, ...(opp.cluster.category ? { categories: { some: { category: { name: { equals: opp.cluster.category, mode: "insensitive" } } } } } : {}) },
-      include: { variants: { take: 1 } },
-      take: 8,
-    });
+    // Önce kümenin kategorisine bağlı ürünler; yoksa adında kategori kelimesi geçenler; o da yoksa markanın ürünleri.
+    const productQuery = (where: object) => db.product.findMany({ where: { brandId: access.brandId, active: true, ...where }, include: { variants: { take: 1 } }, take: 8 });
+    const cat = opp.cluster.category;
+    const word = cat?.split(/\s+/).filter((w) => w.length > 3).pop();
+    let catalog = cat ? await productQuery({ categories: { some: { category: { name: { contains: cat, mode: "insensitive" } } } } }) : [];
+    if (!catalog.length && word) catalog = await productQuery({ name: { contains: word.slice(0, Math.max(4, word.length - 2)), mode: "insensitive" } });
+    if (!catalog.length) catalog = await productQuery({});
     const genInput: GenerationInput = {
       type: input.type,
       language: access.brand.language,

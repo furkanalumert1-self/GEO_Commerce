@@ -42,3 +42,13 @@ describe("ek filtreler", () => {
     expect(isCompetitorCandidate("zara.com")).toBe(true);
   });
 });
+
+describe("katalog uyumu", () => {
+  it("katalog verisi yoksa bilinmiyor; marka kategorisi veya benzer katalog adı uyumlu sayılır", async () => {
+    const { catalogFit } = await import("@/modules/opportunities/engine");
+    expect(catalogFit("Katlanır Koltuk", new Set(), new Set())).toBeNull();
+    expect(catalogFit("Katlanır Koltuk", new Set(["katlanır koltuk"]), new Set())).toBe(100);
+    expect(catalogFit("Katlanır Koltuk", new Set(), new Set(["mocca katlanır koltuklar"]))).toBe(100);
+    expect(catalogFit("Avize", new Set(), new Set(["mocca katlanır koltuklar"]))).toBe(30);
+  });
+});

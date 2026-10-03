@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
+import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
 import { evidenceStrength, opportunityDedupeKey, opportunityScore, visibilityGap, type OpportunityComponents } from "./scoring";
 
 /**
@@ -13,12 +14,23 @@ export interface DiagnosisStep {
   recommendation: string;
 }
 
+/** Kategori eşleşmesi: tam ad veya anlamlı kelimelerin hepsi bir katalog adında geçiyorsa uyumlu. */
+export function catalogFit(category: string, brandCats: Set<string>, catalogNames: Set<string>): number | null {
+  const c = category.toLocaleLowerCase("tr-TR");
+  if (brandCats.has(c)) return 100;
+  if (catalogNames.size === 0) return null;
+  const words = c.split(/\s+/).filter((w) => w.length > 2);
+  const names = [...catalogNames];
+  if (names.some((n) => n === c || (words.length && words.every((w) => n.includes(w.slice(0, Math.max(4, w.length - 2))))))) return 100;
+  return 30;
+}
+
 type GapType = "intent_content" | "missing_comparison" | "catalog_mismatch" | "technical_access" | "citation_gap" | "structured_data";
 
 const ACTION_FOR_GAP: Record<GapType, string> = {
   intent_content: "Bu niyet için hedef sayfaya soru-cevap odaklı içerik bloğu ekleyin",
   missing_comparison: "Rakiplerle karşılaştırma/alternatif sayfası hazırlayın",
-  catalog_mismatch: "İlgili ürünleri kategoriye bağlayın veya stok/uyumsuzluğu giderin",
+  catalog_mismatch: "Bu niyete karşılık gelen kategori/ürün sayfası oluşturun veya mevcut ürünleri bu kategoriye bağlayın",
   technical_access: "Sayfanın taranabilir ve indekslenebilir olduğundan emin olun",
   citation_gap: "Rakibi destekleyen üçüncü taraf kaynaklarda marka görünürlüğü için outreach görevi oluşturun",
   structured_data: "Ürün şemasına fiyat, para birimi ve stok bilgisini (görünür veriyle uyumlu) ekleyin",
@@ -35,6 +47,7 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
   });
   const categories = await db.category.findMany({ where: { brandId }, select: { name: true, url: true } });
   const catNames = new Set(categories.map((c) => c.name.toLocaleLowerCase("tr-TR")));
+  const brandCats = new Set(brand.categories.map((c) => c.toLocaleLowerCase("tr-TR")));
   const pages = await db.pageSnapshot.findMany({ where: { brandId, excluded: false }, select: { url: true, pageType: true, schemaTypes: true, findings: true }, orderBy: { sampledAt: "desc" }, take: 500 });
 
   let upserted = 0;
@@ -65,8 +78,10 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
         if (brandMentioned) thirdPartyWithBrand.add(ct.domain);
       }
     }
-    const citationGapDomains = [...thirdPartyForComp.entries()].filter(([d]) => !thirdPartyWithBrand.has(d));
-    const catalogFitValue = cluster.category ? (catNames.has(cluster.category.toLocaleLowerCase("tr-TR")) ? 100 : 30) : null;
+    // Rakip mağazalar (ticari alan adları) outreach hedefi değildir; boşluk yalnız yayın/pazaryeri/inceleme kaynaklarıdır.
+    const citationGapDomains = [...thirdPartyForComp.entries()].filter(([d]) => !thirdPartyWithBrand.has(d) && !isCompetitorCandidate(d, brand.domain));
+    // Katalog uyumu: markanın onayladığı kategoriler veya taranmış kategori/ürün sayfaları; katalog verisi yoksa bilinmiyor (null).
+    const catalogFitValue = cluster.category ? catalogFit(cluster.category, brandCats, catNames) : null;
     const gapType: GapType =
       catalogFitValue !== null && catalogFitValue < 50
         ? "catalog_mismatch"

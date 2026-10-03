@@ -14,6 +14,11 @@ describe("zorunlu eksik tespiti", () => {
     ]);
   });
 
+  it("[PLACEHOLDER: ...] ve [EKSİK: ...] biçimlerini de engel sayar", () => {
+    const c = { ...base, metaDescription: "Keşfedin. [PLACEHOLDER: Doğrulanmış kategori bilgileri]", bodyBlocks: [{ markdown: "- [EKSİK: Ürün ölçüleri]\n- [ikea](https://ikea.com.tr) ve [not] kalabilir" }] };
+    expect(blockingIssues(c).map((i) => i.token)).toEqual(["[PLACEHOLDER: Doğrulanmış kategori bilgileri]", "[EKSİK: Ürün ölçüleri]"]);
+  });
+
   it("markdown bağlantısı ve bilgilendirici notlar engel değildir", () => {
     const c = { ...base, bodyBlocks: [{ markdown: "[Serum](https://x.example/serum) ve [ÜRÜN](https://x.example)" }], placeholders: ["İddia için kanıt ekleyin [NOT]"] };
     expect(blockingIssues(c)).toEqual([]);

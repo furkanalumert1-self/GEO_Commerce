@@ -5,6 +5,7 @@ import { FilterBar } from "@/components/layout/filter-bar";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { parseRange } from "@/modules/monitoring/queries";
+import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
 
 export const metadata: Metadata = { title: "Kaynaklar" };
 
@@ -36,7 +37,11 @@ export default async function CitationsPage({ params, searchParams }: { params: 
     if (c.observation.sampledAt > d.last) d.last = c.observation.sampledAt;
     byDomain.set(c.domain, d);
   }
-  let rows = [...byDomain.entries()].map(([domain, d]) => ({ domain, ...d, gap: d.association === "third_party" && d.withCompetitorOnly > 0 && d.withBrand === 0 }));
+  // Üçüncü taraf görünen ticari alan adları çoğu zaman rakip mağazalardır (outreach hedefi değil); ayrı işaretlenir.
+  let rows = [...byDomain.entries()].map(([domain, d]) => {
+    const likelyCompetitor = d.association === "third_party" && isCompetitorCandidate(domain, access.brand.domain);
+    return { domain, ...d, likelyCompetitor, gap: d.association === "third_party" && !likelyCompetitor && d.withCompetitorOnly > 0 && d.withBrand === 0 };
+  });
   if (onlyGap) rows = rows.filter((r) => r.gap);
   rows.sort((a, b) => b.withCompetitorOnly - a.withCompetitorOnly || b.obs.size - a.obs.size);
   const base = `/w/${workspaceId}/b/${brandId}/citations`;
@@ -51,16 +56,16 @@ export default async function CitationsPage({ params, searchParams }: { params: 
         <Link href={`${base}?range=${sp.range ?? "30"}&gap=1`} className={onlyGap ? "font-medium" : "text-primary underline"}>Yalnız citation boşluğu</Link>
       </div>
       <Card>
-        <CardHeader title={`${rows.length} site · ${rows.reduce((s, r) => s + r.urls.size, 0)} URL`} description="Boşluk: rakip anılan yanıtlarda atıf yapılan, markanızın anıldığı hiçbir yanıtta görünmeyen üçüncü taraf siteler." />
+        <CardHeader title={`${rows.length} site · ${rows.reduce((s, r) => s + r.urls.size, 0)} URL`} description="Boşluk: rakip anılan yanıtlarda atıf yapılan, markanızın anıldığı hiçbir yanıtta görünmeyen yayın, pazaryeri ve inceleme siteleri (outreach hedefi). Olası rakip: başka bir markanın mağazası olabilir; Rakipler sayfasından ekleyebilirsiniz." />
         {rows.length === 0 ? <EmptyState title="Sonuç yok" description="Seçili dönemde kaynak bulunamadı." /> : (
           <TableWrap label="Kaynak siteleri">
             <thead><tr><Th>Site</Th><Th>Tür</Th><Th>İlişki</Th><Th numeric>URL</Th><Th numeric>Yanıt</Th><Th numeric>Yalnız rakiple</Th><Th numeric>Markanızla</Th></tr></thead>
             <tbody>
               {rows.slice(0, 100).map((r) => (
                 <tr key={r.domain}>
-                  <Td>{r.domain} {r.gap ? <Badge tone="warning">Boşluk</Badge> : null}</Td>
+                  <Td>{r.domain} {r.gap ? <Badge tone="warning">Boşluk</Badge> : r.likelyCompetitor ? <Badge>Olası rakip</Badge> : null}</Td>
                   <Td className="text-muted">{r.sourceType ?? "—"}</Td>
-                  <Td>{r.association === "own" ? "Kendi" : r.association === "competitor" ? "Rakip sitesi" : "Üçüncü taraf"}</Td>
+                  <Td>{r.association === "own" ? "Kendi" : r.association === "competitor" ? "Rakip sitesi" : r.likelyCompetitor ? "Ticari site (rakip olabilir)" : "Üçüncü taraf"}</Td>
                   <Td numeric>{r.urls.size}</Td>
                   <Td numeric>{r.obs.size}</Td>
                   <Td numeric>{r.withCompetitorOnly}</Td>

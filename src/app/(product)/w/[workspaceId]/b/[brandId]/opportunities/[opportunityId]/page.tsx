@@ -15,6 +15,7 @@ import { OPPORTUNITY_WEIGHTS, type OpportunityComponents } from "@/modules/oppor
 import type { DiagnosisStep } from "@/modules/opportunities/engine";
 import { hasFeature } from "@/modules/billing/plans";
 import { ENGINE_SHORT, fmtDate, GAP_LABEL, OPP_STATUS_LABEL } from "@/lib/format";
+import { cleanQuote } from "@/lib/quote";
 
 export const metadata: Metadata = { title: "Fırsat" };
 
@@ -120,7 +121,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
                     <p className="text-xs font-semibold text-text-secondary">Gözlem</p>
                     {d.observation ? (
                       <>
-                        <blockquote className="mt-1.5 border-l-2 border-primary/40 pl-3 text-text">&ldquo;{d.observation.quote}&rdquo;</blockquote>
+                        <blockquote className="mt-1.5 border-l-2 border-primary/40 pl-3 text-text">&ldquo;{cleanQuote(d.observation.quote)}&rdquo;</blockquote>
                         <p className="mt-1.5 text-xs text-text-secondary">
                           {ENGINE_SHORT[d.observation.engine] ?? d.observation.engine} · {fmtDate(d.observation.sampledAt, access.brand.timezone)}
                           {d.observation.url ? <> · <a className="break-all text-primary underline" href={d.observation.url} target="_blank" rel="noopener noreferrer nofollow">{d.observation.url}</a></> : null}
@@ -153,7 +154,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
             <ul className="divide-y divide-border">
               {o.evidence.map((e) => (
                 <li key={e.id} className="px-5 py-3 text-sm">
-                  {e.quote ? <p>&ldquo;{e.quote}&rdquo;</p> : null}
+                  {e.quote ? <p>&ldquo;{cleanQuote(e.quote)}&rdquo;</p> : null}
                   {e.note ? <p className="text-text-secondary">{e.note}</p> : null}
                   <p className="mt-1 text-xs text-text-secondary">
                     {e.observation ? `${ENGINE_SHORT[e.observation.engine] ?? e.observation.engine} · ${fmtDate(e.observation.sampledAt, access.brand.timezone)}` : "Tarama bulgusu"}

@@ -402,7 +402,7 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
     });
     // Eski raporlardaki adaylar da aynı filtreden geçer.
     for (const c of (summary.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, audit.domain)).slice(0, PLANS.starter.limits.competitorsPerBrand)) {
-      await tx.competitor.create({ data: { workspaceId: ws.id, brandId: brand.id, name: c.domain.split(".")[0]!, domain: c.domain, source: "domain_finding" } });
+      await tx.competitor.create({ data: { workspaceId: ws.id, brandId: brand.id, name: c.domain.split(".")[0]!.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")), domain: c.domain, source: "domain_finding" } });
     }
     await tx.auditLog.create({ data: { workspaceId: ws.id, actorId: userId, actorType: "user", scope: "audit", action: "audit.claimed", target: audit.id } });
     return { workspaceId: ws.id, brandId: brand.id, trialStarted: !existingTrial, period: periodKey(now) };

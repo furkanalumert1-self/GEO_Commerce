@@ -15,6 +15,7 @@ import { scoreCommercialIntent, classifyIntentType } from "@/modules/prompts/int
 import { PLANS, TRIAL } from "@/modules/billing/plans";
 import { periodKey } from "@/modules/billing/quota";
 import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
+import { isCompetitorCandidate } from "./competitor-filter";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -135,8 +136,6 @@ export function auditPrompts(categories: string[], country: string): string[] {
   ];
   return templates.slice(0, AUDIT_PROMPTS).map((t, i) => t(base[i % base.length]!).replace(/\s+/g, " ").trim());
 }
-
-const KNOWN_THIRD_PARTY = /(forum|haber|news|blog|rehber|yorum|review|wiki|medium|youtube|instagram|facebook|twitter|x\.com|reddit|sikayet|trendyol|hepsiburada|amazon|n11|cimri|akakce)/;
 
 type AuditAnswer = { engine: string; model: string; surface: string; prompt: string; ok: boolean; mentioned: boolean; recommended: boolean; ownCitation: boolean; citedDomains: string[]; sampledAt: string; errorCode?: string; errorDetail?: string };
 
@@ -262,7 +261,8 @@ export async function runAudit(
   });
   const agg = aggregateScore(perEngine);
   const domainCounts = new Map<string, number>();
-  for (const x of answers) for (const d of new Set(x.citedDomains)) if (!KNOWN_THIRD_PARTY.test(d)) domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
+  // Kamu/eğitim, haber/medya, sosyal ağ ve pazaryeri alan adları kaynak olarak kalır, rakip önerilmez.
+  for (const x of answers) for (const d of new Set(x.citedDomains)) if (isCompetitorCandidate(d, audit.domain)) domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
   const competitorCandidates = [...domainCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([domain, count]) => ({ domain, observations: count }));
   const lost = answers.filter((x) => x.ok && !x.mentioned && x.citedDomains.length > 0);
   const opportunityCount = new Set(lost.map((x) => x.prompt)).size;
@@ -335,7 +335,8 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
       data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: summary.crawl?.categories ?? [], onboarding: { step: 2, fromAuditId: audit.id } },
     });
     await tx.audit.update({ where: { id: audit.id }, data: { workspaceId: ws.id } });
-    for (const c of (summary.competitorCandidates ?? []).slice(0, PLANS.starter.limits.competitorsPerBrand)) {
+    // Eski raporlardaki adaylar da aynı filtreden geçer.
+    for (const c of (summary.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, audit.domain)).slice(0, PLANS.starter.limits.competitorsPerBrand)) {
       await tx.competitor.create({ data: { workspaceId: ws.id, brandId: brand.id, name: c.domain.split(".")[0]!, domain: c.domain, source: "domain_finding" } });
     }
     await tx.auditLog.create({ data: { workspaceId: ws.id, actorId: userId, actorType: "user", scope: "audit", action: "audit.claimed", target: audit.id } });

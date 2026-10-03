@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Button, Card, CardHeader } from "@/components/ui";
+import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
 
 interface Check {
   id: string;
@@ -142,6 +143,8 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
   };
 
   const r = view.result;
+  // Eski raporlarda kalmış haber/kamu/eğitim alan adları da gösterilmez.
+  const candidates = (r?.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, view.domain));
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
@@ -258,10 +261,10 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
               </ul>
             </Card>
             <Card>
-              <CardHeader title="Rakip adayları" description="Yanıtlarda atıf yapılan alan adlarından; kayıttan sonra onaylamanız gerekir." />
+              <CardHeader title="Rakip adayları" description="Yanıtlarda atıf yapılan ticari alan adlarından (haber, kamu ve eğitim siteleri hariç); kayıttan sonra onaylamanız gerekir." />
               <ul className="divide-y divide-border">
-                {r.competitorCandidates.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Aday bulunamadı.</li> : null}
-                {r.competitorCandidates.map((c) => (
+                {candidates.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Aday bulunamadı.</li> : null}
+                {candidates.map((c) => (
                   <li key={c.domain} className="flex justify-between px-4 py-3 text-sm">
                     <span>{c.domain}</span>
                     <span className="tabular text-muted">{c.observations} yanıtta</span>

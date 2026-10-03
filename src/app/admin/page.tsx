@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/page-access";
 import { daysAgo, fmtDate } from "@/lib/format";
 import { ProviderCheck } from "@/components/forms/provider-check";
 import { ApiButton } from "@/components/forms/api-button";
+import { AuditForm } from "@/components/forms/audit-form";
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
@@ -39,6 +40,12 @@ export default async function AdminPage() {
           </TableWrap>
         </Card>
       </div>
+      <Card className="mt-6">
+        <CardHeader title="Test analizi (GEO Audit)" description="Gerçek alan adıyla sıfırdan analiz. Yönetici olarak 30 günlük ücretsiz analiz limiti uygulanmaz; günlük maliyet tavanı geçerlidir. Sonuç sayfasındaki “Kaydet” ile raporu hesabınıza alıp detaylı raporu açabilirsiniz." />
+        <div className="max-w-xl p-4">
+          <AuditForm demo={false} />
+        </div>
+      </Card>
       <Card className="mt-6">
         <CardHeader title="Sağlayıcı testi" description="AI anahtarlarını ve e-posta gönderimini kuyruk/worker olmadan doğrular." />
         <ProviderCheck />

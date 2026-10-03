@@ -100,10 +100,11 @@ export function parseConfig(env: Record<string, string | undefined>): AppConfig 
   }
   return {
     ...cfg,
+    // Virgül, noktalı virgül veya boşlukla ayrılmış; panelde tırnaklı girilmiş değerler de kabul edilir.
     platformAdmins: (cfg.PLATFORM_ADMIN_ALLOWLIST ?? "")
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
+      .split(/[\s,;]+/)
+      .map((s) => s.trim().replace(/^["'<]+|["'>]+$/g, "").toLowerCase())
+      .filter((s) => s.includes("@")),
   };
 }
 

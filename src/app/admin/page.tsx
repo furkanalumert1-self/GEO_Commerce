@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Card, CardHeader, PageHeader, TableWrap, Td, Th } from "@/components/ui";
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
+import { log } from "@/lib/observability/log";
 import { requireUser } from "@/lib/page-access";
 import { daysAgo, fmtDate } from "@/lib/format";
 import { ProviderCheck } from "@/components/forms/provider-check";
@@ -15,7 +16,11 @@ export const metadata: Metadata = { title: "Platform yönetimi", robots: { index
 export default async function AdminPage() {
   const u = await requireUser("/admin");
   const user = await db.user.findUnique({ where: { id: u.id } });
-  if (!user || !config().platformAdmins.includes(user.email.toLowerCase())) notFound();
+  if (!user || !config().platformAdmins.includes(user.email.toLowerCase())) {
+    // Sayfanın varlığı gizli kalır (404); teşhis için yalnız allowlist durumu loglanır, e-postalar yazılmaz.
+    log.warn("[admin] access_denied", { allowlistSize: config().platformAdmins.length, hint: config().platformAdmins.length ? "Oturumdaki e-posta listede değil" : "PLATFORM_ADMIN_ALLOWLIST boş veya okunamadı (Production ortamına eklenip redeploy edildi mi?)" });
+    notFound();
+  }
   const since = daysAgo(30);
   const [tenants, dead, costs, inboxErrors] = await Promise.all([
     db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true, overrideExpiresAt: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }),

@@ -163,7 +163,7 @@ export function SidebarNav({ nav, onNavigate, footer, label = "Ana gezinme" }: {
 }
 
 /** Mobil/tablet drawer: Radix Dialog → focus trap, Escape, focus restore. */
-export function MobileNav({ nav, header, footer }: { nav: NavModel; header?: ReactNode; footer?: ReactNode }) {
+export function MobileNav({ nav, header, footer, brand }: { nav: NavModel; header?: ReactNode; footer?: ReactNode; brand?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -176,8 +176,9 @@ export function MobileNav({ nav, header, footer }: { nav: NavModel; header?: Rea
           className="fixed inset-y-0 left-0 z-50 flex w-[288px] max-w-[85vw] flex-col rounded-r-[var(--radius-xl)] bg-surface shadow-[var(--shadow-overlay)]"
           aria-describedby={undefined}
         >
-          <div className="flex h-14 items-center justify-between border-b border-border pl-4 pr-2">
-            <Dialog.Title className="font-semibold">Menü</Dialog.Title>
+          <div className="flex h-16 items-center justify-between border-b border-border pl-4 pr-2">
+            <Dialog.Title className="sr-only">Menü</Dialog.Title>
+            {brand}
             <Dialog.Close className="inline-flex h-11 w-11 items-center justify-center rounded-md hover:bg-surface-subtle" aria-label="Menüyü kapat">
               <X size={18} aria-hidden />
             </Dialog.Close>

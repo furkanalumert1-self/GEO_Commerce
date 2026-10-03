@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui";
 import { MobileNav, SidebarNav, type NavEntry, type NavModel } from "./nav-client";
 import { ContextSwitcher } from "./context-switcher";
 import { SignOutButton } from "./sign-out";
-import { APP_NAME } from "@/lib/brand";
+import { Logo } from "@/components/brand/logo";
 
 export interface ShellWorkspace {
   id: string;
@@ -117,9 +117,8 @@ export function AppShell({
 }) {
   const nav = buildNav(current, brandId);
   const brand = (
-    <Link href={`/w/${current.id}/overview`} className="flex items-center gap-2 rounded-md font-semibold tracking-[-0.01em]">
-      <span aria-hidden className="inline-flex h-8 w-8 items-center justify-center rounded-[9px] bg-primary text-sm font-bold text-white">C</span>
-      <span>{APP_NAME}</span>
+    <Link href={`/w/${current.id}/overview`} className="flex min-w-0 items-center rounded-md">
+      <Logo priority className="h-12" />
     </Link>
   );
   return (
@@ -128,7 +127,7 @@ export function AppShell({
         {t("common.skip")}
       </a>
       <aside className="fixed inset-y-0 left-0 hidden w-[260px] flex-col border-r border-border bg-surface lg:flex" aria-label="Kenar çubuğu">
-        <div className="flex h-16 items-center px-5">{brand}</div>
+        <div className="flex h-20 items-center px-5">{brand}</div>
         <div className="px-3 pb-2">
           <Suspense fallback={<div className="h-20" />}>
             <ContextSwitcher workspaces={workspaces} currentWorkspaceId={current.id} currentBrandId={brandId} layout="stacked" />
@@ -138,7 +137,7 @@ export function AppShell({
       </aside>
       <div className="lg:pl-[260px]">
         <header className="sticky top-0 z-30 flex min-h-14 items-center gap-2 border-b border-border bg-surface/95 px-4 py-2 backdrop-blur-sm sm:px-6 lg:hidden">
-          <MobileNav nav={nav} footer={<Account email={user.email} plan={`Paket: ${PLAN_LABEL[current.planKey] ?? current.planKey}`} />} />
+          <MobileNav nav={nav} brand={<Logo className="h-[42px]" />} footer={<Account email={user.email} plan={`Paket: ${PLAN_LABEL[current.planKey] ?? current.planKey}`} />} />
           <Suspense fallback={<div className="flex-1" />}>
             <ContextSwitcher workspaces={workspaces} currentWorkspaceId={current.id} currentBrandId={brandId} layout="inline" idSuffix="-m" />
           </Suspense>

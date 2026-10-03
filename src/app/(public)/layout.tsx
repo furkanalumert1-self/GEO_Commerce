@@ -1,14 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { APP_NAME } from "@/lib/brand";
+import { Logo } from "@/components/brand/logo";
 
 export default function PublicLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2">İçeriğe geç</a>
       <header className="border-b border-border bg-surface/80">
-        <div className="mx-auto flex min-h-[60px] w-full max-w-6xl flex-wrap sm:min-h-[72px] items-center justify-between gap-2 px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2 font-semibold"><span aria-hidden className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-primary text-[13px] font-semibold text-white">C</span>{APP_NAME}</Link>
+        <div className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap sm:min-h-20 items-center justify-between gap-2 px-4 sm:px-6">
+          <Link href="/" className="flex min-w-0 shrink items-center rounded-md"><Logo priority className="h-[42px] sm:h-[52px]" /></Link>
           <nav aria-label="Genel" className="flex flex-wrap items-center gap-1 text-sm">
             <Link href="/audit" className="hidden min-h-11 items-center rounded-md px-3 hover:bg-surface-subtle sm:inline-flex">Ücretsiz ölçüm</Link>
             <Link href="/pricing" className="hidden min-h-11 items-center rounded-md px-3 hover:bg-surface-subtle sm:inline-flex">Fiyatlar</Link>

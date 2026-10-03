@@ -1,0 +1,7 @@
+orderId,currency,paidAt,status,productId,sku,itemName,quantity,unitPrice,refundId,refundAmount,refundedAt,anonymousId
+TEST-1001,TRY,2026-10-01T10:15:00Z,paid,P-01,MOCCA-GRI,Mocca Katlanır Koltuk Gri,1,8999.00,,,,
+TEST-1002,TRY,2026-10-01T14:40:00Z,paid,P-02,PUF-SET-3,Notre Koltuk Puf Seti,1,12499.00,,,,
+TEST-1002,TRY,2026-10-01T14:40:00Z,paid,P-03,MAGIC-BEJ,Magic Katlanır Koltuk Bej,1,9499.00,,,,
+TEST-1003,TRY,2026-10-02T09:05:00Z,partially_refunded,P-01,MOCCA-GRI,Mocca Katlanır Koltuk Gri,2,8999.00,R-1003,8999.00,2026-10-03T08:00:00Z,
+TEST-1004,TRY,2026-10-02T19:30:00Z,refunded,P-04,BELLA-PUF,Bella Puf,1,2499.00,R-1004,2499.00,2026-10-03T09:00:00Z,
+TEST-1005,TRY,2026-10-03T11:20:00Z,paid,P-05,VALERIA-ANT,Valeria Katlanır Koltuk Antrasit,1,10999.00,,,,

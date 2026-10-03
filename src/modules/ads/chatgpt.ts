@@ -81,7 +81,7 @@ export function contextHints(input: { prompts: string[]; category: string | null
   }
   if (input.category) {
     const c = input.category.toLocaleLowerCase("tr-TR");
-    for (const t of [`${c} satın alma`, `${c} modelleri karşılaştırma`, `küçük ev için ${c}`, `uygun fiyatlı ${c}`]) out.add(t);
+    for (const t of [`${c} satın alma`, `${c} modelleri karşılaştırma`, `${c} nasıl seçilir`, `uygun fiyatlı ${c}`]) out.add(t);
   }
   for (const n of input.products.slice(0, 10)) out.add(n.toLocaleLowerCase("tr-TR"));
   return [...out].slice(0, Math.min(max, CHATGPT_ADS_SPEC.contextHintsMax));

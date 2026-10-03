@@ -8,16 +8,18 @@ import { hasFeature } from "@/modules/billing/plans";
 import { config } from "@/lib/config";
 import { DEFAULT_RULE } from "@/modules/ads/rules";
 import { CHATGPT_ADS_SPEC, policyIssues } from "@/modules/ads/chatgpt";
+import { buildChatgptAdsPlan } from "@/modules/ads/chatgpt-plan";
+import { ChatgptAdsPlan } from "@/components/ads/chatgpt-plan";
 
 export const metadata: Metadata = { title: "Reklam" };
 
-const TABS = [["readiness", "Hazırlık"], ["intelligence", "Fırsat istihbaratı"], ["campaigns", "Kampanyalar"], ["rules", "Kurallar"]] as const;
+const TABS = [["chatgpt", "ChatGPT Ads planı"], ["readiness", "Hazırlık"], ["intelligence", "Fırsat istihbaratı"], ["campaigns", "Kampanyalar"], ["rules", "Kurallar"]] as const;
 
 export default async function AdsPage({ params, searchParams }: { params: Promise<{ workspaceId: string; brandId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId, brandId } = await params;
   const sp = await searchParams;
   const access = await pageBrand(workspaceId, brandId);
-  const tab = TABS.find(([k]) => k === sp.tab)?.[0] ?? "readiness";
+  const tab = TABS.find(([k]) => k === sp.tab)?.[0] ?? "chatgpt";
   const base = `/w/${workspaceId}/b/${brandId}/ads`;
   if (!hasFeature(access.entitlements, "ads")) {
     return (<><PageHeader title="Reklam" /><Alert tone="primary" title="Ads modülü Commerce paketinde">Önce istihbarat ve taslak, ardından erişim ve yetkiye bağlı kontrollü otomasyon. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></>);
@@ -27,6 +29,8 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     db.opportunity.findMany({ where: { brandId, status: { in: ["new", "triaged", "in_progress"] } }, orderBy: [{ score: { sort: "desc", nulls: "last" } }], take: 8, include: { cluster: { select: { label: true, type: true } } } }),
     db.pageSnapshot.findMany({ where: { brandId }, select: { url: true, pageType: true, findings: true }, take: 200 }),
   ]);
+  const usps = [sp.usp1, sp.usp2].filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.slice(0, 40));
+  const chatgptPlan = tab === "chatgpt" ? await buildChatgptAdsPlan(db, { workspaceId, brandId }, { usps }) : null;
   const brandRow = await db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { country: true, categories: true } });
   const market = CHATGPT_ADS_SPEC.markets[brandRow.country];
   const policy2 = policyIssues(brandRow.categories, brandRow.country);
@@ -41,6 +45,7 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
           <Link key={k} href={`${base}?tab=${k}`} aria-current={tab === k ? "page" : undefined} className={cn("inline-flex min-h-11 items-center border-b-2 px-3 text-sm sm:min-h-9", tab === k ? "border-primary font-medium text-primary" : "border-transparent text-muted")}>{label}</Link>
         ))}
       </div>
+      {tab === "chatgpt" && chatgptPlan ? <ChatgptAdsPlan plan={chatgptPlan} action={base} usps={usps} downloadUrl={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/ads/chatgpt-plan?${new URLSearchParams(usps.map((u, i) => [`usp${i + 1}`, u]))}`} /> : null}
       {tab === "readiness" ? (
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="p-4 text-sm">

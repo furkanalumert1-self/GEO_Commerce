@@ -26,11 +26,36 @@ describe("ChatGPT Ads taslak kuralları", () => {
   it("bağlam ipuçları sorulardan ve kategoriden üretilir; API taslağı duraklatılmış ve micros", () => {
     const hints = contextHints({ prompts: ["Türkiye'de en iyi yataklı koltuk markaları hangileri?"], category: "Yataklı Koltuk", products: ["Mocca Katlanır Koltuk"] });
     expect(hints).toContain("en iyi yataklı koltuk markaları hangileri");
-    expect(hints).toContain("küçük ev için yataklı koltuk");
+    expect(hints).toContain("yataklı koltuk nasıl seçilir");
     const p = apiPayload({ name: "Homedius · Yataklı Koltuk", country: "TR", dailyBudget: 250, maxCpc: 3.5, title: "T", body: "B", targetUrl: "https://homedius.com/", hints });
     expect(p.campaign.status).toBe("paused");
     expect(p.campaign.daily_spend_limit_micros).toBe(250_000_000);
     expect(p.ad_group.bidding.max_bid_micros).toBe(3_500_000);
     expect(p.campaign.targeting.locations.countries).toEqual(["TR"]);
+  });
+});
+
+describe("ChatGPT Ads kampanya planı yardımcıları", () => {
+  it("metin önerileri karakter sınırları içinde ve doğrulanabilir özellikleri kullanır", async () => {
+    const { copySuggestions } = await import("@/modules/ads/chatgpt-plan");
+    const copies = copySuggestions("Homedius", "Yataklı Koltuk", ["Ücretsiz kargo"]);
+    expect(copies).toHaveLength(3);
+    for (const c of copies) {
+      expect([...c.title].length).toBeLessThanOrEqual(50);
+      expect([...c.body].length).toBeLessThanOrEqual(100);
+    }
+    expect(copies[1]!.body).toContain("Ücretsiz kargo");
+    expect(copies.map((c) => `${c.title} ${c.body}`).join(" ")).not.toMatch(/en iyi|garantili/i);
+  });
+
+  it("bütçe kademeleri reklam grubu sayısıyla (en fazla 3) ölçeklenir", async () => {
+    const { budgetTiers } = await import("@/modules/ads/chatgpt-plan");
+    const one = budgetTiers(1);
+    const five = budgetTiers(5);
+    expect(one[0]!.key).toBe("test");
+    expect(one[0]!.dailyBudget).toBe(24); // 8 tıklama × $3
+    expect(one[0]!.total).toBe(24 * 14);
+    expect(five[0]!.dailyClicks).toBe(24); // 3 grup ile sınırlı
+    expect(one[0]!.maxCpc).toBeLessThan(3);
   });
 });

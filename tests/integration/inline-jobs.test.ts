@@ -226,4 +226,16 @@ describe("Redis'siz (inline) yürütme", () => {
     const added = await seedPrompts(db, { workspaceId: out.workspaceId, brandId: out.brandId, brandName: "Homedius", locale: "tr-TR", source: "generated", activeLimit: 10, texts: [{ text: "Yeni bir soru metni burada mı?" }] });
     expect(added).toBe(0);
   });
+
+  it("ChatGPT Ads planı: ölçüm yokken kategorilerden reklam grubu, TR uygunluğu ve bütçe kademeleri üretir", async () => {
+    const { buildChatgptAdsPlan } = await import("@/modules/ads/chatgpt-plan");
+    const { ws, brand } = await makeTenant("commerce");
+    await db.brand.update({ where: { id: brand.id }, data: { country: "TR", categories: ["Yataklı Koltuk", "Puf Seti"] } });
+    const plan = await buildChatgptAdsPlan(db, { workspaceId: ws.id, brandId: brand.id });
+    expect(plan.adGroups.map((g) => g.label)).toEqual(["Yataklı Koltuk", "Puf Seti"]);
+    expect(plan.adGroups[0]!.hints.length).toBeGreaterThan(0);
+    expect(plan.steps.find((s) => s.key === "eligibility")!.status).toBe("done");
+    expect(plan.steps.find((s) => s.key === "account")!.status).toBe("todo");
+    expect(plan.budget).toHaveLength(3);
+  });
 });

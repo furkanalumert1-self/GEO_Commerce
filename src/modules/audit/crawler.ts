@@ -89,7 +89,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       result.sitemapFound = true;
       const parsed = parseSitemap(r.body);
       sitemapUrls.push(...parsed.sitemaps);
-      for (const u of parsed.urls.slice(0, opts.maxPages * 3)) queue.push({ url: u, depth: 1 });
+      for (const u of parsed.urls.filter((x) => !LOW_VALUE.test(x)).sort((a, b) => priority(a) - priority(b)).slice(0, opts.maxPages * 3)) queue.push({ url: u, depth: 1 });
     } catch {
       /* sitemap erişilemedi */
     }
@@ -144,7 +144,12 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
         facts,
       });
       await opts.onProgress?.(result.pages.length, Math.min(opts.maxPages, visited.size + queue.length));
-      if (depth < maxDepth) for (const l of facts.links) queue.push({ url: l, depth: depth + 1 });
+      if (depth < maxDepth) {
+        // Ana sayfa menü bağlantıları (kategori/ürün) sitemap'teki blog vb. URL'lerden önce taranır.
+        const next = facts.links.filter((l) => !LOW_VALUE.test(l)).map((l) => ({ url: l, depth: depth + 1 }));
+        if (depth === 0) queue.unshift(...next.sort((a, b) => priority(a.url) - priority(b.url)));
+        else queue.push(...next);
+      }
       if (opts.delayMs) await sleep(opts.delayMs);
     } catch (e) {
       result.failed.push({ url: key, reason: (e as Error).message.slice(0, 120) });
@@ -152,6 +157,16 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   }
   result.truncated = queue.length > 0;
   return result;
+}
+
+/** Hesap/sepet/arama gibi GEO açısından değersiz ve kişisel sayfalar taranmaz. */
+const LOW_VALUE = /\/(uye[-_/]|giris|login|logout|register|kayit|sifre|password|sepet|cart|checkout|odeme|hesabim|account|favori|wishlist|karsilastir|compare|arama|search)|[?&](sort|page|filter)=/i;
+/** Küçük sayı önce: kategori/ürün → diğer → blog/haber/kurumsal. */
+function priority(url: string): number {
+  const p = url.toLowerCase();
+  if (/\/(kategori|category|collections?|urunler|products?|shop|magaza)\b/.test(p)) return 0;
+  if (/\/(blog|haber|news|makale|article|kurumsal|hakkimizda|about|iletisim|contact|sss|faq|kvkk|gizlilik|privacy|sozlesme|terms)/.test(p)) return 2;
+  return 1;
 }
 
 function safeAbs(href: string, base: string): string | null {

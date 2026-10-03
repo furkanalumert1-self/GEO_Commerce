@@ -27,13 +27,39 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
     throw new ProviderError(`Ağ hatası: ${(e as Error).message}`, true, undefined, "network");
   }
   const latencyMs = Date.now() - started;
-  if (res.status === 429 || res.status >= 500) {
-    const ra = Number(res.headers.get("retry-after"));
-    throw new ProviderError(`Sağlayıcı geçici hata ${res.status}`, true, Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined, `http_${res.status}`);
-  }
-  if (res.status === 401 || res.status === 403) throw new ProviderError("Sağlayıcı kimlik doğrulama hatası", false, undefined, "auth");
-  if (!res.ok) throw new ProviderError(`Sağlayıcı isteği reddetti (${res.status})`, false, undefined, `http_${res.status}`);
+  if (!res.ok) throw await providerHttpError(res);
   return { json: (await res.json()) as Record<string, unknown>, latencyMs };
+}
+
+/**
+ * Sağlayıcı hata gövdesini (OpenAI / Google / Perplexity) okuyup ayırt edici kod üretir. Özellikle 429:
+ * "hesapta kredi/kota yok" (kalıcı; yeniden denemek para/süre harcar) ile anlık hız sınırı (geçici) ayrılır.
+ * Sağlayıcı mesajı kısaltılarak taşınır (anahtar içermez).
+ */
+async function providerHttpError(res: Response): Promise<ProviderError> {
+  let detail = "";
+  let code = "";
+  let googleStatus = "";
+  try {
+    const body = (await res.json()) as { error?: { message?: string; code?: string | number; type?: string; status?: string } };
+    detail = (body.error?.message ?? "").replace(/\s+/g, " ").slice(0, 240);
+    code = String(body.error?.code ?? body.error?.type ?? "");
+    googleStatus = body.error?.status ?? "";
+  } catch {
+    /* gövde JSON değil */
+  }
+  const suffix = detail ? `: ${detail}` : "";
+  const ra = Number(res.headers.get("retry-after"));
+  const retryAfter = Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+  const noQuota = code === "insufficient_quota" || /insufficient_quota|exceeded your current quota|billing|limit: 0\b|free[_ ]tier/i.test(detail);
+  if (res.status === 429 && noQuota) return new ProviderError(`Hesapta kullanılabilir kredi/kota yok (faturalandırmayı kontrol edin)${suffix}`, false, undefined, "insufficient_quota");
+  if (res.status === 429) return new ProviderError(`Sağlayıcı hız sınırı${suffix}`, true, retryAfter, "http_429");
+  if (res.status >= 500) return new ProviderError(`Sağlayıcı geçici hata ${res.status}${suffix}`, true, retryAfter, `http_${res.status}`);
+  if (res.status === 401 || res.status === 403 || googleStatus === "PERMISSION_DENIED" || /api key not valid|invalid api key|incorrect api key/i.test(detail)) {
+    return new ProviderError(`Sağlayıcı kimlik doğrulama hatası${suffix}`, false, undefined, "auth");
+  }
+  if (res.status === 404 || /model.*(not found|does not exist)|is not found for API version/i.test(detail)) return new ProviderError(`Model bulunamadı veya bu anahtarla erişilemiyor${suffix}`, false, undefined, "http_404");
+  return new ProviderError(`Sağlayıcı isteği reddetti (${res.status})${suffix}`, false, undefined, `http_${res.status}`);
 }
 
 function notConfigured(engine: EngineKey, provider: string, reason: string, surface: AiMonitorAdapter["surface"]): AiMonitorAdapter {

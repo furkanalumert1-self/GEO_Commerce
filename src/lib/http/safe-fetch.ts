@@ -154,6 +154,20 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
   throw new AppError("validation_error", "Çok fazla yönlendirme");
 }
 
+export const BOT_USER_AGENT = "Mozilla/5.0 (compatible; CallypsoBot/1.0; +https://geocommerce-two.vercel.app)";
+
+/**
+ * Doğrulanmış IP'ye sabitlenmiş DNS lookup. Node (≥20) bağlantı kurarken `{ all: true }` ile çağırıp
+ * adres dizisi bekleyebilir; eski biçim (address, family) ile yanıt verilirse "Invalid IP address: undefined"
+ * hatası oluşur. İki çağrı biçimi de desteklenir.
+ */
+export function pinnedLookup(address: string, family: number) {
+  return (_host: string, options: { all?: boolean } | number | undefined, cb: (err: Error | null, address: string | Array<{ address: string; family: number }>, family?: number) => void) => {
+    if (typeof options === "object" && options?.all) cb(null, [{ address, family }]);
+    else cb(null, address, family);
+  };
+}
+
 function pinnedRequest(
   url: URL,
   address: string,
@@ -166,9 +180,9 @@ function pinnedRequest(
       url,
       {
         method: opts.method ?? "GET",
-        headers: { "user-agent": "GEOCommerceBot/1.0 (+https://example.invalid/bot)", accept: "text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.5", ...opts.headers },
+        headers: { "user-agent": BOT_USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "tr-TR,tr;q=0.9,en;q=0.6", ...opts.headers },
         // DNS rebinding koruması: doğrulanan IP'ye bağlan.
-        lookup: (_h, _o, cb) => cb(null, address, family),
+        lookup: pinnedLookup(address, family) as never,
         timeout: opts.timeoutMs,
       },
       (res) => {

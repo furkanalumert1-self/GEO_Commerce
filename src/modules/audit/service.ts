@@ -44,7 +44,14 @@ export async function startAudit(db: PrismaClient, input: { domain: string; loca
   const since = new Date(Date.now() - FREE_WINDOW_DAYS * 86_400_000);
   const fingerprintHash = sha256(`fp:${input.fingerprint}`);
   if (!demo) {
-    const recent = await db.audit.findFirst({ where: { OR: [{ domain }, { fingerprintHash }], createdAt: { gte: since } } });
+    // Başarısız (veri üretmemiş) audit'ler ücretsiz hakkı tüketmez; sürmekte olanlar ve sonuç üretmiş olanlar tüketir.
+    const recent = await db.audit.findFirst({
+      where: {
+        OR: [{ domain }, { fingerprintHash }],
+        createdAt: { gte: since },
+        AND: [{ OR: [{ status: { in: ["queued", "running"] } }, { status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["visibility", "sampleCount"], gt: 0 } }] }],
+      },
+    });
     if (recent) throw new AppError("rate_limited", "Bu alan adı veya cihaz için son 30 günde ücretsiz audit yapıldı", { resetAt: new Date(recent.createdAt.getTime() + FREE_WINDOW_DAYS * 86_400_000).toISOString() });
     await assertDailyCostCap(db);
   }
@@ -86,10 +93,34 @@ export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAudi
   };
 }
 
-function deriveCategoryTerms(pages: Awaited<ReturnType<typeof crawlSite>>["pages"]): string[] {
-  const cats = pages.filter((p) => p.pageType === "category").map((p) => p.facts.h1 ?? p.facts.title ?? "").filter(Boolean);
-  const productCats = pages.flatMap((p) => p.facts.products.map((x) => x.category ?? "")).filter(Boolean);
-  return [...new Set([...cats, ...productCats].map((c) => c.split("|")[0]!.trim()))].slice(0, 5);
+/**
+ * Soru üretimi için genel kategori terimleri. Ürün kategori yollarından ("Mobilya > Mocca Katlanır Koltuk")
+ * birden çok ürünün paylaştığı ortak son ek ("Katlanır Koltuk") ve üst kategoriler ("Mobilya") tercih edilir;
+ * markanın kendi model adları (yalnız tek ürüne özgü) soruya taşınmaz.
+ */
+export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1: string | null; title: string | null; products: Array<{ category?: string | null }> } }>): string[] {
+  const paths = pages.flatMap((p) => p.facts.products.map((x) => x.category ?? "")).filter(Boolean).map((c) => c.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean));
+  const leaves = [...new Set(paths.map((s) => s[s.length - 1]!))];
+  const tops = paths.filter((s) => s.length > 1).map((s) => s[0]!);
+  const suffixCount = new Map<string, number>();
+  for (const leaf of leaves) {
+    const w = leaf.split(/\s+/);
+    for (const n of [2, 1]) if (w.length > n) suffixCount.set(w.slice(-n).join(" "), (suffixCount.get(w.slice(-n).join(" ")) ?? 0) + 1);
+  }
+  const shared = [...suffixCount.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[0].split(" ").length - a[0].split(" ").length || b[1] - a[1]).map(([t]) => t);
+  const pageCats = pages.filter((p) => p.pageType === "category").map((p) => p.facts.h1 ?? p.facts.title ?? "").filter(Boolean).map((c) => c.split("|")[0]!.trim());
+  // Sayfa başlıkları çoğu zaman model/koleksiyon adıdır; yalnız ürün kategori verisi yoksa kullanılır.
+  const ordered = shared.length || tops.length ? [...shared, ...tops] : [...leaves, ...pageCats];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of ordered) {
+    const k = t.toLocaleLowerCase("tr-TR");
+    // "Seti" gibi, zaten seçilmiş çok kelimeli bir terimin son eki olan tek kelimeler atlanır.
+    if (t.length <= 2 || seen.has(k) || (!k.includes(" ") && out.some((o) => o.toLocaleLowerCase("tr-TR").endsWith(` ${k}`)))) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.slice(0, 5);
 }
 
 export function auditPrompts(categories: string[], country: string): string[] {
@@ -97,9 +128,9 @@ export function auditPrompts(categories: string[], country: string): string[] {
   const base = categories.length ? categories : ["ürünler"];
   const templates = [
     (c: string) => `${place} en iyi ${c.toLocaleLowerCase("tr-TR")} markaları hangileri?`,
-    (c: string) => `Hassas cilt için hangi ${c.toLocaleLowerCase("tr-TR")} önerirsin?`,
+    (c: string) => `Küçük bir ev için hangi ${c.toLocaleLowerCase("tr-TR")} modellerini önerirsin?`,
     (c: string) => `Uygun fiyatlı ve kaliteli ${c.toLocaleLowerCase("tr-TR")} nereden alabilirim?`,
-    (c: string) => `${c} alırken nelere dikkat etmeliyim, hangi markaları karşılaştırmalıyım?`,
+    (c: string) => `${c.toLocaleLowerCase("tr-TR")} alırken nelere dikkat etmeliyim, hangi markaları karşılaştırmalıyım?`.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")),
     (c: string) => `Popüler ${c.toLocaleLowerCase("tr-TR")} markalarına alternatif ne var?`,
   ];
   return templates.slice(0, AUDIT_PROMPTS).map((t, i) => t(base[i % base.length]!).replace(/\s+/g, " ").trim());
@@ -107,7 +138,7 @@ export function auditPrompts(categories: string[], country: string): string[] {
 
 const KNOWN_THIRD_PARTY = /(forum|haber|news|blog|rehber|yorum|review|wiki|medium|youtube|instagram|facebook|twitter|x\.com|reddit|sikayet|trendyol|hepsiburada|amazon|n11|cimri|akakce)/;
 
-type AuditAnswer = { engine: string; model: string; surface: string; prompt: string; ok: boolean; mentioned: boolean; recommended: boolean; ownCitation: boolean; citedDomains: string[]; sampledAt: string; errorCode?: string };
+type AuditAnswer = { engine: string; model: string; surface: string; prompt: string; ok: boolean; mentioned: boolean; recommended: boolean; ownCitation: boolean; citedDomains: string[]; sampledAt: string; errorCode?: string; errorDetail?: string };
 
 /** Adımlar arası kalıcı audit ara durumu (JobRecord.cursor.step). */
 export interface AuditWork {
@@ -120,6 +151,7 @@ export interface AuditWork {
     failed: number;
     skippedByRobots: number;
     truncated: boolean;
+    failures?: Array<{ url: string; reason: string }>;
   };
   prompts?: string[];
   answers: AuditAnswer[];
@@ -164,6 +196,7 @@ export async function runAudit(
       failed: crawl.failed.length,
       skippedByRobots: crawl.skippedByRobots,
       truncated: crawl.truncated,
+      failures: crawl.failed.slice(0, 3),
     };
     await save();
     if (overBudget()) return "continue";
@@ -191,7 +224,7 @@ export async function runAudit(
     }
     const { prompt, a } = pairs[work.answers.length]!;
     // Aynı platformda kalıcı hata (anahtar/model) alındıysa tekrar çağrılmaz.
-    const permanent = work.answers.find((x) => x.engine === a.engine && !x.ok && ["auth", "not_configured", "http_400", "http_404"].includes(x.errorCode ?? ""));
+    const permanent = work.answers.find((x) => x.engine === a.engine && !x.ok && ["auth", "not_configured", "http_400", "http_404", "insufficient_quota"].includes(x.errorCode ?? ""));
     if (permanent) {
       work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: permanent.errorCode });
       continue;
@@ -216,7 +249,7 @@ export async function runAudit(
         continue;
       }
       work.pendingAttempts = 0;
-      work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: pe?.code ?? "error" });
+      work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: pe?.code ?? "error", errorDetail: ((e as Error).message ?? "").slice(0, 240) });
     }
     await save();
   }
@@ -237,6 +270,8 @@ export async function runAudit(
   const models = [...new Set(answers.filter((x) => x.ok).map((x) => `${x.engine}:${x.model}`))];
   const okCount = answers.filter((x) => x.ok).length;
   const failedErrors = [...new Set(answers.filter((x) => !x.ok).map((x) => `${x.engine}:${x.errorCode ?? "error"}`))];
+  // Platform başına ilk sağlayıcı hata mesajı (tanı için; anahtar içermez).
+  const failedDetails = Object.fromEntries(available.map((a) => [a.engine, answers.find((x) => x.engine === a.engine && !x.ok && x.errorDetail)?.errorDetail]).filter(([, d]) => d));
   const partial = unavailable.length > 0 || okCount < prompts.length * AUDIT_ENGINES.length || work.crawl.failed > 0 || work.crawl.truncated;
 
   await db.audit.update({
@@ -253,9 +288,10 @@ export async function runAudit(
         engines: perEngine.map((e) => ({ engine: e.engine, score: e.score, coverage: e.coverage })),
         unavailableEngines: unavailable,
         failedCalls: failedErrors,
+        failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [] },
         competitorCandidates,
         opportunityCount,
         examples,

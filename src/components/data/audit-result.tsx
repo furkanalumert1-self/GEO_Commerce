@@ -21,9 +21,10 @@ interface Summary {
   engines: Array<{ engine: string; score: number | null; coverage: number | null }>;
   unavailableEngines: Array<{ engine: string; reason: string | null }>;
   failedCalls?: string[];
+  failedDetails?: Record<string, string>;
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
   readiness: { geoScore: number | null; adsScore: number | null; checks: Check[] };
-  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[] };
+  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }> };
   competitorCandidates: Array<{ domain: string; observations: number }>;
   opportunityCount: number;
   examples: Array<{ prompt: string; engine: string; competitorDomains: string[]; intentScore: number; intentType: string }>;
@@ -62,7 +63,8 @@ const CALL_ERROR: Record<string, string> = {
   not_configured: "yapılandırılmamış",
   http_400: "istek/model reddedildi",
   http_404: "model bulunamadı",
-  http_429: "kota/hız sınırı",
+  http_429: "hız sınırı",
+  insufficient_quota: "hesapta kredi/kota yok (faturalandırma)",
   timeout: "zaman aşımı",
   network: "ağ hatası",
 };
@@ -146,7 +148,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         <h1 className="text-2xl font-semibold">GEO Audit: {view.domain}</h1>
         {r?.demo ? <Badge tone="warning">Örnek veri</Badge> : null}
         <Badge tone={view.status === "succeeded" ? "success" : view.status === "partial" ? "warning" : view.status === "failed" ? "danger" : "primary"}>
-          {view.status === "partial" ? "Kısmi sonuç" : (STAGES[view.stage] ?? view.stage)}
+          {view.status === "partial" ? "Kısmi sonuç" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
         </Badge>
       </div>
 
@@ -189,7 +191,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
 
       {view.status === "failed" ? (
         <Alert tone="danger" title="Audit tamamlanamadı">
-          Site taranamadı veya AI motorlarına ulaşılamadı ({view.errorCode ?? "bilinmeyen neden"}). Alan adının herkese açık olduğundan emin olup daha sonra tekrar deneyin.
+          Sitede taranabilir sayfa bulunamadı ve AI platformlarından yanıt alınamadı; aşağıdaki &ldquo;Kaynak ve yöntem&rdquo; bölümünde nedenleri görebilirsiniz. Veri üretmeyen audit ücretsiz hakkınızı tüketmez; sorun giderildikten sonra aynı alan adıyla tekrar deneyebilirsiniz.
         </Alert>
       ) : null}
 
@@ -230,9 +232,15 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
               <p><span className="text-muted">Ülke / dil:</span> {r.provenance.country} / {r.provenance.language}</p>
               <p><span className="text-muted">Modeller:</span> {r.provenance.models.join(", ") || "—"}</p>
               <p><span className="text-muted">Örneklem:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
-              <p><span className="text-muted">Tarama:</span> {r.crawl.pages} sayfa, {r.crawl.products} ürün, robots ile atlanan {r.crawl.skippedByRobots}</p>
+              <p><span className="text-muted">Tarama:</span> {r.crawl.pages} sayfa, {r.crawl.products} ürün, robots ile atlanan {r.crawl.skippedByRobots}{r.crawl.failed ? `, alınamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>
+              {r.crawl.failures?.length ? <p className="text-xs text-text-secondary">Tarama hataları: {r.crawl.failures.map((f) => `${f.url} → ${f.reason}`).join("; ")}</p> : null}
               {r.unavailableEngines.length ? <p><span className="text-muted">Bağlı olmayan motorlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
               {r.failedCalls?.length ? <p><span className="text-muted">Yanıt alınamayan çağrılar:</span> {r.failedCalls.map((f) => { const [e, c] = f.split(":"); return `${ENGINE[e!] ?? e} (${CALL_ERROR[c ?? ""] ?? c})`; }).join("; ")} — başarısız sorgular görünürlük sıfırı sayılmaz.</p> : null}
+              {r.failedDetails && Object.keys(r.failedDetails).length ? (
+                <ul className="text-xs text-text-secondary">
+                  {Object.entries(r.failedDetails).map(([e, d]) => <li key={e} className="break-words">{ENGINE[e] ?? e}: {d}</li>)}
+                </ul>
+              ) : null}
             </div>
           </Card>
 

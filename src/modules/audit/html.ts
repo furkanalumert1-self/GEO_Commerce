@@ -194,10 +194,12 @@ export function parseSitemap(xml: string): { urls: string[]; sitemaps: string[] 
 
 export function classifyPage(url: string, facts: Pick<PageFacts, "schemaTypes" | "products">): string {
   const p = new URL(url).pathname.toLowerCase();
-  if (facts.products.length > 0 || /\/(urun|product|p)\//.test(p)) return "product";
+  if (p === "/" || p === "") return "home";
   if (/\/(kategori|category|collections?|c)\//.test(p) || facts.schemaTypes.includes("CollectionPage")) return "category";
+  // Birden çok ürün listeleyen sayfa (kategori/koleksiyon), tek ürün detay sayfası değildir.
+  if (facts.products.length > 1) return "category";
+  if (facts.products.length === 1 || /\/(urun|product|p)\//.test(p)) return "product";
   if (/(iade|return|refund|kargo|shipping|gizlilik|privacy|kvkk|mesafeli|terms|sozlesme)/.test(p)) return "policy";
   if (/(iletisim|contact|hakkimizda|about)/.test(p)) return "contact";
-  if (p === "/" || p === "") return "home";
   return "other";
 }

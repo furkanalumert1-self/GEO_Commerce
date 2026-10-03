@@ -74,7 +74,7 @@ export async function executeRun(
   let done = 0;
   const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
   // Kalıcı hata (anahtar/model/yapılandırma) alan platform bu çalıştırmada tekrar çağrılmaz (adımlar arası da).
-  const PERMANENT = ["auth", "not_configured", "unsupported", "http_400", "http_404"];
+  const PERMANENT = ["auth", "not_configured", "unsupported", "http_400", "http_404", "insufficient_quota"];
   const deadEngines = new Map<string, string>(
     (await db.observation.findMany({ where: { runId, status: "failed", errorCode: { in: PERMANENT } }, distinct: ["engine"], select: { engine: true, errorCode: true } })).map((o) => [o.engine, o.errorCode!]),
   );

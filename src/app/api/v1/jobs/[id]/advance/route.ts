@@ -6,7 +6,7 @@ import type { Permission } from "@/lib/permissions";
 import { assertCan, isUuid, resolveBrandAccess, resolveWorkspaceAccess } from "@/modules/tenancy/access";
 
 /** Adım bütçesi + kayıt payı; Vercel Hobby (Fluid compute olmadan) dahil tüm planlarda izinli üst sınır. */
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /** İşi başlatmak için gereken yetkiyle aynı yetki ilerletmek için de gerekir. */
 const PERMISSION: Record<string, Permission> = { monitor_run: "runs.start", crawl: "brand.manage", commerce_sync: "integrations.manage" };

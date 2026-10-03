@@ -4,7 +4,7 @@ import { json, rateLimit, route } from "@/lib/http/api";
 import { advanceJob } from "@/lib/queue/advance";
 import { getAuditByToken, publicAuditView } from "@/modules/audit/service";
 
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * Anonim ücretsiz audit'in sonraki adımı. Yetki: tahmin edilemeyen, süreli audit bağlantısı (token); yalnız bu

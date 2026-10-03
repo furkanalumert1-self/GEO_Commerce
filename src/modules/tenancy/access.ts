@@ -115,7 +115,14 @@ export function assertCan(access: WorkspaceAccess | BrandAccess, permission: Per
 /** Yeni ücretli iş (ölçüm, üretim, crawl) öncesi: abonelik durumu ve read-only marka. */
 export function assertCanRunPaidJob(access: WorkspaceAccess | BrandAccess): void {
   if (!access.entitlements.canRunPaidJobs) {
-    throw new AppError("plan_required", "Aboneliğiniz yeni ücretli işlere izin vermiyor", { reason: access.entitlements.readOnlyReason });
+    const reason = access.entitlements.readOnlyReason;
+    const message =
+      reason === "no_subscription"
+        ? "Bu çalışma alanında aktif abonelik veya deneme yok (deneme hesap başına bir çalışma alanına verilir). Paket seçin veya yöneticiden test erişimi isteyin."
+        : reason === "past_due_grace_expired"
+          ? "Ödeme gecikti ve ek süre doldu; yeni ölçüm/üretim için ödeme bilgisini güncelleyin."
+          : "Aboneliğiniz yeni ücretli işlere izin vermiyor";
+    throw new AppError("plan_required", message, { reason });
   }
   if ("brand" in access && access.brand.readOnly) {
     throw new AppError("plan_required", "Bu marka mevcut pakette salt okunur");

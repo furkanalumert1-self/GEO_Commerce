@@ -22,24 +22,40 @@ export default async function AdminPage() {
     notFound();
   }
   const since = daysAgo(30);
+  // Her bölüm ayrı yüklenir: biri hata verirse sayfa çökmez, kartta sebep gösterilir ve loglanır.
+  const errors: Record<string, string> = {};
+  const safe = async <T,>(key: string, p: Promise<T>, fallback: T): Promise<T> => {
+    try {
+      return await p;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      errors[key] = msg.split("\n").filter(Boolean).slice(-1)[0]?.slice(0, 300) ?? "Bilinmeyen hata";
+      log.error("[admin] section_failed", { section: key, error: msg.slice(0, 1000) });
+      return fallback;
+    }
+  };
   const [tenants, dead, costs, inboxErrors] = await Promise.all([
-    db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true, overrideExpiresAt: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }),
-    db.jobRecord.findMany({ where: { status: "dead" }, orderBy: { updatedAt: "desc" }, take: 25, select: { id: true, type: true, deadReason: true, lastError: true, workspaceId: true, updatedAt: true } }),
-    db.costLedger.groupBy({ by: ["provider", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } }),
-    db.inboxEvent.count({ where: { error: { not: null } } }),
+    safe("tenants", db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true, overrideExpiresAt: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }), []),
+    safe("dlq", db.jobRecord.findMany({ where: { status: "dead" }, orderBy: { updatedAt: "desc" }, take: 25, select: { id: true, type: true, deadReason: true, lastError: true, workspaceId: true, updatedAt: true } }), []),
+    safe("costs", db.costLedger.groupBy({ by: ["provider", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } }), []),
+    safe("inbox", db.inboxEvent.count({ where: { error: { not: null } } }), 0),
   ]);
+  const sectionError = (key: string) => (errors[key] ? <p role="alert" className="px-4 py-3 text-sm text-danger">Bu bölüm yüklenemedi: {errors[key]}</p> : null);
   return (
     <main id="main" className="mx-auto max-w-[1440px] px-4 py-6 sm:px-8">
       <PageHeader title="Platform yönetimi" description="Tenant/billing sağlığı, sağlayıcı maliyetleri, DLQ. PII varsayılan olarak gizli; tüm müdahaleler gerekçeyle audit log'a yazılır." />
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader title="Tenant'lar" description="Kimlikler pseudonymous gösterilir" />
+          {sectionError("tenants")}
           <TableWrap label="Tenantlar"><thead><tr><Th>Workspace</Th><Th>Paket</Th><Th numeric>Marka</Th><Th>Oluşturma</Th><Th>Test erişimi</Th></tr></thead>
             <tbody>{tenants.map((t) => <tr key={t.id}><Td className="font-mono text-xs">{t.id.slice(0, 8)}{t.isDemo ? " (demo)" : ""}</Td><Td>{t.subscription ? `${t.subscription.planKey} · ${t.subscription.status}` : "—"}{t.subscription?.overrideExpiresAt && t.subscription.overrideExpiresAt > new Date() ? <span className="block text-xs text-warning">Test erişimi: {fmtDate(t.subscription.overrideExpiresAt)}</span> : null}</Td><Td numeric>{t._count.brands}</Td><Td className="text-muted">{fmtDate(t.createdAt)}</Td><Td>{!t.isDemo && t.subscription ? <ApiButton url={`/api/v1/admin/workspaces/${t.id}/override`} body={{ days: 7, reason: "Ödeme öncesi uçtan uca test (teşhis + Fix with AI)" }} label="7 gün Fix with AI" onSuccessMessage="Verildi" /> : "—"}</Td></tr>)}</tbody>
           </TableWrap>
         </Card>
         <Card>
           <CardHeader title="Sağlayıcı maliyeti (30 gün)" description={`Webhook inbox hataları: ${inboxErrors}`} />
+          {sectionError("costs")}
+          {sectionError("inbox")}
           <TableWrap label="Maliyet"><thead><tr><Th>Sağlayıcı</Th><Th>Sonuç</Th><Th numeric>Deneme</Th><Th numeric>USD</Th></tr></thead>
             <tbody>{costs.map((c, i) => <tr key={i}><Td>{c.provider}</Td><Td>{c.succeeded ? "başarılı" : "başarısız"}</Td><Td numeric>{c._count._all}</Td><Td numeric>{(Number(c._sum.costMicros ?? 0n) / 1e6).toFixed(2)}</Td></tr>)}</tbody>
           </TableWrap>
@@ -57,6 +73,7 @@ export default async function AdminPage() {
       </Card>
       <Card className="mt-6">
         <CardHeader title="DLQ (dead jobs)" description="Yeniden oynatma: POST /api/v1/admin/jobs/:id/retry (gerekçe zorunlu)" />
+        {sectionError("dlq")}
         <TableWrap label="DLQ"><thead><tr><Th>Job</Th><Th>Tür</Th><Th>Neden</Th><Th>Zaman</Th></tr></thead>
           <tbody>{dead.map((j) => <tr key={j.id}><Td className="font-mono text-xs">{j.id.slice(0, 8)}</Td><Td>{j.type}</Td><Td className="text-xs text-muted">{j.deadReason}: {j.lastError?.slice(0, 120)}</Td><Td className="text-muted">{fmtDate(j.updatedAt, "UTC", "tr-TR", true)}</Td></tr>)}</tbody>
         </TableWrap>

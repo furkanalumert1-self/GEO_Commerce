@@ -6,6 +6,7 @@ Kontrol tarihi: 2026-09-30. "Canlı" = gerçek hesapla doğrulandı. Hiçbiri he
 |---|---|---|---|---|---|
 | OpenAI (Responses API + web_search) | ChatGPT motoru, `api_grounded` | `src/adapters/ai/providers.ts` | Bearer; model `OPENAI_MONITOR_MODEL` | Fixture/parse ✓, canlı ✗ | API anahtarı; şema yeniden doğrulanmalı |
 | Google Gemini (generateContent + google_search) | Gemini motoru | aynı | `x-goog-api-key` | canlı ✗ | anahtar |
+| Anthropic Claude (Messages API + `web_search_20250305`) | Claude motoru, `api_grounded`; ücretsiz ölçüm (yapılandırılmışsa) + hesap içi | `src/adapters/ai/anthropic.ts` (`@anthropic-ai/sdk`, SDK retry kapalı) | `ANTHROPIC_API_KEY`; model `ANTHROPIC_MONITOR_MODEL`; arama `user_location.country` = istenen pazar (doğrulanmış konum değil); istek başına ≤3 arama, ≤2048 çıktı token; kaynak = `web_search_result_location` atıfları. Arama $10/1000 + token (2026-10-04 resmi belge) | mock ✓, canlı ✗ | anahtar; Console'da web araması kapalıysa 400 → `search_unavailable` (aramasız sonuç üretilmez). ClaudeBot erişim testi değildir |
 | Perplexity (chat/completions) | Perplexity motoru | aynı | Bearer | canlı ✗ | anahtar |
 | Google AI Overviews / AI Mode, Copilot | ayrı surface | `unsupported` | izinli/lisanslı kaynak yok | — | lisans; Gemini yanıtı yerine kullanılmaz |
 | Lisanslı UI kaynağı | `licensed_ui` | yalnız env | `LICENSED_MONITOR_*` | — | sözleşme |

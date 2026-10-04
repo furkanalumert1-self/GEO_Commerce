@@ -30,6 +30,7 @@ export function tzLabel(timeZone: string): string {
 export const ENGINE_SHORT: Record<string, string> = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
+  claude: "Claude",
   perplexity: "Perplexity",
   google_ai_overviews: "AI Overviews",
   copilot: "Copilot",

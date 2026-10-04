@@ -21,6 +21,8 @@ interface Summary {
   visibility: { score: number | null; smallSample: boolean; sampleCount: number; scheduled: number; partial: boolean; missingEngines: string[] };
   engines: Array<{ engine: string; score: number | null; coverage: number | null }>;
   unavailableEngines: Array<{ engine: string; reason: string | null }>;
+  /** Bu ölçümde sorulan platformlar (eski raporlarda yok). */
+  scopeEngines?: string[];
   failedCalls?: string[];
   failedDetails?: Record<string, string>;
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
@@ -70,6 +72,10 @@ const CALL_ERROR: Record<string, string> = {
   insufficient_quota: "hesapta kredi/kota yok (faturalandırma)",
   timeout: "zaman aşımı",
   network: "ağ hatası",
+  search_unavailable: "web araması hesapta kapalı",
+  search_failed: "web araması başarısız",
+  refusal: "model yanıtlamadı",
+  unavailable: "yanıt alınamadı",
 };
 
 /** Site okunamadığında neden ve yapılacak iş (kullanıcı dili; ham hata yalnız teknik ayrıntıda). */
@@ -83,7 +89,7 @@ const UNREADABLE: Record<string, { why: (d: string) => string; todo: string }> =
   network: { why: (d) => `${d} adresine bağlanılamadı.`, todo: "Sitenin tarayıcıda açıldığını kontrol edip tekrar deneyin." },
 };
 
-const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", perplexity: "Perplexity API" };
+const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", claude: "Claude (Anthropic API)", perplexity: "Perplexity API" };
 
 interface StepInfo {
   outcome: string;
@@ -269,8 +275,9 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           <Card>
             <CardHeader title="Nasıl ölçüldü" />
             <div className="grid gap-2 p-4 text-sm sm:grid-cols-2">
-              <p><span className="text-muted">Yöntem:</span> AI platformlarının web aramalı API yanıtları — ChatGPT/Gemini uygulamasındaki sonuçla birebir aynı değildir</p>
-              <p><span className="text-muted">Ülke / dil:</span> {r.provenance.country} / {r.provenance.language}</p>
+              <p><span className="text-muted">Yöntem:</span> AI platformlarının web aramalı API yanıtları — ChatGPT/Gemini/Claude uygulamasındaki sonuçla birebir aynı değildir</p>
+              {r.scopeEngines?.length ? <p><span className="text-muted">Platformlar:</span> {r.scopeEngines.map((e) => ENGINE[e] ?? e).join(", ")}</p> : null}
+              <p><span className="text-muted">Ülke / dil (istenen pazar):</span> {r.provenance.country} / {r.provenance.language}</p>
               <p><span className="text-muted">Modeller:</span> {r.provenance.models.join(", ") || "—"}</p>
               <p><span className="text-muted">Yanıtlar:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
               <p><span className="text-muted">Site incelemesi:</span> {r.crawl.pages} sayfa okundu, {r.crawl.products} ürün bulundu, robots kuralıyla atlanan {r.crawl.skippedByRobots}{r.crawl.failed ? `, okunamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>

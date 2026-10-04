@@ -5,6 +5,7 @@ import { getAuditByToken, publicAuditView } from "@/modules/audit/service";
 import { AuditResult } from "@/components/data/audit-result";
 import { currentUser } from "@/lib/page-access";
 import { executionMode } from "@/lib/queue";
+import { platformAdminEmail } from "@/lib/platform-admin";
 
 export const metadata: Metadata = { title: "Ölçüm sonucu", robots: { index: false, follow: false } };
 
@@ -13,5 +14,5 @@ export default async function AuditResultPage({ params }: { params: Promise<{ to
   const audit = await getAuditByToken(db, token);
   if (!audit) notFound();
   const user = await currentUser();
-  return <AuditResult token={token} initial={JSON.parse(JSON.stringify(publicAuditView(audit)))} signedIn={Boolean(user)} inline={executionMode() === "inline"} />;
+  return <AuditResult token={token} initial={JSON.parse(JSON.stringify(publicAuditView(audit, { admin: Boolean(await platformAdminEmail()) })))} signedIn={Boolean(user)} inline={executionMode() === "inline"} />;
 }

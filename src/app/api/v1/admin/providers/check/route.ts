@@ -9,7 +9,7 @@ import { log } from "@/lib/observability/log";
 import { requirePlatformAdmin } from "../../guard";
 
 const body = z.object({ sendTestEmail: z.boolean().default(false) });
-const ENGINES: EngineKey[] = ["chatgpt", "gemini", "perplexity"];
+const ENGINES: EngineKey[] = ["chatgpt", "gemini", "claude", "perplexity"];
 const PROBE = "Türkiye'de hassas cilt için önerilen bir nemlendirici markası söyleyin. Tek cümle yanıt verin.";
 
 /**
@@ -27,7 +27,7 @@ export const POST = route(async ({ req, requestId }) => {
       if (a.status() !== "ready") return { engine, status: a.status(), ok: false, reason: a.statusReason() };
       const started = Date.now();
       try {
-        const r = await a.ask({ prompt: PROBE, country: "TR", language: "tr", signal: AbortSignal.timeout(45_000) });
+        const r = await a.ask({ prompt: PROBE, country: "TR", language: "tr", signal: AbortSignal.timeout(90_000) });
         return { engine, status: "ready", ok: r.text.trim().length > 0, model: r.model, latencyMs: Date.now() - started, citations: r.urls.length, sample: r.text.slice(0, 160) };
       } catch (e) {
         const code = e instanceof ProviderError ? e.code : "error";

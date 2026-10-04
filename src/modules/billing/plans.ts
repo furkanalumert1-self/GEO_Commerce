@@ -5,7 +5,7 @@
  */
 export type PlanKey = "free_audit" | "starter" | "growth" | "commerce" | "agency" | "enterprise";
 
-export type Engine = "chatgpt" | "gemini" | "perplexity" | "google_ai_overviews" | "copilot";
+export type Engine = "chatgpt" | "gemini" | "claude" | "perplexity" | "google_ai_overviews" | "copilot";
 
 export type Feature =
   | "diagnosis"
@@ -53,7 +53,7 @@ export const PLANS: Record<PlanKey, PlanDefinition> = {
     label: "Free GEO Audit",
     monthlyPriceUsdCents: 0,
     limits: {
-      brands: 1, seats: 1, competitorsPerBrand: 3, engines: ["chatgpt", "gemini"], activePrompts: 5,
+      brands: 1, seats: 1, competitorsPerBrand: 3, engines: ["chatgpt", "gemini", "claude"], activePrompts: 5,
       answerUnits: 10, monitoringFrequency: "once", opportunityDetail: 0, opportunitySummaryOnly: true,
       fixUnits: 0, crawlUrls: 20, catalogProducts: 20, commerceEvents: 0, retentionDays: 7, pooled: false,
       features: [],
@@ -65,7 +65,7 @@ export const PLANS: Record<PlanKey, PlanDefinition> = {
     label: "Starter",
     monthlyPriceUsdCents: 7900,
     limits: {
-      brands: 1, seats: 2, competitorsPerBrand: 3, engines: ["chatgpt", "gemini"], activePrompts: 25,
+      brands: 1, seats: 2, competitorsPerBrand: 3, engines: ["chatgpt", "gemini", "claude"], activePrompts: 25,
       answerUnits: 500, monitoringFrequency: "weekly", opportunityDetail: 10, opportunitySummaryOnly: false,
       fixUnits: 0, crawlUrls: 200, catalogProducts: 500, commerceEvents: 0, retentionDays: 90, pooled: false,
       features: [],
@@ -77,7 +77,7 @@ export const PLANS: Record<PlanKey, PlanDefinition> = {
     label: "Growth",
     monthlyPriceUsdCents: 19900,
     limits: {
-      brands: 1, seats: 5, competitorsPerBrand: 5, engines: ["chatgpt", "gemini", "perplexity"], activePrompts: 75,
+      brands: 1, seats: 5, competitorsPerBrand: 5, engines: ["chatgpt", "gemini", "claude", "perplexity"], activePrompts: 75,
       answerUnits: 2000, monitoringFrequency: "daily_budgeted", opportunityDetail: "all", opportunitySummaryOnly: false,
       fixUnits: 30, crawlUrls: 1000, catalogProducts: 5000, commerceEvents: 0, retentionDays: 365, pooled: false,
       features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics"],

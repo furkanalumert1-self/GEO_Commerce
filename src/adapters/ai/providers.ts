@@ -1,6 +1,7 @@
 import { config, type AppConfig } from "@/lib/config";
 import { ProviderError, type AiAnswer, type AiMonitorAdapter, type AskInput, type EngineKey } from "./types";
 import { createFixtureAdapter } from "./fixture";
+import { claudeAdapter } from "./anthropic";
 
 /**
  * Canlı AI adapter'ları. Endpoint/şema notları docs/provider-capabilities.md'de; canlı smoke opt-in.
@@ -196,6 +197,7 @@ export function getAiAdapters(cfg: AppConfig = config(), opts: { demo?: boolean 
     return {
       chatgpt: createFixtureAdapter("chatgpt"),
       gemini: createFixtureAdapter("gemini"),
+      claude: createFixtureAdapter("claude"),
       perplexity: createFixtureAdapter("perplexity"),
       google_ai_overviews: unsupported("google_ai_overviews", "google", "Google AI Overviews/AI Mode için izinli/lisanslı kaynak bağlı değil"),
       copilot: unsupported("copilot", "microsoft", "Copilot için izinli/lisanslı kaynak bağlı değil"),
@@ -204,6 +206,7 @@ export function getAiAdapters(cfg: AppConfig = config(), opts: { demo?: boolean 
   return {
     chatgpt: openAiAdapter(cfg),
     gemini: geminiAdapter(cfg),
+    claude: claudeAdapter(cfg),
     perplexity: perplexityAdapter(cfg),
     google_ai_overviews: unsupported("google_ai_overviews", "google", "Google AI Overviews/AI Mode için izinli/lisanslı kaynak bağlı değil; sıradan Gemini yanıtı yerine kullanılmaz"),
     copilot: unsupported("copilot", "microsoft", "Copilot için izinli/lisanslı kaynak bağlı değil"),
@@ -213,6 +216,7 @@ export function getAiAdapters(cfg: AppConfig = config(), opts: { demo?: boolean 
 export const ENGINE_LABELS: Record<EngineKey, string> = {
   chatgpt: "ChatGPT (OpenAI API)",
   gemini: "Gemini (Google API)",
+  claude: "Claude (Anthropic API)",
   perplexity: "Perplexity (API)",
   google_ai_overviews: "Google AI Overviews",
   copilot: "Microsoft Copilot",

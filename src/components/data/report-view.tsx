@@ -36,7 +36,7 @@ export function ReportView({ snapshot: s, timeZone, brandingName }: { snapshot: 
       <Card>
         <CardHeader title="Platformlar ve görünürlük payı" />
         <div className="grid gap-4 p-4 md:grid-cols-2">
-          <ul className="text-sm">{s.visibility.perEngine.map((e) => <li key={e.engine}>{ENGINE_SHORT[e.engine] ?? e.engine}: {e.score ?? "—"} (coverage {fmtPct(e.coverage)})</li>)}</ul>
+          <ul className="text-sm">{s.visibility.perEngine.map((e) => <li key={e.engine}>{ENGINE_SHORT[e.engine] ?? e.engine}: {e.score ?? "—"} (tamamlanan ölçüm {fmtPct(e.coverage)})</li>)}</ul>
           <ul className="text-sm">{s.sov.map((x) => <li key={x.id}>{x.name}{x.type === "brand" ? " (siz)" : ""}: {x.value === null ? "ölçülemedi" : `%${fmtNumber(x.value, "tr-TR", 1)}`}</li>)}</ul>
         </div>
       </Card>

@@ -112,6 +112,31 @@ describe("Redis'siz (inline) yürütme", () => {
     expect(summary.failedCalls).toEqual(["gemini:auth"]);
   });
 
+  it("Claude yapılandırılmışsa ücretsiz ölçüm kapsamına girer; kredi hatası diğer platformları durdurmaz ve tekrar çağrılmaz", async () => {
+    const audit = await makeAudit(`c-${randomToken(4).toLowerCase()}.com`);
+    const gpt = countingAdapter("chatgpt");
+    const gem = countingAdapter("gemini");
+    const cl = countingAdapter("claude", async () => {
+      throw new ProviderError("Hesapta kullanılabilir kredi yok", false, undefined, "insufficient_quota");
+    });
+    const adapters = { chatgpt: gpt.adapter, gemini: gem.adapter, claude: cl.adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
+    expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters })).toBe("done");
+    expect(cl.calls()).toBe(1);
+    expect(gpt.calls()).toBe(5);
+    expect(gem.calls()).toBe(5);
+    const done = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
+    expect(done.status).toBe("partial");
+    const summary = done.resultSummary as { scopeEngines: string[]; visibility: { sampleCount: number; scheduled: number; missingEngines: string[] }; failedCalls: string[] };
+    expect(summary.scopeEngines).toEqual(["chatgpt", "gemini", "claude"]);
+    expect(summary.visibility.sampleCount).toBe(10);
+    expect(summary.visibility.scheduled).toBe(15);
+    expect(summary.visibility.missingEngines).toContain("claude"); // başarısız platform ortak skora girmez
+    expect(summary.failedCalls).toEqual(["claude:insufficient_quota"]);
+    // Yeniden çalıştırma çağrıyı tekrarlamaz.
+    await runAudit(db, audit.id, { fetcher: siteFetcher, adapters });
+    expect(cl.calls() + gpt.calls() + gem.calls()).toBe(11);
+  });
+
   it("ölçüm adımlarla ilerler; kota bir kez commit edilir; kalıcı hata alan platform tekrar çağrılmaz", async () => {
     const t = await makeTenant();
     const cluster = await db.intentCluster.create({ data: { workspaceId: t.ws.id, brandId: t.brand.id, type: "category_discovery", label: "c", locale: "tr-TR" } });

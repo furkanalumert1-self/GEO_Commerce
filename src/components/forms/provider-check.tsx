@@ -15,7 +15,7 @@ interface EngineResult {
   reason?: string | null;
 }
 
-const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI)", gemini: "Gemini (Google)", perplexity: "Perplexity" };
+const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI)", gemini: "Gemini (Google)", claude: "Claude (Anthropic)", perplexity: "Perplexity" };
 
 /** Yapılandırılmış sağlayıcılara tek kısa gerçek çağrı (küçük maliyet) ve isteğe bağlı test e-postası. */
 export function ProviderCheck() {

@@ -19,7 +19,7 @@ export function unit(seed: string): number {
   return parseInt(sha256(seed).slice(0, 8), 16) / 0x100000000;
 }
 
-const ENGINE_BIAS: Record<string, number> = { chatgpt: 0.08, gemini: -0.05, perplexity: 0.02 };
+const ENGINE_BIAS: Record<string, number> = { chatgpt: 0.08, gemini: -0.05, claude: -0.02, perplexity: 0.02 };
 
 export function fixtureAnswer(engine: EngineKey, prompt: string, repetition = 1): AiAnswer {
   const seed = `${engine}|${prompt}|${repetition}`;

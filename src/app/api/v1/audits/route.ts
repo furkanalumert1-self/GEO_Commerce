@@ -2,22 +2,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { json, rateLimit, readJson, route } from "@/lib/http/api";
 import { startAudit } from "@/modules/audit/service";
-import { auth } from "@/auth";
-import { config } from "@/lib/config";
+import { platformAdminEmail } from "@/lib/platform-admin";
 import { log } from "@/lib/observability/log";
-
-/** Oturumdaki kullanıcı PLATFORM_ADMIN_ALLOWLIST'teyse (test amaçlı) 30 gün kuralı atlanır. */
-async function platformAdminEmail(): Promise<string | null> {
-  try {
-    const s = await auth();
-    if (!s?.user?.id) return null;
-    const user = await db.user.findUnique({ where: { id: s.user.id }, select: { email: true } });
-    const email = user?.email.toLowerCase();
-    return email && config().platformAdmins.includes(email) ? email : null;
-  } catch {
-    return null;
-  }
-}
 
 const body = z.object({
   domain: z.string().trim().min(3).max(253),

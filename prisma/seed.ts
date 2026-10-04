@@ -40,7 +40,7 @@ function seededAdapters(dayIndex: number): Record<EngineKey, AiMonitorAdapter> {
     ask: async (i) => fixtureAnswer(engine, i.prompt, dayIndex),
   });
   const na = (engine: EngineKey): AiMonitorAdapter => ({ ...mk(engine), status: () => "unsupported", ask: async () => { throw new Error("unsupported"); } });
-  return { chatgpt: mk("chatgpt"), gemini: mk("gemini"), perplexity: mk("perplexity"), google_ai_overviews: na("google_ai_overviews"), copilot: na("copilot") };
+  return { chatgpt: mk("chatgpt"), gemini: mk("gemini"), claude: na("claude"), perplexity: mk("perplexity"), google_ai_overviews: na("google_ai_overviews"), copilot: na("copilot") };
 }
 
 const CLUSTERS: Array<{ label: string; type: ReturnType<typeof classifyIntentType>; category: string | null; prompts: string[] }> = [

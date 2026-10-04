@@ -3,6 +3,7 @@ import { notFound } from "@/lib/http/errors";
 import { json, rateLimit, route } from "@/lib/http/api";
 import { advanceJob } from "@/lib/queue/advance";
 import { getAuditByToken, publicAuditView } from "@/modules/audit/service";
+import { platformAdminEmail } from "@/lib/platform-admin";
 
 export const maxDuration = 120;
 
@@ -19,5 +20,5 @@ export const POST = route<{ token: string }>(async ({ params, requestId }) => {
   if (!job) throw notFound("Audit işi");
   const r = await advanceJob(db, job.id, null);
   const fresh = await db.audit.findUniqueOrThrow({ where: { id: a.id } });
-  return json({ ...publicAuditView(fresh), step: { outcome: r.outcome, progress: r.job?.progress ?? null, resumable: r.job?.resumable ?? false, error: r.job?.error ?? null } }, { requestId, headers: { "x-robots-tag": "noindex", "cache-control": "no-store" } });
+  return json({ ...publicAuditView(fresh, { admin: Boolean(await platformAdminEmail()) }), step: { outcome: r.outcome, progress: r.job?.progress ?? null, resumable: r.job?.resumable ?? false, error: r.job?.error ?? null } }, { requestId, headers: { "x-robots-tag": "noindex", "cache-control": "no-store" } });
 });

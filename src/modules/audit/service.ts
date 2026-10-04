@@ -27,6 +27,17 @@ export const AUDIT_TTL_DAYS = 7;
 const FREE_WINDOW_DAYS = 30;
 const AUDIT_PROMPTS = 5;
 const AUDIT_ENGINES: EngineKey[] = ["chatgpt", "gemini"];
+/**
+ * Yapılandırılmışsa kapsama eklenen platformlar. Yapılandırılmamışsa ölçümü "kısmi" yapmaz; kapsam dışı ve
+ * "şu anda kullanılamıyor" olarak gösterilir. Kapsam audit'in soru adımında sabitlenir (devam eden işte değişmez).
+ */
+const OPTIONAL_AUDIT_ENGINES: EngineKey[] = ["claude"];
+
+/** Ücretsiz ölçümün başlamadan önce gösterilen platform kapsamı (sunucu yapılandırmasına göre). */
+export function auditEngineScope(adapters: Record<EngineKey, AiMonitorAdapter> = getAiAdapters()) {
+  const usable = (e: EngineKey) => ["ready", "demo"].includes(adapters[e]?.status() ?? "");
+  return { engines: [...AUDIT_ENGINES, ...OPTIONAL_AUDIT_ENGINES.filter(usable)], unavailable: OPTIONAL_AUDIT_ENGINES.filter((e) => !usable(e)) };
+}
 
 /** `adminBypass`: platform admin testi — 30 günlük ücretsiz audit kuralını atlar; günlük maliyet tavanı yine geçerlidir. */
 export async function startAudit(db: PrismaClient, input: { domain: string; locale: string; fingerprint: string; adminBypass?: boolean }) {
@@ -84,7 +95,23 @@ export async function getAuditByToken(db: PrismaClient, token: string) {
 }
 
 /** Public, sanitize edilmiş sonuç — ham yanıt/PII yok, fırsat detayları kilitli (yalnız ilk 3 özet). */
-export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAuditByToken>>>) {
+/**
+ * Sağlayıcı yapılandırma/hata ayrıntısı (env adı, faturalandırma, ham mesaj) yalnız platform yöneticisine gösterilir;
+ * müşteri "Şu anda kullanılamıyor" / "yanıt alınamadı" görür. Kayıtlı özet değiştirilmez.
+ */
+export function customerSafeSummary(summary: unknown): unknown {
+  if (!summary || typeof summary !== "object") return summary;
+  const s = summary as { unavailableEngines?: Array<{ engine: string; reason: string | null }>; failedCalls?: string[]; failedDetails?: unknown };
+  const { failedDetails: _hidden, ...rest } = s;
+  void _hidden;
+  return {
+    ...rest,
+    ...(s.unavailableEngines ? { unavailableEngines: s.unavailableEngines.map((u) => ({ engine: u.engine, reason: "Şu anda kullanılamıyor" })) } : {}),
+    ...(s.failedCalls ? { failedCalls: [...new Set(s.failedCalls.map((f) => `${f.split(":")[0]}:unavailable`))] } : {}),
+  };
+}
+
+export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAuditByToken>>>, opts: { admin?: boolean } = {}) {
   return {
     domain: a.domain,
     status: a.status,
@@ -92,7 +119,7 @@ export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAudi
     progress: { done: a.progressDone, total: a.progressTotal },
     expiresAt: a.expiresAt.toISOString(),
     claimed: Boolean(a.claimedAt),
-    result: a.resultSummary ?? null,
+    result: (opts.admin ? a.resultSummary : customerSafeSummary(a.resultSummary)) ?? null,
     errorCode: a.errorCode,
   };
 }
@@ -201,6 +228,8 @@ export interface AuditWork {
     unreadable?: { kind: string; detail: string };
   };
   prompts?: string[];
+  /** Bu audit'te sorulan platformlar (soru adımında sabitlenir). Eski işlerde yok → AUDIT_ENGINES. */
+  engines?: EngineKey[];
   answers: AuditAnswer[];
   /** Sıradaki (soru × motor) çiftinin deneme sayısı (zaman aşımı/geçici hata). */
   pendingAttempts?: number;
@@ -281,13 +310,17 @@ export async function runAudit(
   if (!work.prompts) {
     await stage("prompts", 2);
     work.prompts = auditPrompts(categories, country);
+    work.engines = auditEngineScope(adapters).engines;
     await save();
   }
   const prompts = work.prompts;
 
   await stage("asking_engines", 3);
-  const available = AUDIT_ENGINES.map((e) => adapters[e]).filter((a) => a.status() === "ready" || a.status() === "demo");
-  const unavailable = AUDIT_ENGINES.filter((e) => !available.some((a) => a.engine === e)).map((e) => ({ engine: e, reason: adapters[e].statusReason() }));
+  const scope = work.engines ?? AUDIT_ENGINES;
+  const available = scope.map((e) => adapters[e]).filter((a) => a.status() === "ready" || a.status() === "demo");
+  const unavailable = scope.filter((e) => !available.some((a) => a.engine === e)).map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? null }));
+  // Kapsam dışı kalan isteğe bağlı platformlar: yalnız bilgi (kısmi sayılmaz, skora girmez).
+  const outOfScope = OPTIONAL_AUDIT_ENGINES.filter((e) => !scope.includes(e)).map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? null }));
   const siteDomain = work.crawl.siteDomain ?? audit.domain;
   const entity = { id: "self", type: "brand" as const, name: brandName, aliases: [], domain: siteDomain };
   const pairs = prompts.flatMap((prompt) => available.map((a) => ({ prompt, a })));
@@ -298,7 +331,7 @@ export async function runAudit(
     }
     const { prompt, a } = pairs[work.answers.length]!;
     // Aynı platformda kalıcı hata (anahtar/model) alındıysa tekrar çağrılmaz.
-    const permanent = work.answers.find((x) => x.engine === a.engine && !x.ok && ["auth", "not_configured", "http_400", "http_404", "insufficient_quota"].includes(x.errorCode ?? ""));
+    const permanent = work.answers.find((x) => x.engine === a.engine && !x.ok && ["auth", "not_configured", "http_400", "http_404", "insufficient_quota", "search_unavailable"].includes(x.errorCode ?? ""));
     if (permanent) {
       work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: permanent.errorCode });
       continue;
@@ -347,7 +380,7 @@ export async function runAudit(
   const failedErrors = [...new Set(answers.filter((x) => !x.ok).map((x) => `${x.engine}:${x.errorCode ?? "error"}`))];
   // Platform başına ilk sağlayıcı hata mesajı (tanı için; anahtar içermez).
   const failedDetails = Object.fromEntries(available.map((a) => [a.engine, answers.find((x) => x.engine === a.engine && !x.ok && x.errorDetail)?.errorDetail]).filter(([, d]) => d));
-  const partial = unavailable.length > 0 || okCount < prompts.length * AUDIT_ENGINES.length || work.crawl.failed > 0 || work.crawl.truncated;
+  const partial = unavailable.length > 0 || okCount < prompts.length * scope.length || work.crawl.failed > 0 || work.crawl.truncated;
 
   await db.audit.update({
     where: { id: auditId },
@@ -359,9 +392,10 @@ export async function runAudit(
       resultSummary: {
         brandName,
         demo,
-        visibility: { score: agg.score, smallSample: true, sampleCount: okCount, scheduled: prompts.length * AUDIT_ENGINES.length, partial: agg.partial, missingEngines: [...agg.missingEngines, ...unavailable.map((u) => u.engine)] },
+        visibility: { score: agg.score, smallSample: true, sampleCount: okCount, scheduled: prompts.length * scope.length, partial: agg.partial, missingEngines: [...agg.missingEngines, ...unavailable.map((u) => u.engine)] },
         engines: perEngine.map((e) => ({ engine: e.engine, score: e.score, coverage: e.coverage })),
-        unavailableEngines: unavailable,
+        unavailableEngines: [...unavailable, ...outOfScope],
+        scopeEngines: scope,
         failedCalls: failedErrors,
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },

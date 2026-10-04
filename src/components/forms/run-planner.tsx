@@ -12,7 +12,7 @@ interface EngineInfo {
   surface: string;
 }
 
-const LABEL: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", perplexity: "Perplexity API", google_ai_overviews: "Google AI Overviews", copilot: "Microsoft Copilot" };
+const LABEL: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", claude: "Claude (Anthropic API)", perplexity: "Perplexity API", google_ai_overviews: "Google AI Overviews", copilot: "Microsoft Copilot" };
 
 /** Maliyet önizleme → onay → başlat. Kullanılamayan motorlar gerekçesiyle devre dışı. */
 export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false }: { url: string; engines: EngineInfo[]; locale: string; runPagePrefix?: string; inline?: boolean }) {
@@ -51,16 +51,17 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
     <div className="flex flex-col gap-3">
       <fieldset>
         <legend className="text-sm font-medium">Platformlar</legend>
+        <p className="mt-1 text-xs text-text-secondary">Web aramalı API yanıtları ölçülür; ChatGPT, Gemini veya Claude uygulamasındaki sonuçla birebir aynı değildir.</p>
         <ul className="mt-2 flex flex-col gap-2">
           {engines.map((e) => {
             const ok = (e.status === "ready" || e.status === "demo") && e.inPlan;
             return (
               <li key={e.engine} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <label className="flex min-h-11 items-center gap-2 sm:min-h-0">
-                  <input type="checkbox" disabled={!ok} checked={selected.includes(e.engine)} onChange={(ev) => setSelected((s) => (ev.target.checked ? [...s, e.engine] : s.filter((x) => x !== e.engine)))} />
+                  <input type="checkbox" disabled={!ok} checked={selected.includes(e.engine)} onChange={(ev) => { setPreview(null); setSelected((s) => (ev.target.checked ? [...s, e.engine] : s.filter((x) => x !== e.engine))); }} />
                   {LABEL[e.engine] ?? e.engine}
                 </label>
-                {!e.inPlan && (e.status === "ready" || e.status === "demo") ? <Badge tone="warning">Pakette yok</Badge> : e.status === "not_configured" ? <Badge title={e.reason ?? undefined}>Yapılandırılmamış</Badge> : e.status === "unsupported" ? <Badge title={e.reason ?? undefined}>Desteklenmiyor</Badge> : e.status === "demo" ? <Badge tone="warning">Örnek veri</Badge> : null}
+                {!e.inPlan && (e.status === "ready" || e.status === "demo") ? <Badge tone="warning">Pakette yok</Badge> : e.status === "not_configured" ? <Badge>Şu anda kullanılamıyor</Badge> : e.status === "unsupported" ? <Badge>Desteklenmiyor</Badge> : e.status === "demo" ? <Badge tone="warning">Örnek veri</Badge> : null}
               </li>
             );
           })}
@@ -70,7 +71,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
         <summary className="min-h-9 cursor-pointer py-1 text-primary">İleri ayarlar</summary>
       <label className="mt-1 flex flex-col gap-1 text-sm">
         <span>Tekrar sayısı (her soru her platformda kaç kez sorulsun)</span>
-        <input type="number" min={1} max={5} value={repeats} onChange={(e) => setRepeats(Math.max(1, Math.min(5, Number(e.target.value) || 1)))} className="min-h-11 w-24 rounded-md border border-border px-2 sm:min-h-9" />
+        <input type="number" min={1} max={5} value={repeats} onChange={(e) => { setPreview(null); setRepeats(Math.max(1, Math.min(5, Number(e.target.value) || 1))); }} className="min-h-11 w-24 rounded-md border border-border px-2 sm:min-h-9" />
       </label>
       </details>
       {preview ? (
@@ -78,6 +79,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
           <p className="tabular">
             Planlanan: {preview.unitsPlanned} yanıt (istenen {preview.unitsRequested}) · Kalan ölçüm hakkı: {preview.available}
           </p>
+          <p className="tabular mt-1 text-text-secondary">{preview.promptCount} soru × {selected.length} platform × {repeats} tekrar · her yanıt 1 ölçüm hakkı kullanır</p>
           {!preview.fits ? <p className="mt-1 text-warning">Kota yetmediği için {preview.promptCount} soru ölçülecek (%{Math.round(preview.sampledFraction * 100)}); kalanlar sonraki turlarda döndürülür.</p> : null}
         </div>
       ) : null}

@@ -162,7 +162,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         action={
           <ApiButton
             url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/runs`}
-            body={{ engines: ["chatgpt", "gemini", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1 }}
+            body={{ engines: ["chatgpt", "gemini", "claude", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1 }}
             idempotent
             variant="secondary"
             label="Yeni ölçüm başlat"

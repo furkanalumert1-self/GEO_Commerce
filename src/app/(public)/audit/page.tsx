@@ -3,16 +3,24 @@ export const dynamic = "force-dynamic";
 import type { Metadata } from "next";
 import { Card } from "@/components/ui";
 import { AuditForm } from "@/components/forms/audit-form";
+import { auditEngineScope } from "@/modules/audit/service";
+import { ENGINE_SHORT } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Ücretsiz ölçüm" };
 
 export default function AuditStartPage() {
+  const scope = auditEngineScope();
+  const names = (list: string[]) => list.map((e) => ENGINE_SHORT[e] ?? e).join(", ");
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4">
       <h1 className="text-2xl font-semibold">Ücretsiz ölçüm</h1>
       <p className="text-sm text-muted">
-        Akış: alan adı doğrulama → herkese açık HTML/sitemap taraması → marka/kategori/ürün örneklemi → 5 niyet sorusu → erişilebilir 2 AI motoru → özet.
-        Alan adı ve cihaz başına 30 günde bir ücretsiz audit yapılabilir.
+        Siteniz incelenir, ürün grubunuza göre 5 soru hazırlanır ve bu sorular AI platformlarına sorulur. Alan adı ve cihaz başına 30 günde bir ücretsiz ölçüm yapılabilir.
+      </p>
+      <p className="text-sm" data-testid="audit-scope">
+        <span className="font-medium">Sorulacak platformlar:</span> {names(scope.engines)}
+        {scope.unavailable.length ? <span className="text-text-secondary"> · {names(scope.unavailable)}: şu anda kullanılamıyor</span> : null}
+        <span className="block text-xs text-text-secondary">Web aramalı API yanıtları kullanılır; uygulamalardaki (ChatGPT, Gemini, Claude) sonuçla birebir aynı değildir.</span>
       </p>
       <Card className="p-5">
         <AuditForm demo={process.env.DEMO_MODE === "true"} />

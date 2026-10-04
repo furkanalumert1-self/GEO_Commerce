@@ -11,7 +11,7 @@ const COLS: PlanKey[] = ["starter", "growth", "commerce", "agency", "enterprise"
 function engines(k: PlanKey) {
   const e = PLANS[k].limits.engines;
   if (k === "enterprise") return "Özel";
-  return e === "all_connected" ? "Tüm bağlı motorlar" : e.map((x) => ({ chatgpt: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity" })[x as "chatgpt"] ?? x).join(", ");
+  return e === "all_connected" ? "Tüm bağlı motorlar" : e.map((x) => ({ chatgpt: "ChatGPT", gemini: "Gemini", claude: "Claude", perplexity: "Perplexity" })[x as "chatgpt"] ?? x).join(", ");
 }
 
 export default function PricingPage() {

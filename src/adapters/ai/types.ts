@@ -2,7 +2,7 @@
  * AI görünürlük adapter sözleşmesi. API model yanıtı ≠ tüketici UI sonucu:
  * her yanıt provider/model/surface ile etiketlenir (§1).
  */
-export type EngineKey = "chatgpt" | "gemini" | "perplexity" | "google_ai_overviews" | "copilot";
+export type EngineKey = "chatgpt" | "gemini" | "claude" | "perplexity" | "google_ai_overviews" | "copilot";
 export type Surface = "api_grounded" | "api_plain" | "licensed_ui";
 
 export type AdapterStatus = "ready" | "not_configured" | "unsupported" | "demo";

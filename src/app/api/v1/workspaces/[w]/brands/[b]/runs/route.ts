@@ -5,7 +5,7 @@ import { startMonitoringRun } from "@/modules/monitoring/start";
 
 const body = z.object({
   promptIds: z.array(z.string().uuid()).max(300).optional(),
-  engines: z.array(z.enum(["chatgpt", "gemini", "perplexity", "google_ai_overviews", "copilot"])).min(1).max(5),
+  engines: z.array(z.enum(["chatgpt", "gemini", "claude", "perplexity", "google_ai_overviews", "copilot"])).min(1).max(6),
   locales: z.array(z.string().regex(/^[a-z]{2}-[A-Z]{2}$/)).min(1).max(5),
   repeats: z.number().int().min(1).max(5).default(1),
   preview: z.boolean().default(false),

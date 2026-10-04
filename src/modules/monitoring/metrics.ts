@@ -2,7 +2,11 @@
  * Görünürlük formülleri v1 (§5). Her snapshot formulaVersion ile saklanır.
  * Eksik veri null'dır, sıfır değil. Başarısız sorgular görünürlük düşüşü sayılmaz.
  */
-export const FORMULA_VERSION = "visibility@1";
+/**
+ * visibility@1.1: formül (0,5·M + 0,3·R + 0,2·C) aynı; tek fark, aynı soru/platformdaki tekrarların önce
+ * birleştirilmesi (her soru eşit ağırlık alır, çok tekrar edilen soru istemeden fazla ağırlık kazanmaz).
+ */
+export const FORMULA_VERSION = "visibility@1.1";
 export const MIN_SAMPLE = 20;
 export const MIN_COVERAGE = 0.8;
 
@@ -175,4 +179,15 @@ export function isSignificantDrop(
       r.score !== null &&
       (baseline.score as number) - r.score >= threshold,
   );
+}
+
+/**
+ * Tekrar birleştirme: aynı anahtardaki (soru × platform) geçerli gözlemlerin ağırlığı tekrar sayısına bölünür.
+ * Böylece 3 kez sorulan soru, 1 kez sorulan soruyla aynı toplam ağırlığı taşır. Geçersiz gözlemler değişmez
+ * (formüle zaten girmez).
+ */
+export function balanceRepetitions<T extends { valid: boolean; weight: number }>(items: Array<{ key: string; obs: T }>): T[] {
+  const n = new Map<string, number>();
+  for (const x of items) if (x.obs.valid) n.set(x.key, (n.get(x.key) ?? 0) + 1);
+  return items.map((x) => (x.obs.valid ? { ...x.obs, weight: x.obs.weight / (n.get(x.key) ?? 1) } : x.obs));
 }

@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import { config } from "@/lib/config";
+import { log } from "@/lib/observability/log";
 import { hashToken, randomToken, sha256 } from "@/lib/crypto";
 import { AppError } from "@/lib/http/errors";
 import { assertJobsRunnable, enqueue } from "@/lib/queue";
@@ -18,6 +19,7 @@ import { periodKey } from "@/modules/billing/quota";
 import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
 import { isCompetitorCandidate } from "./competitor-filter";
 import { seedPrompts } from "@/modules/prompts/seed";
+import { buildQuestionSet, detectBusiness, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -64,7 +66,11 @@ export async function startAudit(db: PrismaClient, input: { domain: string; loca
       where: {
         OR: [{ domain }, { fingerprintHash }],
         createdAt: { gte: since },
-        AND: [{ OR: [{ status: { in: ["queued", "running"] } }, { status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["visibility", "sampleCount"], gt: 0 } }] }],
+        AND: [
+          { OR: [{ status: { in: ["queued", "running"] } }, { status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["visibility", "sampleCount"], gt: 0 } }] },
+          // Onaylanmadan 24 saatten uzun bekleyen ölçüm (hiç ücretli çağrı yapılmadı) hakkı tüketmez.
+          { NOT: { stage: "confirm", updatedAt: { lt: new Date(Date.now() - 86_400_000) } } },
+        ],
       },
     });
     if (recent && !input.adminBypass) throw new AppError("rate_limited", "Bu alan adı veya cihaz için son 30 günde ücretsiz audit yapıldı", { resetAt: new Date(recent.createdAt.getTime() + FREE_WINDOW_DAYS * 86_400_000).toISOString() });
@@ -74,7 +80,15 @@ export async function startAudit(db: PrismaClient, input: { domain: string; loca
   const audit = await db.audit.create({
     data: { domain, locale: input.locale, tokenHash: hashToken(token), fingerprintHash, expiresAt: new Date(Date.now() + AUDIT_TTL_DAYS * 86_400_000), progressTotal: 5 },
   });
-  const job = await enqueue(db, { type: "audit", operationId: `audit:${audit.id}`, payload: { auditId: audit.id } });
+  const startPath = (() => {
+    try {
+      const u = new URL(/^https?:\/\//i.test(input.domain.trim()) ? input.domain.trim() : `https://${input.domain.trim()}`);
+      return u.pathname.length > 1 && u.pathname.length <= 100 ? u.pathname : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const job = await enqueue(db, { type: "audit", operationId: `audit:${audit.id}`, payload: { auditId: audit.id, ...(startPath ? { startPath } : {}) } });
   return { token, auditId: audit.id, jobId: job.id };
 }
 
@@ -102,13 +116,22 @@ export async function getAuditByToken(db: PrismaClient, token: string) {
 export function customerSafeSummary(summary: unknown): unknown {
   if (!summary || typeof summary !== "object") return summary;
   const s = summary as { unavailableEngines?: Array<{ engine: string; reason: string | null }>; failedCalls?: string[]; failedDetails?: unknown };
-  const { failedDetails: _hidden, ...rest } = s;
+  const { failedDetails: _hidden, crawlDiagnostics: _diag, ...rest } = s as typeof s & { crawlDiagnostics?: unknown };
   void _hidden;
+  void _diag;
   return {
     ...rest,
     ...(s.unavailableEngines ? { unavailableEngines: s.unavailableEngines.map((u) => ({ engine: u.engine, reason: "Şu anda kullanılamıyor" })) } : {}),
     ...(s.failedCalls ? { failedCalls: [...new Set(s.failedCalls.map((f) => `${f.split(":")[0]}:unavailable`))] } : {}),
   };
+}
+
+/** Onay/yanıt aşamasındaki ara durum (tarama ayrıntıları) istemciye gönderilmez. */
+function withoutPendingWork(summary: unknown): unknown {
+  if (!summary || typeof summary !== "object" || !("pendingWork" in summary)) return summary;
+  const { pendingWork: _p, ...rest } = summary as Record<string, unknown>;
+  void _p;
+  return rest;
 }
 
 export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAuditByToken>>>, opts: { admin?: boolean } = {}) {
@@ -119,7 +142,7 @@ export function publicAuditView(a: NonNullable<Awaited<ReturnType<typeof getAudi
     progress: { done: a.progressDone, total: a.progressTotal },
     expiresAt: a.expiresAt.toISOString(),
     claimed: Boolean(a.claimedAt),
-    result: (opts.admin ? a.resultSummary : customerSafeSummary(a.resultSummary)) ?? null,
+    result: withoutPendingWork(opts.admin ? a.resultSummary : customerSafeSummary(a.resultSummary)) ?? null,
     errorCode: a.errorCode,
   };
 }
@@ -209,6 +232,14 @@ export function categoryPrompts(categories: string[], country: string, max: numb
 type AuditAnswer = { engine: string; model: string; surface: string; prompt: string; ok: boolean; mentioned: boolean; recommended: boolean; ownCitation: boolean; citedDomains: string[]; sampledAt: string; errorCode?: string; errorDetail?: string };
 
 /** Adımlar arası kalıcı audit ara durumu (JobRecord.cursor.step). */
+export interface AuditProposal {
+  business: Pick<BusinessProfile, "type" | "confidence" | "reasons" | "evidenceUrls" | "offerings" | "softwareOfferings" | "agencyWording">;
+  topics: string[];
+  questions: AuditQuestion[];
+  incomplete: string | null;
+  brandName: string;
+}
+
 export interface AuditWork {
   crawl?: {
     readiness: ReturnType<typeof evaluateReadiness>;
@@ -226,8 +257,18 @@ export interface AuditWork {
     wwwFallback?: boolean;
     /** Site hiç okunamadıysa nedeni; bu durumda puan/fırsat/rakip üretilmez. */
     unreadable?: { kind: string; detail: string };
+    /** Yönetici tanısı (süreler, başlangıç adresi). */
+    diagnostics?: unknown;
   };
   prompts?: string[];
+  /** Soru → tür (keşif/ihtiyaç/bilgi); eski işlerde yok. */
+  kinds?: Record<string, QuestionKind>;
+  /** Tarama sonrası öneri: işletme türü + konu + 5 soru (onay ekranında gösterilir). */
+  proposal?: AuditProposal;
+  /** Kullanıcı soruları onayladı (ücretli çağrılar yalnız bundan sonra). */
+  confirmed?: boolean;
+  /** Süre bütçesi yüzünden hiç sayfa okunamayan tarama denemeleri (bir kez yeni adımda tekrarlanır). */
+  crawlAttempts?: number;
   /** Bu audit'te sorulan platformlar (soru adımında sabitlenir). Eski işlerde yok → AUDIT_ENGINES. */
   engines?: EngineKey[];
   answers: AuditAnswer[];
@@ -246,7 +287,7 @@ export async function runAudit(
   db: PrismaClient,
   auditId: string,
   deps: { fetcher?: Fetcher; adapters?: Record<EngineKey, AiMonitorAdapter> } = {},
-  opts: { deadline?: number; callTimeoutMs?: number; crawlMaxPages?: number; load?: () => AuditWork | null; save?: (w: AuditWork) => Promise<void> } = {},
+  opts: { deadline?: number; callTimeoutMs?: number; crawlMaxPages?: number; startPath?: string; requireConfirmation?: boolean; load?: () => AuditWork | null; save?: (w: AuditWork) => Promise<void> } = {},
 ): Promise<"done" | "continue"> {
   const cfg = config();
   const audit = await db.audit.findUniqueOrThrow({ where: { id: auditId } });
@@ -256,13 +297,28 @@ export async function runAudit(
   const adapters = deps.adapters ?? getAiAdapters(cfg, { demo });
   const stage = (s: string, done: number) => db.audit.update({ where: { id: auditId }, data: { stage: s, progressDone: done, status: "running" } });
   const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
-  const work: AuditWork = opts.load?.() ?? { answers: [] };
+  // Onaydan sonra başlayan yanıt işi, onay ekranında saklanan ara durumdan devam eder (tarama tekrarlanmaz).
+  const pending = (audit.resultSummary as { phase?: string; pendingWork?: AuditWork } | null)?.phase === "answers" ? (audit.resultSummary as { pendingWork?: AuditWork }).pendingWork : undefined;
+  const work: AuditWork = opts.load?.() ?? (pending ? structuredClone(pending) : null) ?? { answers: [] };
   const save = async () => opts.save?.(work);
 
   if (!work.crawl) {
     await stage("crawling", 1);
-    const crawl = await crawlSite({ domain: audit.domain, maxPages: opts.crawlMaxPages ?? PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: demo ? 0 : 250, deadline: opts.deadline });
+    const crawl = await crawlSite({ domain: audit.domain, startPath: opts.startPath, maxPages: opts.crawlMaxPages ?? PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: demo ? 0 : 250, deadline: opts.deadline });
+    log.info("audit.crawl", { auditId, pages: crawl.pages.length, failed: crawl.failed.length, truncated: crawl.truncated, homeError: crawl.homeError?.kind ?? null, ...(crawl.diagnostics ?? {}) });
+    // Süre bütçesi sayfa okunmadan bittiyse (yavaş sunucu/sitemap) bir kez yeni adımda tekrar denenir; site
+    // "okunamadı" sayılmaz.
+    if (crawl.pages.length === 0 && !crawl.homeError && crawl.truncated && (work.crawlAttempts ?? 0) < 1) {
+      work.crawlAttempts = (work.crawlAttempts ?? 0) + 1;
+      await save();
+      return "continue";
+    }
     const home = crawl.pages.find((p) => p.pageType === "home");
+    const business = detectBusiness(crawl.pages, crawl.domain);
+    const brandForQuestions = siteBrandName(crawl.pages, crawl.domain);
+    const topics = topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), (audit.locale.split("-")[0] ?? "tr").toLowerCase());
+    const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions });
+    work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
     work.crawl = {
       readiness: evaluateReadiness(crawl),
       brandName: home?.facts.ogSiteName ?? home?.facts.h1 ?? audit.domain.split(".")[0]!,
@@ -275,8 +331,9 @@ export async function runAudit(
       failures: crawl.failed.slice(0, 3),
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
       ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
+      diagnostics: crawl.diagnostics ?? null,
       ...(crawl.pages.length === 0
-        ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll || (crawl.failed.length === 0 && crawl.skippedByRobots > 0) ? { kind: "robots", detail: crawl.robotsDisallowAll ? "robots.txt tüm siteyi kapatıyor" : `robots.txt kuralları incelenecek ${crawl.skippedByRobots} sayfanın hepsini kapatıyor` } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : "network", detail: crawl.failed[0]?.reason ?? "Sayfa alınamadı" }) }
+        ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll || (crawl.failed.length === 0 && crawl.skippedByRobots > 0) ? { kind: "robots", detail: crawl.robotsDisallowAll ? "robots.txt tüm siteyi kapatıyor" : `robots.txt kuralları incelenecek ${crawl.skippedByRobots} sayfanın hepsini kapatıyor` } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : crawl.truncated ? "incomplete" : "network", detail: crawl.failed[0]?.reason ?? (crawl.truncated ? "Süre sınırında hiç sayfa okunamadı" : "Sayfa alınamadı") }) }
         : {}),
     };
     await save();
@@ -309,8 +366,26 @@ export async function runAudit(
   const language = audit.locale.split("-")[0] ?? "tr";
   if (!work.prompts) {
     await stage("prompts", 2);
-    work.prompts = auditPrompts(categories, country);
-    work.engines = auditEngineScope(adapters).engines;
+    const scopeNow = auditEngineScope(adapters);
+    if (opts.requireConfirmation && !work.confirmed) {
+      // Ücretli çağrılardan önce tür, konular, sorular ve platformlar kullanıcıya gösterilir; onay gelene kadar
+      // AI platformlarına soru sorulmaz. Ara durum audit kaydında saklanır (yeni iş taramayı tekrarlamaz).
+      await save();
+      await db.audit.update({
+        where: { id: auditId },
+        data: {
+          status: "running",
+          stage: "confirm",
+          progressDone: 2,
+          resultSummary: { phase: "confirm", brandName, demo, proposal: (work.proposal ?? null) as unknown as object, scopeEngines: scopeNow.engines, unavailableEngines: scopeNow.unavailable.map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? null })), crawl: { pages: work.crawl.pages, products: work.crawl.productCount }, pendingWork: work as unknown as object },
+        },
+      });
+      return "done";
+    }
+    const proposed = work.proposal?.questions ?? [];
+    work.prompts = proposed.length ? proposed.map((q) => q.text) : auditPrompts(categories, country);
+    work.kinds = Object.fromEntries(proposed.map((q) => [q.text, q.kind]));
+    work.engines = scopeNow.engines;
     await save();
   }
   const prompts = work.prompts;
@@ -372,9 +447,25 @@ export async function runAudit(
   // Kamu/eğitim, haber/medya, sosyal ağ ve pazaryeri alan adları kaynak olarak kalır, rakip önerilmez.
   for (const x of answers) for (const d of new Set(x.citedDomains)) if (isCompetitorCandidate(d, audit.domain) && isCompetitorCandidate(d, siteDomain)) domainCounts.set(d, (domainCounts.get(d) ?? 0) + 1);
   const competitorCandidates = [...domainCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([domain, count]) => ({ domain, observations: count }));
-  const lost = answers.filter((x) => x.ok && !x.mentioned && x.citedDomains.length > 0);
+  const kindOf = (prompt: string): QuestionKind | null => work.kinds?.[prompt] ?? null;
+  // Fırsat sinyali: keşif/ihtiyaç sorusunda (bilgi sorusu değil) geçerli yanıt var, marka anılmadı ve ticari bir
+  // rakip adayı kaynak gösterildi. Yalnız başka alan adı atfı veya marka yokluğu tek başına yeterli değildir.
+  const lost = answers.filter((x) => x.ok && !x.mentioned && kindOf(x.prompt) !== "info" && x.citedDomains.some((d) => isCompetitorCandidate(d, audit.domain) && isCompetitorCandidate(d, siteDomain)));
   const opportunityCount = new Set(lost.map((x) => x.prompt)).size;
-  const examples = lost.slice(0, 3).map((x) => ({ prompt: x.prompt, engine: x.engine, competitorDomains: [...new Set(x.citedDomains)].slice(0, 3), intentScore: scoreCommercialIntent(x.prompt, categories).total, intentType: classifyIntentType(x.prompt) }));
+  // Örnekler soru başına birleştirilir (aynı soru farklı platformlarda tekrar listelenmez).
+  const byPrompt = new Map<string, { engines: string[]; domains: string[] }>();
+  for (const x of lost) {
+    const cur = byPrompt.get(x.prompt) ?? { engines: [], domains: [] };
+    if (!cur.engines.includes(x.engine)) cur.engines.push(x.engine);
+    for (const d of x.citedDomains) if (!cur.domains.includes(d) && isCompetitorCandidate(d, audit.domain)) cur.domains.push(d);
+    byPrompt.set(x.prompt, cur);
+  }
+  const examples = [...byPrompt.entries()].slice(0, 3).map(([prompt, v]) => ({ prompt, engine: v.engines[0]!, engines: v.engines, competitorDomains: v.domains.slice(0, 4), intentScore: scoreCommercialIntent(prompt, categories).total, intentType: classifyIntentType(prompt) }));
+  // Soru türüne göre ayrı sonuç: keşif/ihtiyaç ile bilgi soruları aynı beklentiyle okunmaz.
+  const kindStats = Object.fromEntries((["discovery", "need", "info"] as const).map((k) => {
+    const list = answers.filter((x) => x.ok && kindOf(x.prompt) === k);
+    return [k, { answers: list.length, mentioned: list.filter((x) => x.mentioned).length, ownCitation: list.filter((x) => x.ownCitation).length }];
+  }));
   const models = [...new Set(answers.filter((x) => x.ok).map((x) => `${x.engine}:${x.model}`))];
   const okCount = answers.filter((x) => x.ok).length;
   const failedErrors = [...new Set(answers.filter((x) => !x.ok).map((x) => `${x.engine}:${x.errorCode ?? "error"}`))];
@@ -403,8 +494,13 @@ export async function runAudit(
         crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false },
         competitorCandidates,
         opportunityCount,
+        opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),
         examples,
         prompts,
+        questions: prompts.map((text) => ({ text, kind: kindOf(text) })),
+        kindStats,
+        business: work.proposal ? { type: work.proposal.business.type, confidence: work.proposal.business.confidence, reasons: work.proposal.business.reasons, topics: work.proposal.topics } : null,
+        crawlDiagnostics: work.crawl.diagnostics ?? null,
       },
     },
   });
@@ -464,4 +560,81 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
     await tx.auditLog.create({ data: { workspaceId: ws.id, actorId: userId, actorType: "user", scope: "audit", action: "audit.claimed", target: audit.id } });
     return { workspaceId: ws.id, brandId: brand.id, trialStarted: !existingTrial, period: periodKey(now) };
   });
+}
+
+const INFO_Q = /(nelere dikkat|farkları|farklar|nedir|nasıl|neden|ne işe yarar)/i;
+const DISCOVERY_Q = /(nereden|mağaza|online|hangi.*(marka|firma|ajans|yazılım|site|mağaza)|önerir|karşılaştır)/i;
+
+/** Kullanıcının düzenlediği sorunun türü (öneriyle aynıysa önerinin türü korunur). */
+export function questionKind(text: string): QuestionKind {
+  if (INFO_Q.test(text)) return "info";
+  if (DISCOVERY_Q.test(text)) return "discovery";
+  return "need";
+}
+
+/** Düzenlenen soru için kalite sorunları (boşsa uygun). Marka adı içeren soru genel keşif ölçümüne girmez. */
+export function questionIssues(text: string, brandName: string): string[] {
+  const t = text.trim();
+  const issues: string[] = [];
+  if (t.length < 10) issues.push("Soru çok kısa");
+  if (t.length > 200) issues.push("Soru çok uzun (en çok 200 karakter)");
+  if (/https?:\/\/|www\./i.test(t)) issues.push("Soruda bağlantı olmamalı");
+  const b = brandName.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9ğüşöçı]/g, "");
+  const n = t.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9ğüşöçı]/g, "");
+  if (b.length >= 3 && n.includes(b)) issues.push("Marka adınızı içeren sorular genel keşif ölçümüne girmez; markasız yazın");
+  if (!/[?？]$/.test(t)) issues.push("Soru işaretiyle bitmeli");
+  return issues;
+}
+
+type ConfirmSummary = { phase?: string; proposal?: AuditProposal; pendingWork?: AuditWork; brandName?: string; demo?: boolean };
+
+/** Onay ekranı: tür veya konu değişince yeni soru seti (ücretli çağrı yok). */
+export function previewAuditQuestions(audit: { locale: string; resultSummary: unknown }, input: { businessType?: BusinessProfile["type"]; topics?: string[] }) {
+  const sum = audit.resultSummary as ConfirmSummary | null;
+  if (sum?.phase !== "confirm" || !sum.proposal) throw new AppError("conflict", "Bu ölçüm soru onayı aşamasında değil");
+  const p = sum.proposal;
+  const type = input.businessType ?? p.business.type;
+  const topics = (input.topics ?? p.topics).map((t) => t.trim()).filter((t) => t.length >= 2 && t.length <= 40).slice(0, 2);
+  const service = ["service", "saas", "service_saas"].includes(type);
+  const set = buildQuestionSet({ ...p.business, type, offerings: service ? topics : p.business.offerings }, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: p.brandName });
+  return { ...set, businessType: type, questions: set.questions.map((q) => ({ ...q, issues: questionIssues(q.text, p.brandName) })) };
+}
+
+/**
+ * Soru onayı: düzenlenmiş en çok 5 soru doğrulanır, ara duruma yazılır ve yanıt işi kuyruğa alınır. Aynı onay
+ * tekrar gönderilirse yeni iş/çağrı oluşmaz (operationId sabit).
+ */
+export async function confirmAudit(db: PrismaClient, auditId: string, input: { questions: string[]; businessType?: BusinessProfile["type"] }) {
+  const audit = await db.audit.findUniqueOrThrow({ where: { id: auditId } });
+  const sum = audit.resultSummary as ConfirmSummary | null;
+  const operationId = `audit:${auditId}:answers`;
+  if (sum?.phase === "answers" || audit.stage !== "confirm") {
+    const existing = await db.jobRecord.findUnique({ where: { operationId } });
+    if (existing) return { jobId: existing.id, alreadyConfirmed: true };
+    throw new AppError("conflict", "Bu ölçüm soru onayı aşamasında değil");
+  }
+  if (!sum?.pendingWork || !sum.proposal) throw new AppError("conflict", "Ölçüm ara durumu bulunamadı; yeniden başlatın");
+  const seen = new Set<string>();
+  const questions = input.questions.map((q) => q.replace(/\s+/g, " ").trim()).filter((q) => {
+    const k = q.toLocaleLowerCase("tr-TR");
+    if (!q || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (questions.length === 0 || questions.length > AUDIT_PROMPTS) throw new AppError("validation_error", `1–${AUDIT_PROMPTS} soru seçin`);
+  const bad = questions.map((q) => ({ q, issues: questionIssues(q, sum.proposal!.brandName) })).filter((x) => x.issues.length);
+  if (bad.length) throw new AppError("validation_error", `Düzenlenmesi gereken soru: “${bad[0]!.q}” — ${bad[0]!.issues[0]}`);
+  const proposedKinds = new Map(sum.proposal.questions.map((q) => [q.text, q.kind]));
+  const cfg = config();
+  const demo = demoAudit(audit.domain, cfg);
+  const work: AuditWork = { ...sum.pendingWork, prompts: questions, kinds: Object.fromEntries(questions.map((q) => [q, proposedKinds.get(q) ?? questionKind(q)])), engines: auditEngineScope(getAiAdapters(cfg, { demo })).engines, confirmed: true, answers: [] };
+  if (input.businessType && work.proposal) work.proposal = { ...work.proposal, business: { ...work.proposal.business, type: input.businessType, confidence: "high", reasons: [...work.proposal.business.reasons, "Tür kullanıcı tarafından onaylandı"] } };
+  const job = await enqueue(db, { type: "audit", operationId, payload: { auditId, phase: "answers" } });
+  await db.audit.update({ where: { id: auditId }, data: { stage: "asking_engines", status: "running", progressDone: 3, resultSummary: { phase: "answers", brandName: sum.brandName ?? null, demo: sum.demo ?? false, proposal: (work.proposal ?? null) as unknown as object, pendingWork: work as unknown as object } } });
+  return { jobId: job.id, alreadyConfirmed: false };
+}
+
+/** Audit'in güncel işi: onaydan sonra yanıt işi, önce tarama işi. */
+export async function currentAuditJob(db: PrismaClient, auditId: string) {
+  return (await db.jobRecord.findUnique({ where: { operationId: `audit:${auditId}:answers` }, select: { id: true } })) ?? db.jobRecord.findUnique({ where: { operationId: `audit:${auditId}` }, select: { id: true } });
 }

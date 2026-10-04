@@ -13,7 +13,7 @@ import { assertJobsRunnable, enqueue, executionMode } from "@/lib/queue";
 import { advanceJob } from "@/lib/queue/advance";
 import { runJob } from "@/workers/runner";
 import { handlers } from "@/workers/handlers";
-import { claimAudit, runAudit, startAudit, type AuditWork } from "@/modules/audit/service";
+import { claimAudit, confirmAudit, previewAuditQuestions, runAudit, startAudit, type AuditWork } from "@/modules/audit/service";
 import { seedPrompts } from "@/modules/prompts/seed";
 import { createRun, executeRun } from "@/modules/monitoring/service";
 import { createFixtureAdapter } from "@/adapters/ai/fixture";
@@ -52,6 +52,61 @@ async function makeAudit(domain: string) {
   const token = randomToken(24);
   return db.audit.create({ data: { domain, locale: "tr-TR", tokenHash: hashToken(token), fingerprintHash: randomToken(8), expiresAt: new Date(Date.now() + 86_400_000), progressTotal: 5 } });
 }
+
+/** Çok markalı mağaza: menü bölümleri + farklı markalı ürün sayfaları (Product JSON-LD). */
+const storeFetcher: Fetcher = async (url) => {
+  const u = new URL(url);
+  const ok = (body: string) => ({ status: 200, body, headers: { "content-type": "text/html" } as Record<string, string>, url, truncated: false });
+  if (u.pathname === "/robots.txt" || u.pathname.endsWith(".xml")) return { status: 404, body: "", headers: {} as Record<string, string>, url, truncated: false };
+  const product = (name: string, brand: string) => ok(`<!doctype html><html lang="tr"><head><title>${name}</title><script type="application/ld+json">${JSON.stringify({ "@type": "Product", name, brand: { "@type": "Brand", name: brand }, offers: { price: "100", priceCurrency: "TRY", availability: "InStock" } })}</script></head><body><h1>${name}</h1></body></html>`);
+  const products: Record<string, [string, string]> = {
+    "/ev-tekstili/battaniye-a": ["Pamuk Battaniye", "Linen Co"],
+    "/ev-tekstili/nevresim-b": ["Saten Nevresim", "Uyku Tekstil"],
+    "/mutfak/tencere-c": ["Çelik Tencere", "Mutfakçı"],
+    "/mutfak/tava-d": ["Döküm Tava", "Ocak Usta"],
+    "/sofra/tabak-e": ["Porselen Tabak", "Seramikçi"],
+  };
+  if (products[u.pathname]) return product(...products[u.pathname]!);
+  const links = Object.keys(products).map((p) => `<a href="${p}">${products[p]![0]}</a>`).join("");
+  return ok(`<!doctype html><html lang="tr"><head><title>Evim</title><meta property="og:site_name" content="Evim"></head><body><h1>Evim</h1><nav><a href="/ev-tekstili/">Ev Tekstili</a><a href="/ev-tekstili/x">Nevresim</a><a href="/ev-tekstili/y">Yorgan</a><a href="/mutfak/">Mutfak</a><a href="/sofra/">Sofra</a></nav>${links}</body></html>`);
+};
+
+describe("ücretsiz ölçüm soru onayı", () => {
+  it("tarama sonrası onay bekler; onaydan önce AI çağrısı yok; onay idempotent; markalı soru reddedilir", async () => {
+    const audit = await makeAudit(`onay-${randomToken(4).toLowerCase()}.com`);
+    const gpt = countingAdapter("chatgpt");
+    const gem = countingAdapter("gemini");
+    const adapters = { chatgpt: gpt.adapter, gemini: gem.adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
+    expect(await runAudit(db, audit.id, { fetcher: storeFetcher, adapters }, { requireConfirmation: true })).toBe("done");
+    expect(gpt.calls() + gem.calls()).toBe(0);
+    const waiting = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
+    expect(waiting.stage).toBe("confirm");
+    const sum = waiting.resultSummary as { proposal: { business: { type: string }; topics: string[]; questions: Array<{ text: string; kind: string }> } };
+    expect(sum.proposal.business.type).toBe("retailer");
+    expect(sum.proposal.topics[0]).toBe("Ev Tekstili");
+    expect(sum.proposal.questions).toHaveLength(5);
+    expect(sum.proposal.questions.map((q) => q.kind)).toEqual(["discovery", "discovery", "need", "need", "info"]);
+    expect(sum.proposal.questions.every((q) => !/evim/i.test(q.text))).toBe(true);
+    // Tür değişince soru seti yeniden üretilir (ücretli çağrı yok).
+    const preview = previewAuditQuestions(waiting, { businessType: "manufacturer", topics: ["Nevresim"] });
+    expect(preview.questions[0]!.text).toMatch(/nevresim markaları/i);
+    await expect(confirmAudit(db, audit.id, { questions: ["Evim güvenilir bir mağaza mı?"] })).rejects.toThrow(/Marka adınızı/);
+    const chosen = sum.proposal.questions.slice(0, 3).map((q) => q.text);
+    const first = await confirmAudit(db, audit.id, { questions: chosen });
+    const again = await confirmAudit(db, audit.id, { questions: chosen });
+    expect(again.jobId).toBe(first.jobId);
+    expect(again.alreadyConfirmed).toBe(true);
+    // Yanıt işi taramayı tekrarlamaz; yalnız onaylanan 3 soru × 2 platform sorulur.
+    expect(await runAudit(db, audit.id, { fetcher: async () => { throw new Error("tarama tekrarlanmamalı"); }, adapters }, { requireConfirmation: false })).toBe("done");
+    expect(gpt.calls()).toBe(3);
+    expect(gem.calls()).toBe(3);
+    const done = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
+    const res = done.resultSummary as { questions: Array<{ kind: string }>; kindStats: Record<string, { answers: number }>; business: { type: string } };
+    expect(res.questions.map((q) => q.kind)).toEqual(["discovery", "discovery", "need"]);
+    expect(res.kindStats.info!.answers).toBe(0);
+    expect(res.business.type).toBe("retailer");
+  });
+});
 
 describe("Redis'siz (inline) yürütme", () => {
   it("mod açıkça inline; Redis olmadan iş başlatılabilir ve outbox'a yazılmaz", async () => {

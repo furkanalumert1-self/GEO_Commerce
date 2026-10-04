@@ -14,6 +14,8 @@ export interface ProductFacts {
   url: string | null;
   /** Bilginin kaynağı: yapılandırılmış veri (schema) veya sayfa meta etiketleri (meta). */
   source?: "schema" | "meta";
+  /** Ürünün markası (schema `brand` veya `product:brand`); yoksa null. */
+  brand?: string | null;
 }
 
 export interface PageFacts {
@@ -32,6 +34,8 @@ export interface PageFacts {
   trackers: string[];
   /** BreadcrumbList adları (ana sayfa hariç, sırayla); kategori ipucu olarak kullanılır. */
   breadcrumbs?: string[];
+  /** Site içi bağlantıların görünür metni (menü/hizmet adları için; en çok 600, url'e göre tekil). */
+  anchors?: Array<{ url: string; text: string }>;
 }
 
 const decode = (s: string) =>
@@ -117,6 +121,11 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
       image: typeof img === "string" ? img : str((img as Record<string, unknown> | undefined)?.url),
       url: str(o.url) ?? baseUrl,
       source: "schema",
+      brand: (() => {
+        const b = Array.isArray(o.brand) ? o.brand[0] : o.brand;
+        const name = typeof b === "string" ? b : str((b as Record<string, unknown> | undefined)?.name);
+        return name ? decode(name).trim() || null : null;
+      })(),
     });
   }
   for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl, crumbs);
@@ -166,6 +175,7 @@ export function metaProduct(html: string, url: string, h1: string | null): Produ
     image,
     url: metaContent(html, "og:url", "property") ?? url,
     source: "meta",
+    brand: metaContent(html, "product:brand", "property"),
   };
 }
 
@@ -189,6 +199,28 @@ export function extractPage(html: string, url: string): PageFacts {
         abs.hash = "";
         links.add(abs.toString());
       }
+    } catch {
+      /* geçersiz link */
+    }
+  }
+  const anchors = new Map<string, string>();
+  const host = (() => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  for (const am of html.matchAll(/<a\b[^>]*href\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]{0,400}?)<\/a>/gi)) {
+    if (anchors.size >= 600) break;
+    const textRaw = visibleText(am[4] ?? "").replace(/\s+/g, " ").trim();
+    if (textRaw.length < 2 || textRaw.length > 60) continue;
+    try {
+      const abs = new URL(decode(am[2] ?? am[3] ?? ""), url);
+      if (abs.hostname.replace(/^www\./, "") !== host) continue;
+      abs.hash = "";
+      const key = abs.toString();
+      if (!anchors.has(key)) anchors.set(key, textRaw);
     } catch {
       /* geçersiz link */
     }
@@ -230,6 +262,7 @@ export function extractPage(html: string, url: string): PageFacts {
     ogSiteName: metaContent(html, "og:site_name", "property"),
     trackers: TRACKER_PATTERNS.filter(([re]) => re.test(html)).map(([, n]) => n),
     breadcrumbs,
+    anchors: [...anchors.entries()].map(([u, t]) => ({ url: u, text: t })),
   };
 }
 
@@ -310,9 +343,12 @@ export function classifyPage(url: string, facts: Pick<PageFacts, "schemaTypes" |
   const p = new URL(url).pathname.toLowerCase();
   if (p === "/" || p === "") return "home";
   if (/\/(kategori|category|collections?|c)\//.test(p) || facts.schemaTypes.includes("CollectionPage")) return "category";
-  // Birden çok ürün listeleyen sayfa (kategori/koleksiyon), tek ürün detay sayfası değildir.
-  if (facts.products.length > 1) return "category";
-  if (facts.products.length === 1 || /\/(urun|product|p)\//.test(p)) return "product";
+  // Birden çok farklı ürün listeleyen sayfa (kategori/koleksiyon), tek ürün detay sayfası değildir. Aynı ürünün
+  // şemada iki kez yer alması (tema + uygulama) ürünü kategori yapmaz.
+  const distinct = new Set(facts.products.map((x, i) => (x.sku ?? x.name ?? "").trim().toLocaleLowerCase("tr-TR") || `#${i}`)).size;
+  if (distinct > 1 && !/\/(products?|urun)\//.test(p)) return "category";
+  if (distinct > 2) return "category";
+  if (facts.products.length >= 1 || /\/(urun|products?|p)\//.test(p)) return "product";
   if (/(iade|return|refund|kargo|shipping|gizlilik|privacy|kvkk|mesafeli|terms|sozlesme)/.test(p)) return "policy";
   if (/(iletisim|contact|hakkimizda|about)/.test(p)) return "contact";
   return "other";

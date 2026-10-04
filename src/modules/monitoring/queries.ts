@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
-import { aggregateScore, shareOfVoice, visibilityScore, FORMULA_VERSION } from "./metrics";
+import { aggregateScore, balanceRepetitions, shareOfVoice, visibilityScore, FORMULA_VERSION } from "./metrics";
 import { brandEntities, cohortHash, toScored } from "./service";
 
 /**
@@ -39,7 +39,7 @@ export async function brandMetrics(db: PrismaClient, workspaceId: string, brandI
   const engines = [...new Set(obs.map((o) => o.engine))].sort();
   const perEngine = engines.map((engine) => {
     const list = obs.filter((o) => o.engine === engine);
-    return visibilityScore(list.map((o) => toScored(o, brandId)), list.length);
+    return visibilityScore(balanceRepetitions(list.map((o) => ({ key: o.promptVersion.promptId, obs: toScored(o, brandId) }))), list.length);
   });
   const agg = aggregateScore(perEngine);
   const sov = shareOfVoice(
@@ -60,6 +60,9 @@ export async function brandMetrics(db: PrismaClient, workspaceId: string, brandI
     sov: entities.map((e) => ({ id: e.id, name: e.name, type: e.type, value: sov[e.id] ?? null })),
     coverage: scheduled > 0 ? valid / scheduled : null,
     sampleCount: valid,
+    /** Örneklem dökümü: farklı soru ve çalışma sayısı (tekrarlar ayrı soru sayılmaz). */
+    promptCount: new Set(obs.filter((o) => o.status === "succeeded").map((o) => o.promptVersion.promptId)).size,
+    runCount: new Set(obs.map((o) => o.runId)).size,
     failedCount: obs.length - valid,
     scheduledCount: scheduled,
     provenance: { models, surfaces, lastSampledAt },
@@ -81,7 +84,7 @@ export async function dailyTrend(db: PrismaClient, workspaceId: string, brandId:
       const engines = [...new Set(list.map((o) => o.engine))];
       const per = engines.map((e) => {
         const l = list.filter((o) => o.engine === e);
-        return visibilityScore(l.map((o) => toScored(o, brandId)), l.length);
+        return visibilityScore(balanceRepetitions(l.map((o) => ({ key: o.promptVersion.promptId, obs: toScored(o, brandId) }))), l.length);
       });
       const agg = aggregateScore(per);
       return { day, score: agg.score, partial: agg.partial, smallSample: agg.smallSample, sampleCount: agg.sampleCount, perEngine: Object.fromEntries(per.map((p) => [p.engine, p.score])) };

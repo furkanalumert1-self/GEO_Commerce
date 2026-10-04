@@ -9,6 +9,7 @@ import { isUuid } from "@/modules/tenancy/access";
 import { ENGINE_SHORT, fmtDate, fmtPct, RUN_STATUS_LABEL } from "@/lib/format";
 import { executionMode } from "@/lib/queue";
 import { InlineJobDriver } from "@/components/data/inline-job-driver";
+import { isStalled, runProgress } from "@/modules/monitoring/run-status";
 
 export const metadata: Metadata = { title: "Ölçüm çalıştırması" };
 
@@ -25,22 +26,26 @@ export default async function RunPage({ params }: { params: Promise<{ workspaceI
   ]);
   const names = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const running = run.status === "queued" || run.status === "running";
+  // Sayaçlar gözlemlerden canlı (çalışma bitene kadar 0/… kalmaz).
+  const live = (await runProgress(db, [run])).get(run.id)!;
+  const stalled = isStalled(run, live);
   const inline = executionMode() === "inline";
   return (
     <>
       <PageHeader
         title={`Ölçüm · ${fmtDate(run.scheduledAt, access.brand.timezone, "tr-TR", true)}`}
-        badges={<Badge tone={run.status === "succeeded" ? "success" : run.status === "partial" ? "warning" : run.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[run.status] ?? run.status}</Badge>}
+        badges={stalled ? <Badge tone="warning">Durakladı</Badge> : <Badge tone={run.status === "succeeded" ? "success" : run.status === "partial" ? "warning" : run.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[run.status] ?? run.status}</Badge>}
         description={`${run.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")} · ${run.locales.join(", ")} · ${run.repetitions} tekrar`}
       />
       <Card className="mb-6 p-4" aria-live="polite">
-        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(run.completedCount)], ["Başarısız", String(run.failedCount)], ["Tamamlanan ölçüm", fmtPct(run.coverage)], ["Config", run.configVersion], ["Tetikleyici", run.trigger]]} />
+        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(live.succeeded)], ["Başarısız", String(live.failed)], ["Bekleyen", String(live.pending)], ["Tamamlanan ölçüm", fmtPct(run.scheduledCount ? live.succeeded / run.scheduledCount : null)], ["Config", run.configVersion], ["Tetikleyici", run.trigger]]} />
+        {stalled ? <p className="mt-2 text-sm text-warning" role="status">Bu ölçüm {live.lastActivity ? fmtDate(live.lastActivity, access.brand.timezone, "tr-TR", true) : "başlangıçtan"} beri ilerlemedi. {inline ? "Redis'siz modda ölçüm yalnız bu sayfa açıkken ilerler; aşağıdan devam ettirebilirsiniz." : "İşlem kuyruğu kontrol ediliyor; sorun sürerse yeni ölçüm başlatın."} Sonuçlar tamamlanana kadar nihai değildir.</p> : null}
         {running && inline && job && !["succeeded", "partial", "dead", "canceled"].includes(job.status) ? (
           <div className="mt-3">
             <InlineJobDriver advanceUrl={`/api/v1/jobs/${job.id}/advance`} initialStatus={job.status} label="Ölçüm" />
           </div>
         ) : running ? (
-          <p className="mt-2 text-sm text-muted">Çalışıyor: {job ? `${job.progressDone}/${job.progressTotal || run.scheduledCount}` : "sırada"} — sayfayı yenileyerek ilerlemeyi görebilirsiniz; kısmi sonuçlar aşağıda.</p>
+          <p className="mt-2 text-sm text-muted">Çalışıyor: {live.succeeded + live.failed}/{run.scheduledCount} yanıt işlendi — sayfayı yenileyerek ilerlemeyi görebilirsiniz; kısmi sonuçlar aşağıda ve nihai değildir.</p>
         ) : null}
         {job?.status === "dead" ? <p className="mt-2 text-sm text-danger" role="alert">Ölçüm tamamlanamadı: {job.lastError ?? job.deadReason ?? "bilinmeyen hata"}. Ayrılan kota serbest bırakıldı; yeni bir ölçüm başlatabilirsiniz.</p> : null}
         {run.status === "partial" ? <p className="mt-2 text-sm text-warning">Bazı yanıtlar alınamadı; başarısız sorgular kota tüketmez ve görünürlük düşüşü sayılmaz.</p> : null}

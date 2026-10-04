@@ -47,7 +47,11 @@ test("audit → claim → trial onboarding", async ({ page }, info) => {
   await page.getByLabel("Web siteniz").fill("lumabakim.example");
   await page.getByRole("button", { name: /ölçümü başlat/i }).click();
   await page.waitForURL(/\/audit\/.+/);
-  await expect(page.getByText(/Fırsat sayısı/)).toBeVisible({ timeout: 60_000 });
+  // Tarama sonrası onay ekranı: soru/platform/kapsam görünür, onay gelmeden AI çağrısı yapılmaz.
+  await expect(page.getByRole("heading", { name: "Ölçüm öncesi onay" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/soru × \d platform/)).toBeVisible();
+  await page.getByRole("button", { name: "Onayla ve ölçümü başlat" }).click();
+  await expect(page.getByText(/Fırsat (sinyali|analizi)/)).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/Küçük örneklem/)).toBeVisible();
   const path = new URL(page.url()).pathname;
   await page.goto(`/login?next=${encodeURIComponent(path)}`);

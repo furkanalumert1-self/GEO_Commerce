@@ -12,6 +12,8 @@ import { brandMetrics, parseRange } from "@/modules/monitoring/queries";
 import { brandEntities } from "@/modules/monitoring/service";
 import { isUuid } from "@/modules/tenancy/access";
 import { ENGINE_SHORT, fmtDate, fmtNumber, fmtPct, SURFACE_LABEL, RUN_STATUS_LABEL } from "@/lib/format";
+import { sovMissingReason } from "@/lib/view-models";
+import { isStalled, runProgress } from "@/modules/monitoring/run-status";
 
 export const metadata: Metadata = { title: "Görünürlük" };
 
@@ -41,6 +43,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
     db.observation.findMany({ where: { workspaceId, brandId }, distinct: ["engine"], select: { engine: true } }),
     sp.obs && isUuid(sp.obs) ? db.observation.findFirst({ where: { id: sp.obs, workspaceId, brandId }, include: { mentions: true, citations: true, promptVersion: { select: { text: true, version: true } } } }) : null,
   ]);
+  const progress = await runProgress(db, runs);
   const names = Object.fromEntries(entities.map((e) => [e.id, e.name]));
   const qs = (patch: Record<string, string>) => {
     const q = new URLSearchParams(Object.entries(sp).filter(([, v]) => v !== undefined) as Array<[string, string]>);
@@ -56,6 +59,9 @@ export default async function VisibilityPage({ params, searchParams }: { params:
         <Link href={base} aria-current="page" className="inline-flex min-h-11 items-center border-b-2 border-primary px-3 text-sm font-medium text-primary sm:min-h-10">Sonuçlar</Link>
       </div>
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} engines={engines.map((e) => e.engine)} />
+      <p className="tabular -mt-3 mb-4 text-sm text-text-secondary" data-testid="sample-summary">
+        {metrics.promptCount} farklı soru · {metrics.sampleCount} geçerli yanıt · {metrics.runCount} çalışma{metrics.failedCount ? ` · ${metrics.failedCount} yanıt alınamadı (puana girmez)` : ""}
+      </p>
       {metrics.aggregate.smallSample ? (
         <div className="mb-4">
           <Alert tone="warning" title="Küçük örneklem">Seçili dönemde {metrics.sampleCount} geçerli gözlem var (&lt; 20). Sonuçları yönlü bir işaret olarak değerlendirin.</Alert>
@@ -101,6 +107,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
         </Card>
         <Card>
           <CardHeader title="Rakiplere göre görünürlük payı" description="Aynı soru kümesi; her yanıtta bir marka en fazla bir kez sayılır. Rakip listesi değişirse karşılaştırma kümesi değişir." />
+          {metrics.sov.every((x) => x.value === null) ? <p className="px-5 pb-2 text-sm text-text-secondary">Neden ölçülemedi: {sovMissingReason({ competitorCount: metrics.sov.filter((x) => x.type === "competitor").length, validAnswers: metrics.sampleCount })}.</p> : null}
           <TableWrap label="Share of voice">
             <thead>
               <tr>
@@ -112,7 +119,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
               {metrics.sov.map((s) => (
                 <tr key={s.id}>
                   <Td>{s.name} {s.type === "brand" ? <Badge tone="primary">Siz</Badge> : null}</Td>
-                  <Td numeric>{s.value === null ? "Ölçülemedi" : `%${fmtNumber(s.value, "tr-TR", 1)}`}</Td>
+                  <Td numeric>{s.value === null ? <span title={sovMissingReason({ competitorCount: metrics.sov.filter((x) => x.type === "competitor").length, validAnswers: metrics.sampleCount })}>Ölçülemedi</span> : `%${fmtNumber(s.value, "tr-TR", 1)}`}</Td>
                 </tr>
               ))}
             </tbody>
@@ -169,8 +176,8 @@ export default async function VisibilityPage({ params, searchParams }: { params:
             <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
               <Link className="text-primary hover:underline" href={`/w/${workspaceId}/b/${brandId}/runs/${r.id}`}>{fmtDate(r.scheduledAt, access.brand.timezone, "tr-TR", true)} · {r.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")}</Link>
               <span className="flex items-center gap-2">
-                <Badge tone={r.status === "succeeded" ? "success" : r.status === "partial" ? "warning" : r.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[r.status] ?? r.status}</Badge>
-                <span className="tabular text-muted">{r.completedCount}/{r.scheduledCount}</span>
+                {isStalled(r, progress.get(r.id)) ? <Badge tone="warning">Durakladı</Badge> : <Badge tone={r.status === "succeeded" ? "success" : r.status === "partial" ? "warning" : r.status === "failed" ? "danger" : "primary"}>{RUN_STATUS_LABEL[r.status] ?? r.status}</Badge>}
+                <span className="tabular text-muted" title="Başarılı / planlanan yanıt">{progress.get(r.id)?.succeeded ?? r.completedCount}/{r.scheduledCount}</span>
               </span>
             </li>
           ))}

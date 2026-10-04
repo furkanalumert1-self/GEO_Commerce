@@ -253,3 +253,15 @@ export function nextStep(i: NextStepInput): NextStep {
   if (i.topOpportunity) return { title: `İlk öneriyi inceleyin: ${i.topOpportunity.title}`, reason: "Rakiplerin öne çıktığı ve kanıtı en güçlü soru grubu.", cta: "Başla", href: i.topOpportunity.href };
   return { title: "Yeni ölçüm başlatın", reason: "Şu an açık öneri yok; yeni ölçüm güncel durumu gösterir.", cta: "Ölçümü planla", href: "/prompts#olcum" };
 }
+
+/**
+ * Görünürlük payı ölçülemediğinde nedeni: sıfır pay ile tanımsız payda ayrılır.
+ * - onaylı rakip yok → karşılaştırma kümesi yok
+ * - geçerli yanıt yok → veri yok
+ * - takip edilen markaların hiçbiri anılmadı → pay tanımsız (0 değil)
+ */
+export function sovMissingReason(input: { competitorCount: number; validAnswers: number }): string {
+  if (input.validAnswers === 0) return "Geçerli yanıt yok";
+  if (input.competitorCount === 0) return "Onaylı rakip yok";
+  return "Takip edilen markaların hiçbiri anılmadı (pay tanımsız)";
+}

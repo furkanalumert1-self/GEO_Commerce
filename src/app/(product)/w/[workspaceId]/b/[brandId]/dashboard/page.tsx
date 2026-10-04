@@ -14,7 +14,7 @@ import { actionsNeedingFix } from "@/modules/actions/readiness";
 import { revenueAvailability, revenueVisible } from "@/modules/commerce/availability";
 import { listCandidates } from "@/modules/catalog/candidates";
 import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, plainStoredText, SURFACE_LABEL } from "@/lib/format";
-import { absoluteDelta, actionCta, alignPrevious, impactLevel, nextStep, plainTr, previousPeriod, STRONG_EVIDENCE_CONFIDENCE } from "@/lib/view-models";
+import { absoluteDelta, actionCta, alignPrevious, impactLevel, nextStep, plainTr, previousPeriod, sovMissingReason, STRONG_EVIDENCE_CONFIDENCE } from "@/lib/view-models";
 
 export const metadata: Metadata = { title: "Genel Bakış" };
 
@@ -208,7 +208,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           label="Rakiplere göre görünürlük payınız"
           value={self === null ? undefined : fmtNumber(self, "tr-TR", 1)}
           unit="%"
-          missing={self === null ? "Henüz ölçülmüyor" : undefined}
+          missing={self === null ? sovMissingReason({ competitorCount, validAnswers: metrics.sampleCount }) : undefined}
           sentence={sovSentence}
           delta={sovDelta}
           scope={`Aynı sorularda markanızın ve ${competitorCount} onaylı rakibin anılma payı`}

@@ -5,7 +5,7 @@ import { log } from "@/lib/observability/log";
 import { ProviderError, type AiMonitorAdapter, type EngineKey } from "@/adapters/ai/types";
 import { extract, type Entity } from "./extract";
 import { sampleKey } from "./planner";
-import { FORMULA_VERSION, aggregateScore, shareOfVoice, visibilityScore, type ScoredObservation } from "./metrics";
+import { FORMULA_VERSION, aggregateScore, balanceRepetitions, shareOfVoice, visibilityScore, type ScoredObservation } from "./metrics";
 import { commit, release } from "@/modules/billing/quota";
 
 export const MONITOR_CONFIG_VERSION = "monitor@1";
@@ -224,7 +224,7 @@ export async function writeRunSnapshots(db: PrismaClient, runId: string) {
   const perEngine = run.engines.map((engine) => {
     const list = observations.filter((o) => o.engine === engine);
     const scheduled = pvIds.length * run.locales.length * run.repetitions;
-    return visibilityScore(list.map((o) => toScored(o, run.brandId)), scheduled);
+    return visibilityScore(balanceRepetitions(list.map((o) => ({ key: o.promptVersionId, obs: toScored(o, run.brandId) }))), scheduled);
   });
   const agg = aggregateScore(perEngine);
   const sov = shareOfVoice(

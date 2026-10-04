@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { notFound } from "@/lib/http/errors";
 import { json, rateLimit, route } from "@/lib/http/api";
 import { advanceJob } from "@/lib/queue/advance";
-import { getAuditByToken, publicAuditView } from "@/modules/audit/service";
+import { currentAuditJob, getAuditByToken, publicAuditView } from "@/modules/audit/service";
 import { platformAdminEmail } from "@/lib/platform-admin";
 
 export const maxDuration = 120;
@@ -16,7 +16,7 @@ export const POST = route<{ token: string }>(async ({ params, requestId }) => {
   const a = await getAuditByToken(db, params.token);
   if (!a) throw notFound("Audit");
   rateLimit(`audit-advance:${a.id}`, 40, 60_000);
-  const job = await db.jobRecord.findUnique({ where: { operationId: `audit:${a.id}` }, select: { id: true } });
+  const job = await currentAuditJob(db, a.id);
   if (!job) throw notFound("Audit işi");
   const r = await advanceJob(db, job.id, null);
   const fresh = await db.audit.findUniqueOrThrow({ where: { id: a.id } });

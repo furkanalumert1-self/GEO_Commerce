@@ -53,16 +53,19 @@ async function assertTenantActive(ctx: JobContext, paid: boolean) {
 
 export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult>> = {
   async audit(ctx) {
-    const { auditId } = ctx.job.payloadRef as { auditId: string };
+    const { auditId, startPath, phase } = ctx.job.payloadRef as { auditId: string; startPath?: string; phase?: string };
     const stepMode = ctx.deadline !== undefined;
     return runAudit(ctx.db, auditId, {}, {
       deadline: ctx.deadline,
+      startPath,
+      // Tarama işi soru önerisinde durur; ücretli çağrılar kullanıcı onayından sonraki yanıt işinde yapılır.
+      requireConfirmation: phase !== "answers",
       callTimeoutMs: stepMode ? INLINE_CALL_TIMEOUT_MS : undefined,
       crawlMaxPages: stepMode ? INLINE_AUDIT_CRAWL_PAGES : undefined,
       load: () => (ctx.step as AuditWork | undefined) ?? null,
       save: async (w) => {
         await ctx.saveStep?.(w);
-        await ctx.progress(w.answers.length, (w.prompts?.length ?? 5) * 2);
+        await ctx.progress(w.answers.length, (w.prompts?.length ?? 5) * (w.engines?.length ?? 2));
       },
     });
   },

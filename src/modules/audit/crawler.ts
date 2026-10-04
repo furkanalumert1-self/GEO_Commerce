@@ -38,6 +38,8 @@ export interface CrawlResult {
   wwwFallback?: boolean;
   /** Ana sayfaya hiç erişilemediyse nedeni (ssl | dns | timeout | refused | http | network). */
   homeError?: { kind: SiteErrorKind; detail: string };
+  /** Yönetici tanısı (gizli veri yok): başlangıç adresi, süreler ve aşama sayıları. */
+  diagnostics?: { start: string; origin: string; sitemapsRead: number; sitemapMs: number; pagesMs: number; budgetMs: number | null };
 }
 
 export type SiteErrorKind = "ssl" | "dns" | "timeout" | "refused" | "http" | "network";
@@ -54,6 +56,8 @@ export function classifySiteError(message: string): SiteErrorKind {
 
 export interface CrawlOptions {
   domain: string;
+  /** Kullanıcının girdiği anlamlı yol (/tr gibi); ana sayfayla birlikte önce taranır. */
+  startPath?: string;
   maxPages: number;
   maxDepth?: number;
   delayMs?: number;
@@ -145,7 +149,12 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   // Sitemap (index paginasyonu dahil, sınırlı). Alt sitemap'ler türüne göre sıralanır: ürün → kategori → diğer; blog atlanır.
   const seenSitemaps = new Set<string>();
   const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
-  while (sitemapUrls.length && seenSitemaps.size < MAX_SITEMAPS && !overBudget()) {
+  // Sitemap okuma süre bütçesinin en çok %40'ını kullanır: yavaş/çok parçalı sitemap'ler sayfa taramasını
+  // tamamen tüketmesin (aksi halde hiç sayfa okunmadan "Sayfa alınamadı" oluşuyordu).
+  const t0 = Date.now();
+  const sitemapDeadline = opts.deadline !== undefined ? t0 + Math.max(0, opts.deadline - t0) * 0.4 : undefined;
+  if (opts.startPath && opts.startPath !== "/") queue.splice(1, 0, { url: `${origin}${opts.startPath}`, depth: 0 });
+  while (sitemapUrls.length && seenSitemaps.size < MAX_SITEMAPS && !overBudget() && !(sitemapDeadline !== undefined && Date.now() > sitemapDeadline)) {
     sitemapUrls.sort((a, b) => sitemapRank(a) - sitemapRank(b));
     const sm = sitemapUrls.shift()!;
     if (seenSitemaps.has(sm) || sitemapRank(sm) >= SKIP_SITEMAP_RANK) continue;
@@ -163,11 +172,18 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       /* sitemap erişilemedi */
     }
   }
+  const sitemapMs = Date.now() - t0;
+  // Başlangıç yolu (/tr) ana sayfadan hemen sonra okunur.
+  let picksStart = opts.startPath && opts.startPath !== "/" ? 1 : 0;
   // Ürün adresleri bilindiğinde her 1 diğer sayfaya 3 ürün sayfası düşer; ürünler bitince diğerleri devam eder.
   let picks = 0;
   const nextItem = () => {
     picks++;
     if (picks === 1 || !productQueue.length) return queue.shift() ?? productQueue.shift();
+    if (picksStart > 0) {
+      picksStart--;
+      return queue.shift() ?? productQueue.shift();
+    }
     if (picks % 4 === 0 && queue.length) return queue.shift();
     return productQueue.shift();
   };
@@ -233,6 +249,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
     }
   }
   result.truncated = queue.length > 0 || productQueue.length > 0;
+  result.diagnostics = { start: `${origin}${opts.startPath ?? "/"}`, origin, sitemapsRead: seenSitemaps.size, sitemapMs, pagesMs: Date.now() - t0 - sitemapMs, budgetMs: opts.deadline !== undefined ? opts.deadline - t0 : null };
   return result;
 }
 

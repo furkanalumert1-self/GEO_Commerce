@@ -123,6 +123,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   }
 
   let disallow: string[] = [];
+  let allow: string[] = [];
   let sitemapUrls: string[] = [`${origin}/sitemap.xml`];
   try {
     const r = await fetcher(`${origin}/robots.txt`, { sameSiteAs: domain });
@@ -130,8 +131,9 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       result.robotsFound = true;
       const parsed = parseRobots(r.body);
       disallow = parsed.disallow;
+      allow = parsed.allow;
       if (parsed.sitemaps.length) sitemapUrls = parsed.sitemaps;
-      result.robotsDisallowAll = disallow.includes("/");
+      result.robotsDisallowAll = !isAllowedByRobots("/", disallow, allow);
     }
   } catch {
     /* robots yok → varsayılan izin */
@@ -190,7 +192,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
     const key = u.toString();
     if (visited.has(key)) continue;
     visited.add(key);
-    if (!isAllowedByRobots(u.pathname, disallow)) {
+    if (!isAllowedByRobots(u.pathname + u.search, disallow, allow)) {
       result.skippedByRobots++;
       continue;
     }

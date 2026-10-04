@@ -276,7 +276,7 @@ export async function runAudit(
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
       ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
       ...(crawl.pages.length === 0
-        ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll ? { kind: "robots", detail: "robots.txt tüm siteyi kapatıyor" } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : "network", detail: crawl.failed[0]?.reason ?? "Sayfa alınamadı" }) }
+        ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll || (crawl.failed.length === 0 && crawl.skippedByRobots > 0) ? { kind: "robots", detail: crawl.robotsDisallowAll ? "robots.txt tüm siteyi kapatıyor" : `robots.txt kuralları incelenecek ${crawl.skippedByRobots} sayfanın hepsini kapatıyor` } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : "network", detail: crawl.failed[0]?.reason ?? "Sayfa alınamadı" }) }
         : {}),
     };
     await save();

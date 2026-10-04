@@ -233,37 +233,70 @@ export function extractPage(html: string, url: string): PageFacts {
 }
 
 /** robots.txt — User-agent: * ve bot adımız için Disallow kuralları. */
-export function parseRobots(txt: string, agent = "geocommercebot"): { disallow: string[]; sitemaps: string[] } {
-  const disallow: string[] = [];
+/** Tarayıcımızın robots.txt'de eşleştirilen adları (User-Agent'taki ürün adı ve eski ad). */
+const OUR_AGENTS = ["callypsobot", "geocommercebot"];
+
+/**
+ * RFC 9309: kurallar User-agent gruplarıyla okunur; bizim adımızla eşleşen grup varsa yalnız o, yoksa "*" grubu
+ * uygulanır. Allow ve Disallow birlikte döner (eşleştirme isAllowedByRobots'ta, en uzun kural kazanır).
+ */
+export function parseRobots(txt: string, agents: string[] = OUR_AGENTS): { disallow: string[]; allow: string[]; sitemaps: string[] } {
   const sitemaps: string[] = [];
-  let applies = false;
-  let sawAgentLine = false;
+  const groups: Array<{ agents: string[]; allow: string[]; disallow: string[] }> = [];
+  let current: (typeof groups)[number] | null = null;
+  let lastWasAgent = false;
   for (const raw of txt.split(/\r?\n/)) {
     const line = raw.replace(/#.*/, "").trim();
     if (!line) continue;
-    const [kRaw, ...rest] = line.split(":");
-    const k = kRaw!.trim().toLowerCase();
-    const v = rest.join(":").trim();
-    if (k === "sitemap") sitemaps.push(v);
-    else if (k === "user-agent") {
-      const ua = v.toLowerCase();
-      if (!sawAgentLine) applies = false;
-      applies = applies || ua === "*" || ua === agent;
-      sawAgentLine = true;
+    const idx = line.indexOf(":");
+    if (idx < 0) continue;
+    const k = line.slice(0, idx).trim().toLowerCase();
+    const v = line.slice(idx + 1).trim();
+    if (k === "sitemap") {
+      if (v) sitemaps.push(v);
+    } else if (k === "user-agent") {
+      if (!current || !lastWasAgent) {
+        current = { agents: [], allow: [], disallow: [] };
+        groups.push(current);
+      }
+      current.agents.push(v.toLowerCase());
+      lastWasAgent = true;
     } else {
-      sawAgentLine = false;
-      if (k === "disallow" && applies && v) disallow.push(v);
+      lastWasAgent = false;
+      if (!current || !v) continue;
+      if (k === "disallow") current.disallow.push(v);
+      else if (k === "allow") current.allow.push(v);
     }
   }
-  return { disallow, sitemaps };
+  const own = groups.filter((g) => g.agents.some((a) => agents.includes(a)) && !g.agents.every((a) => a === "*"));
+  const chosen = own.length ? own : groups.filter((g) => g.agents.includes("*"));
+  return { disallow: chosen.flatMap((g) => g.disallow), allow: chosen.flatMap((g) => g.allow), sitemaps };
 }
 
-export function isAllowedByRobots(pathname: string, disallow: string[]): boolean {
-  return !disallow.some((d) => {
-    if (d.endsWith("$")) return pathname === d.slice(0, -1);
-    const prefix = d.replace(/\*.*$/, "");
-    return pathname.startsWith(prefix);
-  });
+/** robots kuralı → yol+sorgu başından eşleşen RegExp (`*` herhangi dizi, sondaki `$` satır sonu). */
+function robotsPattern(rule: string): RegExp {
+  const anchored = rule.endsWith("$");
+  const body = (anchored ? rule.slice(0, -1) : rule)
+    .split("*")
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp(`^${body}${anchored ? "$" : ""}`);
+}
+
+/**
+ * `path` yol + sorgu dizesidir (ör. "/yatak?sorter=price"). En uzun eşleşen kural kazanır; eşitlikte Allow.
+ * Joker karakterli kurallar (/*?sorter*) yalnız eşleşen adresleri kapatır, siteyi değil.
+ */
+export function isAllowedByRobots(path: string, disallow: string[], allow: string[] = []): boolean {
+  let best: { len: number; allow: boolean } | null = null;
+  const consider = (rule: string, isAllow: boolean) => {
+    if (!robotsPattern(rule).test(path)) return;
+    const len = rule.length;
+    if (!best || len > best.len || (len === best.len && isAllow)) best = { len, allow: isAllow };
+  };
+  for (const d of disallow) consider(d, false);
+  for (const a of allow) consider(a, true);
+  return best ? (best as { allow: boolean }).allow : true;
 }
 
 export function parseSitemap(xml: string): { urls: string[]; sitemaps: string[] } {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { crawlSite, classifySiteError, type Fetcher } from "@/modules/audit/crawler";
-import { availabilityFlag, extractPage } from "@/modules/audit/html";
+import { availabilityFlag, extractPage, isAllowedByRobots, parseRobots } from "@/modules/audit/html";
 import { candidateFacts, candidateStatus, normalizeProductUrl } from "@/modules/catalog/candidates";
 
 const page = (body: string, url: string) => ({ status: 200, headers: { "content-type": "text/html" }, body, url, truncated: false });
@@ -76,5 +76,36 @@ describe("aday durumu", () => {
     const inc = candidateStatus({ url: "https://m.example/c", sku: null, name: "C", priceMinor: null, currency: null, available: null }, existing);
     expect(inc.status).toBe("incomplete");
     expect(inc.missing).toEqual(["fiyat", "stok"]);
+  });
+});
+
+describe("robots.txt (RFC 9309)", () => {
+  const evidea = ["User-agent: *", "Disallow: /*?category_ids*", "Disallow: /*?sorter*", "Disallow: /list/", "Disallow: /orders/ ", "Sitemap: https://www.evidea.com/sitemap.xml"].join("\n");
+
+  it("joker karakterli kurallar siteyi değil yalnız eşleşen adresleri kapatır", () => {
+    const r = parseRobots(evidea);
+    expect(r.sitemaps).toEqual(["https://www.evidea.com/sitemap.xml"]);
+    expect(isAllowedByRobots("/", r.disallow, r.allow)).toBe(true);
+    expect(isAllowedByRobots("/yatak-odasi/", r.disallow, r.allow)).toBe(true);
+    expect(isAllowedByRobots("/yatak-odasi/?sorter=price", r.disallow, r.allow)).toBe(false);
+    expect(isAllowedByRobots("/list/abc", r.disallow, r.allow)).toBe(false);
+    expect(isAllowedByRobots("/orders/1", r.disallow, r.allow)).toBe(false);
+  });
+
+  it("en uzun kural kazanır; Allow eşitlikte üstündür; $ satır sonu", () => {
+    expect(isAllowedByRobots("/shop/item", ["/shop"], ["/shop/item"])).toBe(true);
+    expect(isAllowedByRobots("/shop/other", ["/shop"], ["/shop/item"])).toBe(false);
+    expect(isAllowedByRobots("/a.pdf", ["/*.pdf$"])).toBe(false);
+    expect(isAllowedByRobots("/a.pdf?x=1", ["/*.pdf$"])).toBe(true);
+    expect(isAllowedByRobots("/", ["/"])).toBe(false);
+  });
+
+  it("bizim adımıza özel grup varsa yalnız o uygulanır", () => {
+    const txt = "User-agent: *\nDisallow: /\n\nUser-agent: CallypsoBot\nDisallow: /private/";
+    const r = parseRobots(txt);
+    expect(r.disallow).toEqual(["/private/"]);
+    expect(isAllowedByRobots("/", r.disallow, r.allow)).toBe(true);
+    const all = parseRobots("User-agent: *\nDisallow: /");
+    expect(isAllowedByRobots("/", all.disallow, all.allow)).toBe(false);
   });
 });

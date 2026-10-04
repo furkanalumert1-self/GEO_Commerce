@@ -29,7 +29,10 @@ const MEDIA_BRANDS = new Set([
 ]);
 
 /** Alan adındaki genel içerik/medya kelimeleri. */
-const MEDIA_WORD = /(haber|news|gazete|dergi|magazin|magazine|blog|forum|rehber|yorum|review|wiki|sozluk|radyo|radio)/;
+const MEDIA_WORD = /(haber|news|gazete|dergi|magazin|magazine|blog|forum|rehber|yorum|review|wiki|sozluk|radyo|radio|karsilastir|inceleme|tavsiye)/;
+
+/** "En iyi …" liste/öneri siteleri (eniyisinde, eniyimarka, en-iyi-…): içerik kaynağıdır, satıcı rakip değildir. */
+const LISTICLE_PREFIX = /^(en-?iyi|eniyi)/;
 
 const MULTI_PART_TLD = /\.(com|net|org|gen|biz|info|web|tv|av|dr|name|bbs|tel)\.[a-z]{2}$|\.co\.[a-z]{2}$/;
 
@@ -54,7 +57,7 @@ export function nonCompetitorReason(domain: string, ownDomain?: string): NonComp
   }
   if (INSTITUTIONAL_SUFFIX.test(d) || INSTITUTIONAL_HINT.test(`${d}.`)) return "institutional";
   const label = registrableLabel(d);
-  if (MEDIA_BRANDS.has(label) || MEDIA_WORD.test(label)) return "media";
+  if (MEDIA_BRANDS.has(label) || MEDIA_WORD.test(label) || LISTICLE_PREFIX.test(label)) return "media";
   return null;
 }
 

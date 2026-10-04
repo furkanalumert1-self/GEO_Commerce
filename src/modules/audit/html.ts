@@ -175,10 +175,11 @@ export function extractPage(html: string, url: string): PageFacts {
   const canonicalTag = (html.match(/<link\b[^>]*rel\s*=\s*["']?canonical["']?[^>]*>/i) ?? [])[0];
   const htmlTag = (html.match(/<html\b[^>]*>/i) ?? [])[0];
   const robots = metaContent(html, "robots") ?? "";
-  const links: string[] = [];
+  // Tekil bağlantılar; büyük menülü sitelerde altbilgi (iade/iletişim) bağlantıları da kapsansın diye sınır yüksek.
+  const links = new Set<string>();
   const linkRe = /<a\b[^>]*href\s*=\s*("([^"]*)"|'([^']*)')/gi;
   let lm: RegExpExecArray | null;
-  while ((lm = linkRe.exec(html)) && links.length < 500) {
+  while ((lm = linkRe.exec(html)) && links.size < 2000) {
     const href = decode(lm[2] ?? lm[3] ?? "");
     // İstemci şablonu yer tutucuları ({{url}}) gerçek bağlantı değildir.
     if (/\{\{|\}\}|\$\{/.test(href)) continue;
@@ -186,7 +187,7 @@ export function extractPage(html: string, url: string): PageFacts {
       const abs = new URL(href, url);
       if (abs.protocol === "http:" || abs.protocol === "https:") {
         abs.hash = "";
-        links.push(abs.toString());
+        links.add(abs.toString());
       }
     } catch {
       /* geçersiz link */
@@ -222,7 +223,7 @@ export function extractPage(html: string, url: string): PageFacts {
     lang: htmlTag ? attr(htmlTag, "lang") : null,
     h1: h1M ? visibleText(h1M[1]!) || null : null,
     textLength: text.length,
-    links: [...new Set(links)],
+    links: [...links],
     jsonLd,
     schemaTypes: [...types],
     products,

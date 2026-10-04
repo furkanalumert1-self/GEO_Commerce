@@ -109,3 +109,13 @@ describe("robots.txt (RFC 9309)", () => {
     expect(isAllowedByRobots("/", all.disallow, all.allow)).toBe(false);
   });
 });
+
+describe("bağlantı çıkarımı", () => {
+  it("büyük menülü sayfada altbilgi bağlantıları kaybolmaz (500+ bağlantı)", () => {
+    const menu = Array.from({ length: 900 }, (_, i) => `<a href="/kategori-${i % 600}/">k</a>`).join("");
+    const html = `<html><body>${menu}<footer><a href="/iade-politikamiz/">İade</a><a href="/iletisim/">İletişim</a></footer></body></html>`;
+    const facts = extractPage(html, "https://www.ornek.com/");
+    expect(facts.links).toContain("https://www.ornek.com/iade-politikamiz/");
+    expect(facts.links).toContain("https://www.ornek.com/iletisim/");
+  });
+});

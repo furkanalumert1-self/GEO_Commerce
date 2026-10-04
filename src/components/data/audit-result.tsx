@@ -171,6 +171,17 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
     const open = list.length - measured.length;
     return `Ölçülen kontrol: ${measured.length}/${list.length}, geçen: ${passed}${open ? ` (ölçülemeyen/doğrulama bekleyen: ${open})` : ""}.`;
   };
+  /**
+   * Puan formülü değişmez (ölçülebilen kontrollerin geçme oranı); yalnız sunum: kontrollerin yarısından azı
+   * ölçülebildiyse sayı yerine "Yetersiz veri", bir kısmı ölçülemediyse "Kısmi" rozeti gösterilir.
+   */
+  const readinessView = (group: "geo" | "ads", value: number | null) => {
+    const list = r?.readiness.checks.filter((c) => c.group === group) ?? [];
+    const measured = list.filter((c) => c.status === "pass" || c.status === "fail").length;
+    if (value === null) return { value: "Ölçülemedi", partial: false };
+    if (list.length && measured / list.length < 0.5) return { value: "Yetersiz veri", partial: true };
+    return { value: String(value), partial: measured < list.length };
+  };
   const candidates = (r?.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, view.domain));
   // Eski raporlarda site okunamadıysa (0 sayfa) kontrol maddeleri "bulunamadı" değil "ölçülemedi"dir.
   const notRead = (r?.crawl?.pages ?? 0) === 0;
@@ -262,12 +273,14 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
             </Card>
             <Card className="p-4">
               <p className="text-sm text-muted">Site hazırlığı</p>
-              <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.geoScore ?? "Ölçülemedi"}</p>
+              <p className="tabular mt-2 text-3xl font-semibold">{readinessView("geo", r.readiness.geoScore).value}</p>
+              {readinessView("geo", r.readiness.geoScore).partial ? <div className="mt-2"><Badge tone="warning">Kısmi — bazı kontroller doğrulanamadı</Badge></div> : null}
               <p className="mt-2 text-xs text-muted">{coverage("geo")} Görünürlük puanından ayrıdır.</p>
             </Card>
             <Card className="p-4">
               <p className="text-sm text-muted">Reklam hazırlığı</p>
-              <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.adsScore ?? "Ölçülemedi"}</p>
+              <p className="tabular mt-2 text-3xl font-semibold">{readinessView("ads", r.readiness.adsScore).value}</p>
+              {readinessView("ads", r.readiness.adsScore).partial ? <div className="mt-2"><Badge tone="warning">Kısmi — bazı kontroller doğrulanamadı</Badge></div> : null}
               <p className="mt-2 text-xs text-muted">{coverage("ads")} Reklam hesabı uygunluğu ve ödeme adımı ayrıca doğrulanmalıdır.</p>
             </Card>
           </div>

@@ -52,3 +52,13 @@ describe("katalog uyumu", () => {
     expect(catalogFit("Avize", new Set(), new Set(["mocca katlanır koltuklar"]))).toBe(30);
   });
 });
+
+describe("liste/öneri siteleri", () => {
+  it("'en iyi' listeleri ve karşılaştırma siteleri rakip adayı değildir", () => {
+    expect(nonCompetitorReason("eniyisinde.com.tr")).toBe("media");
+    expect(nonCompetitorReason("eniyimarka.com")).toBe("media");
+    expect(nonCompetitorReason("en-iyi-yatak.com")).toBe("media");
+    expect(nonCompetitorReason("idas.com.tr")).toBeNull();
+    expect(nonCompetitorReason("ikea.com.tr")).toBeNull();
+  });
+});

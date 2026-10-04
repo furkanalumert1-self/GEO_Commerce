@@ -87,7 +87,7 @@ export function AuditConfirm({
   const confirm = async () => {
     setPending("confirm");
     setError(null);
-    const res = await api("confirm", { questions: chosen.map((q) => q.text.trim()), businessType: type !== proposal.business.type ? type : undefined });
+    const res = await api("confirm", { questions: chosen.map((q) => q.text.trim()), businessType: type !== proposal.business.type ? type : undefined, topics: topics.map((t) => t.trim()).filter(Boolean) });
     const body = await res.json().catch(() => null);
     setPending(null);
     if (!res.ok) return setError(body?.error?.message ?? "Ölçüm başlatılamadı");

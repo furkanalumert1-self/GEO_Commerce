@@ -19,6 +19,8 @@ import { periodKey } from "@/modules/billing/quota";
 import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
 import { isCompetitorCandidate } from "./competitor-filter";
 import { seedPrompts } from "@/modules/prompts/seed";
+import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
+import type { ProductFacts } from "./html";
 import { buildQuestionSet, detectBusiness, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind } from "./business";
 
 /**
@@ -259,6 +261,7 @@ export interface AuditWork {
     unreadable?: { kind: string; detail: string };
     /** Yönetici tanısı (süreler, başlangıç adresi). */
     diagnostics?: unknown;
+    productFacts?: Array<{ pageUrl: string; facts: ProductFacts }>;
   };
   prompts?: string[];
   /** Soru → tür (keşif/ihtiyaç/bilgi); eski işlerde yok. */
@@ -332,6 +335,11 @@ export async function runAudit(
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
       ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
       diagnostics: crawl.diagnostics ?? null,
+      // Hesaba kaydedilince kataloğa aktarılmak üzere taramada bulunan ürünler (yalnız ürün sayfaları; en çok 30).
+      productFacts: crawl.pages.flatMap((p) => {
+        const f = candidateFacts(p.pageType, p.facts.products);
+        return f ? [{ pageUrl: p.url, facts: f }] : [];
+      }).slice(0, 30),
       ...(crawl.pages.length === 0
         ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll || (crawl.failed.length === 0 && crawl.skippedByRobots > 0) ? { kind: "robots", detail: crawl.robotsDisallowAll ? "robots.txt tüm siteyi kapatıyor" : `robots.txt kuralları incelenecek ${crawl.skippedByRobots} sayfanın hepsini kapatıyor` } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : crawl.truncated ? "incomplete" : "network", detail: crawl.failed[0]?.reason ?? (crawl.truncated ? "Süre sınırında hiç sayfa okunamadı" : "Sayfa alınamadı") }) }
         : {}),
@@ -491,7 +499,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
         competitorCandidates,
         opportunityCount,
         opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),
@@ -522,7 +530,7 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
   if (demoUser !== isDemoDomain(audit.domain)) {
     throw new AppError("forbidden", demoUser ? "Demo hesabı gerçek bir alan adını kaydedemez" : "Örnek (.example) audit gerçek hesaba kaydedilemez");
   }
-  return db.$transaction(async (tx) => {
+  const out = await db.$transaction(async (tx) => {
     const consumed = await tx.audit.updateMany({ where: { id: audit.id, claimedAt: null }, data: { claimedAt: new Date(), claimUserId: userId } });
     if (consumed.count === 0) throw new AppError("conflict", "Bu audit zaten sahiplenildi");
     const summary = (audit.resultSummary ?? {}) as { brandName?: string; prompts?: string[]; crawl?: { categories?: string[] }; competitorCandidates?: Array<{ domain: string }> };
@@ -560,6 +568,12 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
     await tx.auditLog.create({ data: { workspaceId: ws.id, actorId: userId, actorType: "user", scope: "audit", action: "audit.claimed", target: audit.id } });
     return { workspaceId: ws.id, brandId: brand.id, trialStarted: !existingTrial, period: periodKey(now) };
   });
+  // Ücretsiz ölçüm taramasında bulunan, bilgisi tam ürünler kataloğa otomatik eklenir (eksikler eklenmez).
+  const facts = ((audit.resultSummary as { crawl?: { productFacts?: Array<{ pageUrl: string; facts: ProductFacts }> } } | null)?.crawl?.productFacts ?? []);
+  if (facts.length) {
+    await importProductFacts(db, { workspaceId: out.workspaceId, brandId: out.brandId }, facts, { catalogLimit: PLANS.starter.limits.catalogProducts }).catch((e) => log.warn("audit.claim_import_failed", { auditId: audit.id, error: (e as Error).message }));
+  }
+  return out;
 }
 
 const INFO_Q = /(nelere dikkat|farkları|farklar|nedir|nasıl|neden|ne işe yarar)/i;
@@ -604,7 +618,7 @@ export function previewAuditQuestions(audit: { locale: string; resultSummary: un
  * Soru onayı: düzenlenmiş en çok 5 soru doğrulanır, ara duruma yazılır ve yanıt işi kuyruğa alınır. Aynı onay
  * tekrar gönderilirse yeni iş/çağrı oluşmaz (operationId sabit).
  */
-export async function confirmAudit(db: PrismaClient, auditId: string, input: { questions: string[]; businessType?: BusinessProfile["type"] }) {
+export async function confirmAudit(db: PrismaClient, auditId: string, input: { questions: string[]; businessType?: BusinessProfile["type"]; topics?: string[] }) {
   const audit = await db.audit.findUniqueOrThrow({ where: { id: auditId } });
   const sum = audit.resultSummary as ConfirmSummary | null;
   const operationId = `audit:${auditId}:answers`;
@@ -628,6 +642,9 @@ export async function confirmAudit(db: PrismaClient, auditId: string, input: { q
   const cfg = config();
   const demo = demoAudit(audit.domain, cfg);
   const work: AuditWork = { ...sum.pendingWork, prompts: questions, kinds: Object.fromEntries(questions.map((q) => [q, proposedKinds.get(q) ?? questionKind(q)])), engines: auditEngineScope(getAiAdapters(cfg, { demo })).engines, confirmed: true, answers: [] };
+  // Kullanıcının onay ekranında girdiği konular raporda gösterilir (öneriyle farklıysa).
+  const topics = (input.topics ?? []).map((t) => t.trim()).filter((t) => t.length >= 2 && t.length <= 40).slice(0, 2);
+  if (topics.length && work.proposal) work.proposal = { ...work.proposal, topics };
   if (input.businessType && work.proposal) work.proposal = { ...work.proposal, business: { ...work.proposal.business, type: input.businessType, confidence: "high", reasons: [...work.proposal.business.reasons, "Tür kullanıcı tarafından onaylandı"] } };
   const job = await enqueue(db, { type: "audit", operationId, payload: { auditId, phase: "answers" } });
   await db.audit.update({ where: { id: auditId }, data: { stage: "asking_engines", status: "running", progressDone: 3, resultSummary: { phase: "answers", brandName: sum.brandName ?? null, demo: sum.demo ?? false, proposal: (work.proposal ?? null) as unknown as object, pendingWork: work as unknown as object } } });

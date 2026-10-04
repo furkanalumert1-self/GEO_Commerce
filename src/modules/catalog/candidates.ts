@@ -43,9 +43,13 @@ export function normalizeProductUrl(raw: string): string {
 
 /** Aday için yalnız ürün sayfasında, tek ürün bildiren ve adı olan kayıt kabul edilir; kategori listeleri ürün sayılmaz. */
 export function candidateFacts(pageType: string, products: ProductFacts[]): ProductFacts | null {
-  if (pageType !== "product" || products.length !== 1) return null;
-  const p = products[0]!;
-  return p.name ? p : null;
+  if (pageType !== "product") return null;
+  // Aynı ürün şemada birden çok kez yer alabilir (tema + uygulama); tekilleştirilir, en dolu kayıt seçilir.
+  const named = products.filter((x) => x.name);
+  const keys = new Set(named.map((x) => (x.sku ?? x.name!).trim().toLocaleLowerCase("tr-TR")));
+  if (keys.size !== 1) return null;
+  const score = (x: ProductFacts) => [x.price, x.currency, x.availability, x.image, x.sku].filter(Boolean).length;
+  return [...named].sort((a, b) => score(b) - score(a))[0]!;
 }
 
 type Existing = { externalId: string; url: string | null; name: string; variants: Array<{ priceMinor: bigint | null; currency: string | null; available: boolean | null }> };
@@ -130,11 +134,14 @@ export async function previewProductUrl(url: string, brandDomain: string): Promi
   const d = brandDomain.replace(/^www\./, "");
   const host = u.hostname.replace(/^www\./, "");
   if (u.protocol !== "https:" || (host !== d && !host.endsWith(`.${d}`))) throw new AppError("validation_error", `Bağlantı ${d} alan adınızda ve https olmalı`, { fieldErrors: { url: [`${d} alan adında bir https bağlantısı girin`] } });
+  if (u.pathname.replace(/\/+$/, "") === "") return { candidate: null, reason: "Bu adres ana sayfa. Bir ürünün kendi sayfa adresini girin ya da “Siteyi incele ve ürünleri bul” ile ürünleri otomatik bulun." };
   const r = await safeFetch(u.toString(), { sameSiteAs: d, maxBytes: 1_500_000, timeoutMs: 10_000, maxRedirects: 4 });
   if (r.status >= 400) return { candidate: null, reason: `Sayfa açılamadı (HTTP ${r.status})` };
   const facts = extractPage(r.body, r.url);
-  const f = facts.products.length === 1 ? facts.products[0]! : null;
-  if (!f?.name) return { candidate: null, reason: facts.products.length > 1 ? "Bu bir kategori/liste sayfası; tek ürün sayfası girin" : "Sayfada ürün bilgisi (ad ve fiyat/stok/görsel) bulunamadı" };
+  // Aynı ürünün şemada iki kez yer alması (tema + uygulama) liste sayfası sayılmaz.
+  const distinct = [...new Map(facts.products.filter((x) => x.name).map((x) => [(x.sku ?? x.name!).trim().toLocaleLowerCase("tr-TR"), x])).values()];
+  const f = distinct.length === 1 ? distinct[0]! : null;
+  if (!f?.name) return { candidate: null, reason: distinct.length > 1 ? "Bu bir kategori/liste sayfası; tek ürün sayfası girin" : "Sayfada ürün bilgisi (ad ve fiyat/stok/görsel) bulunamadı. Ürün bilgisi sayfaya sonradan (JavaScript ile) yükleniyorsa okunamayabilir." };
   return { candidate: toCandidateBase(r.url, f), reason: null };
 }
 
@@ -169,17 +176,45 @@ export async function importCandidates(db: PrismaClient, ids: { workspaceId: str
     }
     if (c) chosen.push(c);
   }
+  const saved = await saveCandidates(db, ids, chosen, { catalogLimit: opts.catalogLimit });
+  return { ...saved, skipped };
+}
+
+type Candidate = ReturnType<typeof toCandidateBase>;
+
+/** Ad + fiyat + para birimi + stok bilgisi tam aday (otomatik aktarım için yeterli kanıt). */
+export function isCompleteCandidate(c: Candidate): boolean {
+  return Boolean(c.name && c.priceMinor !== null && c.currency && c.available !== null);
+}
+
+/**
+ * Adayları kataloğa yazar (mükerrer: sku/externalId/normalize URL). `fitToLimit`: paket limitini aşan yeni ürünler
+ * hata yerine atlanır (otomatik aktarımda); aksi halde kota hatası döner.
+ */
+export async function saveCandidates(db: PrismaClient, ids: { workspaceId: string; brandId: string }, chosen: Candidate[], opts: { catalogLimit: number; fitToLimit?: boolean }): Promise<{ imported: number; updated: number; overLimit: number }> {
   const existing = await db.product.findMany({ where: { workspaceId: ids.workspaceId, brandId: ids.brandId }, select: { id: true, externalId: true, url: true, connectorId: true, active: true } });
-  const findExisting = (c: ReturnType<typeof toCandidateBase>) => {
+  const findExisting = (c: Candidate) => {
     const key = normalizeProductUrl(c.url);
     return existing.find((e) => (c.sku && e.externalId === c.sku) || e.externalId === c.url || (e.url && normalizeProductUrl(e.url) === key)) ?? null;
   };
-  const newOnes = chosen.filter((c) => !findExisting(c));
   const activeCount = existing.filter((e) => e.active).length;
-  if (activeCount + newOnes.length > opts.catalogLimit) throw new AppError("quota_exceeded", `Ürün limiti aşılıyor: paketiniz ${opts.catalogLimit} ürüne izin veriyor; ${opts.catalogLimit - activeCount} yeni ürün ekleyebilirsiniz`, { limit: opts.catalogLimit, used: activeCount });
+  const room = Math.max(0, opts.catalogLimit - activeCount);
+  let newOnes = chosen.filter((c) => !findExisting(c));
+  let overLimit = 0;
+  if (newOnes.length > room) {
+    if (!opts.fitToLimit) throw new AppError("quota_exceeded", `Ürün limiti aşılıyor: paketiniz ${opts.catalogLimit} ürüne izin veriyor; ${room} yeni ürün ekleyebilirsiniz`, { limit: opts.catalogLimit, used: activeCount });
+    overLimit = newOnes.length - room;
+    const keep = new Set(newOnes.slice(0, room));
+    chosen = chosen.filter((c) => findExisting(c) || keep.has(c));
+    newOnes = newOnes.slice(0, room);
+  }
   let imported = 0;
   let updated = 0;
+  const seen = new Set<string>();
   for (const c of chosen) {
+    const key = normalizeProductUrl(c.url);
+    if (seen.has(key)) continue;
+    seen.add(key);
     const ex = findExisting(c);
     const p: NormalizedProduct = {
       externalId: ex?.externalId ?? c.sku ?? c.url,
@@ -194,7 +229,29 @@ export async function importCandidates(db: PrismaClient, ids: { workspaceId: str
     if (ex) updated++;
     else imported++;
   }
-  return { imported, updated, skipped };
+  return { imported, updated, overLimit };
+}
+
+/**
+ * Taramadan sonra otomatik aktarım: bilgisi tam (ad/fiyat/para birimi/stok) ürün adayları kataloğa doğrudan
+ * eklenir; eksik bilgili adaylar "Bulunan ürün adayları" listesinde incelemeye kalır. Paket limiti aşılmaz.
+ */
+export async function autoImportComplete(db: PrismaClient, ids: { workspaceId: string; brandId: string }, opts: { catalogLimit: number; crawlRunId?: string }) {
+  const snaps = await db.pageSnapshot.findMany({ where: { workspaceId: ids.workspaceId, brandId: ids.brandId, pageType: "product", ...(opts.crawlRunId ? { crawlRunId: opts.crawlRunId } : {}) }, orderBy: { sampledAt: "desc" }, distinct: ["url"], take: 2000, select: { url: true, pageType: true, findings: true } });
+  const chosen: Candidate[] = [];
+  for (const s of snaps) {
+    const f = candidateFacts(s.pageType ?? "other", ((s.findings as { productCandidates?: ProductFacts[] } | null)?.productCandidates ?? []) as ProductFacts[]);
+    if (!f) continue;
+    const c = toCandidateBase(s.url, f);
+    if (isCompleteCandidate(c)) chosen.push(c);
+  }
+  return saveCandidates(db, ids, chosen, { catalogLimit: opts.catalogLimit, fitToLimit: true });
+}
+
+/** Ücretsiz ölçüm taramasında bulunan ürünler (hesaba kaydedilince): yalnız tam bilgili olanlar aktarılır. */
+export async function importProductFacts(db: PrismaClient, ids: { workspaceId: string; brandId: string }, items: Array<{ pageUrl: string; facts: ProductFacts }>, opts: { catalogLimit: number }) {
+  const chosen = items.filter((x) => x.facts.name).map((x) => toCandidateBase(x.pageUrl, x.facts)).filter(isCompleteCandidate);
+  return saveCandidates(db, ids, chosen, { catalogLimit: opts.catalogLimit, fitToLimit: true });
 }
 
 /** Yalnız dolu alanları yazar (boş/belirsiz alan mevcut veriyi ezmez). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { importCandidates, listCandidates } from "@/modules/catalog/candidates";
+import { autoImportComplete, importCandidates, importProductFacts, listCandidates, previewProductUrl } from "@/modules/catalog/candidates";
 import { persistCrawl } from "@/modules/catalog/service";
 import type { CrawlResult } from "@/modules/audit/crawler";
 import { extractPage } from "@/modules/audit/html";
@@ -53,5 +53,40 @@ describe("ürün keşfi → onaylı aktarım", () => {
     expect(after.variants[0]!.priceMinor).toBe(89900n);
     expect(await db.product.count({ where: { brandId: other.brand.id } })).toBe(0);
     await expect(importCandidates(db, { workspaceId: t.ws.id, brandId: t.brand.id }, [`${d}/yeni`], { brandDomain: t.brand.domain, catalogLimit: 1 })).rejects.toMatchObject({ code: "quota_exceeded" });
+  });
+});
+
+describe("otomatik aktarım", () => {
+  it("taramadan sonra bilgisi tam ürünler kataloğa eklenir, eksikler aday kalır; tekrar mükerrer oluşturmaz; limit aşılmaz", async () => {
+    const t = await makeTenant("commerce");
+    const d = `https://${t.brand.domain}`;
+    // Aynı ürün şemada iki kez (tema + uygulama) yer alsa da tek ürün sayılır.
+    await crawlWith(t, [
+      { url: `${d}/products/kase`, html: ld("Kase", "250", "K1") + ld("Kase", "250", "K1"), pageType: "product" },
+      { url: `${d}/products/tabak`, html: ld("Tabak", "300", "T1"), pageType: "product" },
+      { url: `${d}/products/yastik`, html: ld("Yastık", null, "Y2"), pageType: "product" },
+    ]);
+    const ids = { workspaceId: t.ws.id, brandId: t.brand.id };
+    expect(await autoImportComplete(db, ids, { catalogLimit: 500 })).toMatchObject({ imported: 2, overLimit: 0 });
+    expect((await db.product.findMany({ where: { brandId: t.brand.id }, select: { name: true } })).map((p) => p.name).sort()).toEqual(["Kase", "Tabak"]);
+    const list = await listCandidates(db, ids);
+    expect(list.candidates.find((c) => c.name === "Yastık")?.status).toBe("incomplete");
+    expect(await autoImportComplete(db, ids, { catalogLimit: 500 })).toMatchObject({ imported: 0, updated: 2 });
+    expect(await db.product.count({ where: { brandId: t.brand.id } })).toBe(2);
+  });
+
+  it("ücretsiz ölçüm ürünleri hesaba kaydedilince aktarılır; paket limiti aşılmaz", async () => {
+    const t = await makeTenant("commerce");
+    const d = `https://${t.brand.domain}`;
+    const facts = (name: string, price: string | null) => ({ name, description: null, category: null, price, currency: "TRY", availability: "InStock", sku: null, image: null, url: null });
+    const r = await importProductFacts(db, { workspaceId: t.ws.id, brandId: t.brand.id }, [{ pageUrl: `${d}/a`, facts: facts("A", "10") }, { pageUrl: `${d}/b`, facts: facts("B", "20") }, { pageUrl: `${d}/c`, facts: facts("C", null) }], { catalogLimit: 1 });
+    expect(r).toMatchObject({ imported: 1, overLimit: 1 });
+    expect(await db.product.count({ where: { brandId: t.brand.id } })).toBe(1);
+  });
+
+  it("ana sayfa adresi girilirse açık yönlendirme verilir (istek atılmadan)", async () => {
+    const r = await previewProductUrl("https://www.chakra.com.tr/", "chakra.com.tr");
+    expect(r.candidate).toBeNull();
+    expect(r.reason).toMatch(/ana sayfa/);
   });
 });

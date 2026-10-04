@@ -7,6 +7,7 @@ import { platformAdminEmail } from "@/lib/platform-admin";
 
 const body = z.object({
   questions: z.array(z.string().max(300)).min(1).max(5),
+  topics: z.array(z.string().trim().max(40)).max(2).optional(),
   businessType: z.enum(["manufacturer", "retailer", "brand_store", "marketplace", "service", "saas", "service_saas", "unknown"]).optional(),
 });
 

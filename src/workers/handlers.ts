@@ -1,3 +1,5 @@
+import { log } from "@/lib/observability/log";
+import { autoImportComplete } from "@/modules/catalog/candidates";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { runAudit, type AuditWork } from "@/modules/audit/service";
 import { INLINE_AUDIT_CRAWL_PAGES, INLINE_CALL_TIMEOUT_MS, INLINE_CRAWL_MAX_PAGES } from "@/lib/queue/inline";
@@ -90,6 +92,10 @@ export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult
       previous: new Map(prev.map((p) => [p.url, { etag: p.etag, contentHash: p.contentHash ?? "" }])),
     });
     await persistCrawl(ctx.db, { workspaceId: run.workspaceId, brandId: run.brandId, crawlRunId }, crawl);
+    // Bilgisi tam ürünler kataloğa otomatik eklenir (önceki davranış); eksikler aday listesinde incelemeye kalır.
+    const sub = await ctx.db.subscription.findUnique({ where: { workspaceId: run.workspaceId } });
+    const auto = await autoImportComplete(ctx.db, { workspaceId: run.workspaceId, brandId: run.brandId }, { catalogLimit: resolveEntitlements(sub ? { planKey: sub.planKey as PlanKey, status: sub.status, pastDueSince: sub.pastDueSince, overrideLimits: sub.overrideLimits as never, overrideExpiresAt: sub.overrideExpiresAt } : null).catalogProducts, crawlRunId });
+    log.info("crawl.auto_import", { crawlRunId, ...auto });
     return stepMode && (crawl.truncated || maxPages > INLINE_CRAWL_MAX_PAGES) ? "partial" : "done";
   },
 

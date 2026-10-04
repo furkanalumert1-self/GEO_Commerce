@@ -92,8 +92,8 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
             title="Bulunan ürün adayları"
             description={
               discovery.lastCrawlAt
-                ? `Son inceleme: ${fmtNumber(discovery.pagesRead)} sayfa okundu${discovery.pagesFailed ? `, ${fmtNumber(discovery.pagesFailed)} sayfa erişilemedi` : ""}; ${fmtNumber(discovery.candidates.length)} ürün adayı bulundu, ${fmtNumber(importedCount)} aktarıldı, ${fmtNumber(reviewCount)} inceleme bekliyor.${discovery.truncated ? " Tüm mağaza taranmadı (sayfa/süre sınırı); incelemeyi tekrar başlatarak devam edebilirsiniz." : ""} Katalog onayınız olmadan değişmez; sitenize hiçbir şey yazılmaz.`
-                : "Siteyi incelediğimizde ürün sayfalarınızı bulup burada listeleriz; seçtiklerinizi kataloğa eklersiniz."
+                ? `Son inceleme: ${fmtNumber(discovery.pagesRead)} sayfa okundu${discovery.pagesFailed ? `, ${fmtNumber(discovery.pagesFailed)} sayfa erişilemedi` : ""}; ${fmtNumber(discovery.candidates.length)} ürün adayı bulundu, ${fmtNumber(importedCount)} aktarıldı, ${fmtNumber(reviewCount)} inceleme bekliyor.${discovery.truncated ? " Tüm mağaza taranmadı (sayfa/süre sınırı); incelemeyi tekrar başlatarak devam edebilirsiniz." : ""} Bilgisi tam ürünler otomatik eklenir, eksikler onayınızı bekler; sitenize hiçbir şey yazılmaz.`
+                : "Siteyi incelediğimizde adı, fiyatı ve stok bilgisi tam olan ürünler kataloğa otomatik eklenir; bilgisi eksik olanlar burada onayınızı bekler."
             }
           />
           <ProductCandidates api={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/catalog/candidates`} candidates={pending.concat(discovery.candidates.filter((c) => c.status === "imported").slice(0, 20))} returnHref={returnHref} />

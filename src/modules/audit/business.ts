@@ -233,19 +233,19 @@ export function buildQuestionSet(profile: Pick<BusinessProfile, "type" | "offeri
     case "manufacturer":
       list = [
         q(`${place}en iyi ${A} markaları hangileri?`, "discovery", a),
-        q(`${capTr(B)} için hangi markaları önerirsin?`, "discovery", b),
-        q(`${place}kaliteli ve uzun ömürlü ${A} arıyorum, hangi markaları değerlendirmeliyim?`, "need", a),
-        q(`${capTr(B)} için fiyat/performans açısından hangi markalar öne çıkıyor?`, "need", b),
-        q(`${capTr(A)} türleri arasındaki farklar nelerdir?`, "info", a),
+        q(a !== b ? `${capTr(BG)} için hangi markaları önerirsin?` : `${capTr(AG)} alacağım; hangi markaları karşılaştırmalıyım?`, "discovery", b),
+        q(`${place}kaliteli ve uzun ömürlü ${AG} arıyorum, hangi markaları değerlendirmeliyim?`, "need", a),
+        q(`${capTr(BG)} için fiyat/performans açısından hangi markalar öne çıkıyor?`, "need", b),
+        q(`${capTr(AG)} seçerken nelere dikkat etmeliyim?`, "info", a),
       ];
       break;
     case "brand_store":
     case "unknown":
       list = [
         q(`${place}${AG} satın alabileceğim online mağazalar hangileri?`, "discovery", a),
-        q(`${capTr(B)} için hangi markaları önerirsin?`, "discovery", b),
+        q(`${capTr(BG)} için hangi markaları önerirsin?`, "discovery", b),
         q(`${place}uygun fiyatlı ve kaliteli ${AG} için nereden alışveriş yapabilirim?`, "need", a),
-        q(`${place}kaliteli ve güvenilir ${B} arıyorum, hangi markaları değerlendirmeliyim?`, "need", b),
+        q(`${place}kaliteli ve güvenilir ${BG} arıyorum, hangi markaları değerlendirmeliyim?`, "need", b),
         q(`${capTr(AG)} seçerken nelere dikkat etmeliyim?`, "info", a),
       ];
       break;
@@ -307,7 +307,7 @@ export function representativeTopics(terms: string[], pages: Page[], max = 2): s
 }
 
 const GENERIC_SEGMENT = new Set(["products", "product", "urun", "urunler", "p", "collections", "kategori", "category", "c", "tr", "en"]);
-const JUNK_TOPIC = /^(products?|all|tümü|tüm ürünler|ürünler|koleksiyon|collection|anasayfa|ana sayfa|kampanya.*|indirim.*|outlet|yeni.*|çok satan.*)$/i;
+const JUNK_TOPIC = /^(products?|all|tümü|tüm ürünler|ürünler|koleksiyon|collection|anasayfa|ana sayfa|kampanya.*|indirim.*|outlet|yeni.*|çok satan.*|.*rehberi?|.*guide|blog|ilham.*|trend.*|fırsat.*|hediye( fikirleri)?|marka(lar)?|mağaza(lar)?|stores?)$/i;
 const ENGLISH_HINT = /\b(and|for|the|with|treatments?|serums?|shampoos?|hair|loss|acids?|products?|collection|care|face|skin|body|men|women|kids|home|kitchen)\b/i;
 
 /** "Collection: Saç Bakımı" → "Saç Bakımı"; gürültü ve (Türkçe sitede) İngilizce ürün tipi etiketleri elenir. */

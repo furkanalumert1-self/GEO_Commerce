@@ -90,7 +90,7 @@ export function ProductCandidates({ api, candidates, returnHref }: { api: string
         </div>
       ) : null}
       {rows.length === 0 ? (
-        <p className="px-5 pb-2 text-sm text-text-secondary sm:px-6">Henüz ürün adayı yok. Siteyi inceleyin, ürün bağlantısı ekleyin veya ürün dosyası yükleyin.</p>
+        <p className="px-5 pb-2 text-sm text-text-secondary sm:px-6">Henüz ürün adayı yok. “Siteyi incele ve ürünleri bul” ile ürünleri otomatik bulun, tek bir ürün sayfasının adresini ekleyin veya ürün dosyası yükleyin.</p>
       ) : (
         <ul className="divide-y divide-border border-y border-border" aria-label="Ürün adayları">
           {rows.map((c) => {

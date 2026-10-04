@@ -29,13 +29,14 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
       </>
     );
   }
-  const [accounts, plan, brandRow, categories, products, pages] = await Promise.all([
+  const [accounts, plan, brandRow, categories, products, pages, activeProducts] = await Promise.all([
     db.adsAccount.findMany({ where: { brandId, workspaceId }, select: { provider: true, accessStatus: true } }),
     buildChatgptAdsPlan(db, { workspaceId, brandId }),
     db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { name: true, domain: true, country: true, categories: true } }),
     db.category.findMany({ where: { brandId, url: { not: null } }, select: { name: true, url: true } }),
     db.product.findMany({ where: { brandId, active: true, url: { not: null } }, select: { name: true, url: true, categories: { select: { category: { select: { name: true } } } } }, take: 300 }),
     db.pageSnapshot.findMany({ where: { brandId, pageType: "product" }, select: { findings: true }, take: 200 }),
+    db.product.count({ where: { brandId, workspaceId, active: true } }),
   ]);
   const norm = (s: string) => s.trim().toLocaleLowerCase("tr-TR");
   const home = `https://${brandRow.domain.replace(/^www\./, "")}/`;
@@ -44,12 +45,13 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     const catPage = categories.find((c) => norm(c.name) === cat);
     const word = cat.split(/\s+/).filter((w) => w.length > 3).pop();
     const prods = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (word ? norm(p.name).includes(word.slice(0, Math.max(4, word.length - 2))) : false)).slice(0, 3);
-    const targets = [
-      ...(catPage?.url ? [{ url: catPage.url, label: `Kategori sayfası · ${catPage.url.replace(/^https?:\/\//, "")}` }] : []),
-      ...prods.map((p) => ({ url: p.url!, label: `Ürün · ${p.name}` })),
-      { url: home, label: `Ana sayfa · ${home.replace(/^https?:\/\//, "")}` },
+    // Hedef sayfalar yalnız gerçek kayıtlardan (kategori/ürün); uydurma URL yok. Ana sayfa varsayılan seçili değil.
+    const targets: FlowGroup["targets"] = [
+      ...(catPage?.url ? [{ url: catPage.url, label: `Kategori sayfası · ${catPage.url.replace(/^https?:\/\//, "")}`, kind: "category" as const }] : []),
+      ...prods.map((p) => ({ url: p.url!, label: `Ürün · ${p.name}`, kind: "product" as const })),
+      { url: home, label: `Ana sayfa · ${home.replace(/^https?:\/\//, "")}`, kind: "home" as const },
     ];
-    return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, copy: g.copies[0] ?? null, targets };
+    return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, promptStats: g.promptStats, copy: g.copies[0] ?? null, targets };
   });
   const activeAccount = accounts.find((a) => a.accessStatus === "active");
   const status = activeAccount
@@ -80,7 +82,7 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
 
       {tab === "chatgpt" ? (
         <div className="flex flex-col gap-6">
-          <AdsPlanFlow groups={groups} brandName={brandRow.name} domain={brandRow.domain.replace(/^www\./, "")} days={plan.sample.days} initialGroup={sp.group} />
+          <AdsPlanFlow groups={groups} brandName={brandRow.name} domain={brandRow.domain.replace(/^www\./, "")} days={plan.sample.days} initialGroup={sp.group} catalogEmpty={activeProducts === 0} />
           <details className="rounded-[var(--radius-lg)] border border-border bg-surface px-5 py-3 text-sm">
             <summary className="min-h-9 cursor-pointer py-1 font-medium text-primary">Hazırlık kontrolleri</summary>
             <ul className="mt-2 flex flex-col gap-2">

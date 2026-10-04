@@ -81,10 +81,10 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           {step === 2 ? <BrandSettingsStep url={`${api}/onboarding`} initial={{ country: brand.country, language: brand.language, timezone: brand.timezone, currency: brand.currency, aliases: brand.aliases.join(", "), categories: brand.categories.join(", ") }} /> : null}
           {step === 3 ? (
             <div className="flex flex-col gap-3">
-              <p>{pages} sayfa ve {products} ürün keşfedildi. Hatalı veya hariç tutulacak URL&apos;leri katalogda düzeltin.</p>
+              <p>{pages} sayfa okundu, katalogda {products} ürün var. Site incelemesi ürün adaylarını bulur; seçtiklerinizi Ürünlerim sayfasında onaylayarak kataloğa eklersiniz (onaysız eklenmez).</p>
               <div className="flex flex-wrap gap-2">
-                <JobStartButton url={`${api}/crawls`} body={{ maxPages: 50 }} label="Siteyi tara" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />
-                <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog`}>Kataloğu incele</Link>
+                <JobStartButton url={`${api}/crawls`} body={{ maxPages: 50 }} label="Siteyi incele ve ürünleri bul" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />
+                <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog#adaylar`}>Bulunan ürünleri incele</Link>
               </div>
             </div>
           ) : null}
@@ -102,7 +102,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           {step === 5 && picker ? (
             <div className="flex flex-col gap-3">
               <p className="text-text-secondary">Müşterilerinizin AI asistanlarına sorabileceği soruları seçin. Ölçüm bu sorularla yapılır; reklam bütçesiyle ilgisi yoktur.</p>
-              <QuestionPicker data={picker} api={api} nextHint="Sıradaki adım: İlk ölçüm." />
+              <QuestionPicker data={picker} api={api} nextHint="Sıradaki adım: İlk ölçüm." manageHref={`/w/${workspaceId}/b/${brandId}/prompts#takip`} />
               <Link className="text-sm text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Tüm takip ettiğim soruları gör</Link>
             </div>
           ) : null}

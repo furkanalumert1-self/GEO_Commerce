@@ -124,3 +124,25 @@ describe("yanıt metni durumu", () => {
     expect(rawTextNote({ status: "succeeded", rawText: "x", sampledAt: now }, now)).toBeNull();
   });
 });
+
+describe("kayıtlı metinlerin gösterimi", () => {
+  it("eski teknik terimler güncel dille gösterilir", async () => {
+    const { plainStoredText } = await import("@/lib/format");
+    expect(plainStoredText("Bu niyet için hedef sayfaya soru-cevap odaklı içerik bloğu ekleyin")).toBe("Bu soru grubu için hedef sayfaya soru-cevap odaklı içerik bloğu ekleyin");
+    expect(plainStoredText("Rakibi destekleyen üçüncü taraf kaynaklarda marka görünürlüğü için outreach görevi oluşturun")).toMatch(/^İnceleme gerekli/);
+    expect(plainStoredText(null)).toBeNull();
+  });
+});
+
+describe("sıradaki adım", () => {
+  it("ana akış sırasını izler", async () => {
+    const { nextStep } = await import("@/lib/view-models");
+    const base = { productCount: 5, pendingCandidates: 0, promptCount: 3, hasRun: true, continuing: null, topOpportunity: null };
+    expect(nextStep({ ...base, productCount: 0, pendingCandidates: 38 }).title).toMatch(/38 ürünü/);
+    expect(nextStep({ ...base, productCount: 0 }).cta).toBe("Ürünleri bul");
+    expect(nextStep({ ...base, promptCount: 0 }).href).toBe("/prompts");
+    expect(nextStep({ ...base, hasRun: false }).href).toBe("/prompts#olcum");
+    expect(nextStep({ ...base, continuing: { title: "A", href: "/actions/1" }, topOpportunity: { title: "B", href: "/opportunities/2" } }).cta).toBe("Devam et");
+    expect(nextStep({ ...base, topOpportunity: { title: "B", href: "/opportunities/2" } }).cta).toBe("Başla");
+  });
+});

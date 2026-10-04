@@ -50,7 +50,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
   return (
     <div className="flex flex-col gap-3">
       <fieldset>
-        <legend className="text-sm font-medium">Motorlar</legend>
+        <legend className="text-sm font-medium">Platformlar</legend>
         <ul className="mt-2 flex flex-col gap-2">
           {engines.map((e) => {
             const ok = (e.status === "ready" || e.status === "demo") && e.inPlan;
@@ -66,14 +66,17 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
           })}
         </ul>
       </fieldset>
-      <label className="flex flex-col gap-1 text-sm">
-        <span>Tekrar sayısı</span>
+      <details className="text-sm">
+        <summary className="min-h-9 cursor-pointer py-1 text-primary">İleri ayarlar</summary>
+      <label className="mt-1 flex flex-col gap-1 text-sm">
+        <span>Tekrar sayısı (her soru her platformda kaç kez sorulsun)</span>
         <input type="number" min={1} max={5} value={repeats} onChange={(e) => setRepeats(Math.max(1, Math.min(5, Number(e.target.value) || 1)))} className="min-h-11 w-24 rounded-md border border-border px-2 sm:min-h-9" />
       </label>
+      </details>
       {preview ? (
         <div className="rounded-md border border-border bg-bg p-3 text-sm" aria-live="polite">
           <p className="tabular">
-            Talep: {preview.unitsRequested} unit · Planlanan: {preview.unitsPlanned} unit · Kalan kota: {preview.available}
+            Planlanan: {preview.unitsPlanned} yanıt (istenen {preview.unitsRequested}) · Kalan ölçüm hakkı: {preview.available}
           </p>
           {!preview.fits ? <p className="mt-1 text-warning">Kota yetmediği için {preview.promptCount} soru ölçülecek (%{Math.round(preview.sampledFraction * 100)}); kalanlar sonraki turlarda döndürülür.</p> : null}
         </div>

@@ -15,16 +15,18 @@ describe("ürün grubu → soru seçimi verisi", () => {
 
   it("takipteki ve arşivdeki sorular kendi kimlikleriyle ayrılır", () => {
     const g = groups.find((x) => x.key === "c1")!;
-    expect(g.tracked).toEqual([{ id: "p1", text: "Türkiye'de en iyi bebek yatağı markaları hangileri?" }]);
+    expect(g.tracked).toEqual([{ id: "p1", text: "Türkiye'de en iyi bebek yatağı markaları hangileri?", purpose: "Marka keşfi" }]);
     expect(g.archived.map((q) => q.id)).toEqual(["p2"]);
   });
 
   it("öneriler yalnız grubun ürünüyle ilgilidir ve mevcut sorular tekrar önerilmez", () => {
     const g = groups.find((x) => x.key === "c1")!;
-    expect(g.suggested.length).toBeGreaterThan(0);
-    expect(g.suggested.every((q) => q.id === null && /bebek yatağı/i.test(q.text))).toBe(true);
-    expect(g.suggested.some((q) => q.text === g.tracked[0]!.text)).toBe(false);
-    expect(groups.find((x) => x.key === "c2")!.suggested.every((q) => /yastık/i.test(q.text) && !/bebek/i.test(q.text))).toBe(true);
+    const all = [...g.suggested, ...g.needsEdit];
+    expect(all.length).toBeGreaterThan(0);
+    expect(all.every((q) => q.id === null && /bebek yatağı/i.test(q.text))).toBe(true);
+    expect(all.some((q) => q.text === g.tracked[0]!.text)).toBe(false);
+    const y = groups.find((x) => x.key === "c2")!;
+    expect([...y.suggested, ...y.needsEdit].every((q) => /yastık/i.test(q.text) && !/bebek/i.test(q.text))).toBe(true);
   });
 
   it("soru grubu olmayan ürün kategorisi seçilebilir grup olur; mevcut grupla çakışan eklenmez", () => {

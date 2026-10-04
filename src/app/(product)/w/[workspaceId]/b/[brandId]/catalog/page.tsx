@@ -9,6 +9,8 @@ import { pageBrand } from "@/lib/page-access";
 import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { JobStartButton } from "@/components/forms/job-start-button";
 import { executionMode } from "@/lib/queue";
+import { ProductCandidates } from "@/components/forms/product-candidates";
+import { listCandidates, normalizeProductUrl } from "@/modules/catalog/candidates";
 
 export const metadata: Metadata = { title: "Ürünlerim" };
 
@@ -42,12 +44,19 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
     db.pageSnapshot.count({ where: { brandId, pageType: "product" } }),
     db.product.count({ where: { brandId, workspaceId } }),
   ]);
+  const discovery = await listCandidates(db, { workspaceId, brandId });
+  const pending = discovery.candidates.filter((c) => c.status !== "imported");
+  const importedCount = discovery.candidates.length - pending.length;
+  const reviewCount = discovery.candidates.filter((c) => c.status === "incomplete" || c.status === "review").length;
+  // Yarım kalan işe dönüş yalnız uygulama içi yoldan (açık yönlendirme yok).
+  const returnHref = sp.return && /^\/w\/[0-9a-f-]{36}\/b\/[0-9a-f-]{36}\//.test(sp.return) ? sp.return : null;
+  const importedUrls = new Set((await db.product.findMany({ where: { brandId, workspaceId, url: { not: null } }, select: { url: true }, take: 5000 })).map((p) => normalizeProductUrl(p.url!)));
   // "Tarandı ama ürün yok": nedeni sayfa türünden söylenir; çözüm yeniden tarama değil, ürün dosyası/mağaza bağlantısıdır.
   const emptyReason =
-    activeProducts > 0 || pageTotal === 0
+    activeProducts > 0 || pageTotal === 0 || discovery.candidates.length > 0
       ? null
       : productPageCount === 0
-        ? `${fmtNumber(pageTotal)} sayfa incelendi ancak hiçbiri ürün sayfası olarak tanınmadı. Ürün sayfalarınızda ürün bilgisi işaretlemesi (ad, fiyat, stok) olmayabilir veya ürün sayfaları ilk incelenen sayfalar arasına girmemiş olabilir.`
+        ? `${fmtNumber(pageTotal)} sayfa incelendi ancak hiçbiri ürün sayfası olarak tanınmadı. Ürün sayfalarınızda ürün bilgisi işaretlemesi (ad, fiyat, stok) olmayabilir veya ürün sayfaları ilk incelenen sayfalar arasına girmemiş olabilir. Yeni incelemede ürün sayfaları önceliklidir.`
         : `${fmtNumber(productPageCount)} ürün sayfası bulundu ancak ürün adı/fiyatı okunamadı (sayfalarda ürün bilgisi işaretlemesi eksik).`;
 
   const tabLink = (t: string, label: string) => (
@@ -61,7 +70,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
       <PageHeader
         title="Ürünlerim"
         description={`Taslaklarda kullanılan ürün bilgileri. Son site incelemesi: ${lastCrawl ? fmtDate(lastCrawl.finishedAt ?? lastCrawl.createdAt, access.brand.timezone, "tr-TR", true) : "henüz yok"}.`}
-        action={<JobStartButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} label="Siteyi yeniden incele" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />}
+        action={<JobStartButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} label="Siteyi incele ve ürünleri bul" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />}
       />
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         {integrations.map((i) => (
@@ -73,9 +82,22 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
       {emptyReason ? (
         <div className="mb-4">
           <Alert tone="warning" title="Ürün bulunamadı">
-            {emptyReason} Siteyi yeniden incelemek bunu genelde değiştirmez. <a className="font-medium text-primary underline" href="#urun-aktar">Ürün dosyanızı yükleyin</a> veya mağazanızı <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations`}>bağlayın</Link>.
+            {emptyReason} <a className="font-medium text-primary underline" href="#adaylar">Ürün bağlantısı ekleyin</a>, <a className="font-medium text-primary underline" href="#urun-aktar">ürün dosyanızı yükleyin</a> veya mağazanızı <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations`}>bağlayın</Link>.
           </Alert>
         </div>
+      ) : null}
+      {discovery.candidates.length > 0 || activeProducts === 0 ? (
+        <Card className="mb-6" id="adaylar">
+          <CardHeader
+            title="Bulunan ürün adayları"
+            description={
+              discovery.lastCrawlAt
+                ? `Son inceleme: ${fmtNumber(discovery.pagesRead)} sayfa okundu${discovery.pagesFailed ? `, ${fmtNumber(discovery.pagesFailed)} sayfa erişilemedi` : ""}; ${fmtNumber(discovery.candidates.length)} ürün adayı bulundu, ${fmtNumber(importedCount)} aktarıldı, ${fmtNumber(reviewCount)} inceleme bekliyor.${discovery.truncated ? " Tüm mağaza taranmadı (sayfa/süre sınırı); incelemeyi tekrar başlatarak devam edebilirsiniz." : ""} Katalog onayınız olmadan değişmez; sitenize hiçbir şey yazılmaz.`
+                : "Siteyi incelediğimizde ürün sayfalarınızı bulup burada listeleriz; seçtiklerinizi kataloğa eklersiniz."
+            }
+          />
+          <ProductCandidates api={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/catalog/candidates`} candidates={pending.concat(discovery.candidates.filter((c) => c.status === "imported").slice(0, 20))} returnHref={returnHref} />
+        </Card>
       ) : null}
       <Card>
         <div className="flex flex-wrap gap-1 border-b border-border px-2" role="tablist" aria-label="Katalog görünümü">
@@ -163,21 +185,24 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
                 <tr>
                   <Th>Sayfa</Th>
                   <Th>Tür</Th>
-                  <Th>Ürün bilgisi işaretlemesi</Th>
+                  <Th>Yapılandırılmış veri</Th>
                   <Th>Durum</Th>
                   <Th>Örnekleme</Th>
                 </tr>
               </thead>
               <tbody>
                 {pages.map((p) => {
-                  const f = p.findings as { productComplete?: boolean | null; noindex?: boolean } | null;
+                  const f = p.findings as { productComplete?: boolean | null; noindex?: boolean; productCandidates?: Array<{ url?: string | null; price?: string | null }> } | null;
+                  const cand = f?.productCandidates?.[0];
+                  const pageState = p.excluded ? "Hariç" : cand ? (importedUrls.has(normalizeProductUrl(cand.url ?? p.url)) || importedUrls.has(normalizeProductUrl(p.url)) ? "Aktarıldı" : !cand.price ? "Bilgi eksik" : "Ürün adayı bulundu") : "Sayfa okundu";
                   return (
                     <tr key={p.id}>
                       <Td className="max-w-[28rem] truncate" title={p.url}>{p.url}</Td>
                       <Td>{p.pageType ?? "—"}</Td>
                       <Td className="text-muted">{p.schemaTypes.join(", ") || "—"}</Td>
                       <Td>
-                        {p.excluded ? <Badge>Hariç</Badge> : f?.noindex ? <Badge tone="danger">Arama motorlarına kapalı</Badge> : f?.productComplete === false ? <Badge tone="warning">Fiyat/stok bilgisi eksik</Badge> : <Badge tone="success">Sorun yok</Badge>}
+                        <Badge tone={pageState === "Aktarıldı" ? "success" : pageState === "Ürün adayı bulundu" ? "primary" : pageState === "Bilgi eksik" ? "warning" : "neutral"}>{pageState}</Badge>
+                        {f?.noindex ? <span className="ml-1 text-xs text-danger">arama motorlarına kapalı</span> : null}
                       </Td>
                       <Td className="text-muted">{fmtDate(p.sampledAt, access.brand.timezone)}</Td>
                     </tr>

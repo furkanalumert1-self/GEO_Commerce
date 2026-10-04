@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Badge, Card, CardHeader, EmptyState, PageHeader, TableWrap, Td, Th, cn } from "@/components/ui";
 import { ApiButton } from "@/components/forms/api-button";
 import { QuestionPicker } from "@/components/forms/question-picker";
+import { PromptEdit } from "@/components/forms/prompt-edit";
 import { RunPlanner } from "@/components/forms/run-planner";
 import { Pager, pageParams } from "@/components/data/pager";
 import { db } from "@/lib/db";
@@ -57,7 +58,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
           <div className="px-5 pb-5 sm:px-6"><QuestionPicker data={picker} api={api} nextHint="Ölçümü aşağıdaki “Ölçüm başlat” bölümünden başlatabilirsiniz." /></div>
         </Card>
       ) : null}
-      <Card>
+      <Card id="takip">
         <CardHeader title={show === "archived" ? "Arşivdeki sorular" : "Takip edilen sorular"} description={show === "archived" ? "Arşiv geçmiş ölçümleri silmez. Geri aldığınız soru, etkinleştirilene kadar ölçülmez." : undefined} />
         {prompts.length === 0 ? (
           <EmptyState title={show === "archived" ? "Arşivde soru yok" : "Henüz soru yok"} description={show === "archived" ? "Arşivlediğiniz sorular burada görünür." : "Yukarıdan ürün grubu seçip soruları işaretleyin."} />
@@ -85,7 +86,10 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
                       ) : !p.active ? (
                         <ApiButton url={`${api}/prompts/${p.id}`} method="PATCH" body={{ active: true }} label="Takibe al" />
                       ) : (
-                        <ApiButton url={`${api}/prompts/${p.id}`} method="PATCH" body={{ archived: true }} label="Arşivle" confirm="Soru arşivlensin mi? Geçmiş ölçümler korunur." />
+                        <div className="flex flex-wrap items-start gap-1">
+                          <PromptEdit url={`${api}/prompts/${p.id}`} text={v?.text ?? ""} />
+                          <ApiButton url={`${api}/prompts/${p.id}`} method="PATCH" body={{ archived: true }} variant="ghost" label="İlgisiz" confirm="Bu soru ürünlerinizle ilgili değil mi? Soru arşivlenir; geçmiş ölçümler korunur ve kotada yer açılır." />
+                        </div>
                       )}
                     </Td>
                   </tr>

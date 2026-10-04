@@ -224,3 +224,32 @@ export function rawTextNote(o: { status: string; rawText: string | null; sampled
   if (ageDays > RAW_TEXT_RETENTION_DAYS) return `Yanıt metni saklama süresi (${RAW_TEXT_RETENTION_DAYS} gün) dolduğu için silindi; ölçüm sonuçları korunur.`;
   return "Bu yanıtın metni saklanmadı; ölçüm sonuçları korunur.";
 }
+
+// ── Sıradaki adım (Genel Bakış) ────────────────────────────────────────────
+
+export interface NextStepInput {
+  productCount: number;
+  pendingCandidates: number;
+  promptCount: number;
+  hasRun: boolean;
+  continuing: { title: string; href: string } | null;
+  topOpportunity: { title: string; href: string } | null;
+}
+
+export interface NextStep {
+  title: string;
+  reason: string;
+  cta: string;
+  href: string; // base'e göre göreli yol ("/catalog#adaylar" gibi)
+}
+
+/** Ana akış sırası: Ürünler → Sorular → Ölçüm → Öneri/Taslak. Her durumda tek ana eylem. */
+export function nextStep(i: NextStepInput): NextStep {
+  if (i.productCount === 0 && i.pendingCandidates > 0) return { title: `Bulunan ${i.pendingCandidates} ürünü kontrol edip kataloğa ekleyin`, reason: "Ürün bilgisi olmadan içerik önerileri hazırlanamıyor.", cta: "Ürünleri incele", href: "/catalog#adaylar" };
+  if (i.productCount === 0) return { title: "Ürün bilgilerinizi tamamlayın", reason: "Sitenizi inceleyip ürünlerinizi bulalım; onayladıklarınız kataloğa eklenir.", cta: "Ürünleri bul", href: "/catalog#adaylar" };
+  if (i.promptCount === 0) return { title: "Takip edeceğiniz soruları seçin", reason: "Müşterilerinizin AI'a sorabileceği soruları seçin; ölçüm bu sorularla yapılır.", cta: "Soruları seç", href: "/prompts" };
+  if (!i.hasRun) return { title: "İlk ölçümü başlatın", reason: "Seçtiğiniz sorulara AI yanıtlarını toplayıp markanızın görünürlüğünü ölçelim.", cta: "Ölçümü planla", href: "/prompts#olcum" };
+  if (i.continuing) return { title: `Taslağı tamamlayın: ${i.continuing.title}`, reason: "Yarım kalan bir içerik taslağınız var.", cta: "Devam et", href: i.continuing.href };
+  if (i.topOpportunity) return { title: `İlk öneriyi inceleyin: ${i.topOpportunity.title}`, reason: "Rakiplerin öne çıktığı ve kanıtı en güçlü soru grubu.", cta: "Başla", href: i.topOpportunity.href };
+  return { title: "Yeni ölçüm başlatın", reason: "Şu an açık öneri yok; yeni ölçüm güncel durumu gösterir.", cta: "Ölçümü planla", href: "/prompts#olcum" };
+}

@@ -34,6 +34,22 @@ export interface CrawlResult {
   truncated: boolean;
   /** Ana sayfa aynı markanın başka alan adına yönlendirdiyse (avonni.com → avonni.com.tr) asıl girilen alan adı. */
   redirectedFrom?: string;
+  /** www'suz adres bağlantı/SSL hatası verdiği için tarama www adresiyle yapıldı. */
+  wwwFallback?: boolean;
+  /** Ana sayfaya hiç erişilemediyse nedeni (ssl | dns | timeout | refused | http | network). */
+  homeError?: { kind: SiteErrorKind; detail: string };
+}
+
+export type SiteErrorKind = "ssl" | "dns" | "timeout" | "refused" | "http" | "network";
+
+/** Bağlantı hatasını kullanıcıya anlatılabilir türe çevirir (ham mesaj yalnız teknik ayrıntıda). */
+export function classifySiteError(message: string): SiteErrorKind {
+  if (/EPROTO|SSL|TLS|certificate|CERT_|self.signed|handshake/i.test(message)) return "ssl";
+  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|çözümlen/i.test(message)) return "dns";
+  if (/timeout|zaman aşımı|ETIMEDOUT/i.test(message)) return "timeout";
+  if (/ECONNREFUSED|ECONNRESET/i.test(message)) return "refused";
+  if (/^http_\d+/.test(message)) return "http";
+  return "network";
 }
 
 export interface CrawlOptions {
@@ -73,12 +89,38 @@ export async function resolveSiteDomain(fetcher: Fetcher, domain: string): Promi
   }
 }
 
+/**
+ * www'suz adres bağlantı/SSL hatası verirse www adresi denenir (yaygın yanlış yapılandırma).
+ * Dönen origin taramanın başlangıç adresidir; alan adı sınırı yine kayıtlı alan adıdır.
+ */
+export async function resolveOrigin(fetcher: Fetcher, domain: string): Promise<{ origin: string; wwwFallback: boolean; homeError?: { kind: SiteErrorKind; detail: string } }> {
+  try {
+    await fetcher(`https://${domain}/`, { sameSiteAs: domain });
+    return { origin: `https://${domain}`, wwwFallback: false };
+  } catch (e) {
+    const detail = (e as Error).message.slice(0, 200);
+    try {
+      await fetcher(`https://www.${domain}/`, { sameSiteAs: domain });
+      return { origin: `https://www.${domain}`, wwwFallback: true };
+    } catch {
+      return { origin: `https://${domain}`, wwwFallback: false, homeError: { kind: classifySiteError(detail), detail } };
+    }
+  }
+}
+
 export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   const fetcher = opts.fetcher ?? liveFetcher;
   const domain = await resolveSiteDomain(fetcher, opts.domain);
-  const origin = `https://${domain}`;
+  const resolved = await resolveOrigin(fetcher, domain);
+  const origin = resolved.origin;
   const maxDepth = opts.maxDepth ?? 3;
-  const result: CrawlResult = { domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false, ...(domain !== opts.domain ? { redirectedFrom: opts.domain } : {}) };
+  const result: CrawlResult = { ...(resolved.wwwFallback ? { wwwFallback: true } : {}), ...(resolved.homeError ? { homeError: resolved.homeError } : {}), domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false, ...(domain !== opts.domain ? { redirectedFrom: opts.domain } : {}) };
+
+  if (resolved.homeError) {
+    // Ana sayfaya ne www'suz ne www adresiyle erişilebildi: diğer istekler de başarısız olur, boşuna denenmez.
+    result.failed.push({ url: `${origin}/`, reason: resolved.homeError.detail });
+    return result;
+  }
 
   let disallow: string[] = [];
   let sitemapUrls: string[] = [`${origin}/sitemap.xml`];
@@ -96,12 +138,15 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   }
 
   const queue: Array<{ url: string; depth: number }> = [{ url: `${origin}/`, depth: 0 }];
-  // Sitemap (index paginasyonu dahil, sınırlı)
+  // Ürün sitemap'inden gelen adresler ayrı kuyrukta ve öncelikli: sayfa bütçesi menü/blog/marka sayfalarıyla dolmasın.
+  const productQueue: Array<{ url: string; depth: number }> = [];
+  // Sitemap (index paginasyonu dahil, sınırlı). Alt sitemap'ler türüne göre sıralanır: ürün → kategori → diğer; blog atlanır.
   const seenSitemaps = new Set<string>();
   const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
-  while (sitemapUrls.length && seenSitemaps.size < 5 && !overBudget()) {
+  while (sitemapUrls.length && seenSitemaps.size < MAX_SITEMAPS && !overBudget()) {
+    sitemapUrls.sort((a, b) => sitemapRank(a) - sitemapRank(b));
     const sm = sitemapUrls.shift()!;
-    if (seenSitemaps.has(sm)) continue;
+    if (seenSitemaps.has(sm) || sitemapRank(sm) >= SKIP_SITEMAP_RANK) continue;
     seenSitemaps.add(sm);
     try {
       const r = await fetcher(sm, { sameSiteAs: domain });
@@ -109,20 +154,30 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       result.sitemapFound = true;
       const parsed = parseSitemap(r.body);
       sitemapUrls.push(...parsed.sitemaps);
-      for (const u of parsed.urls.filter((x) => !LOW_VALUE.test(x)).sort((a, b) => priority(a) - priority(b)).slice(0, opts.maxPages * 3)) queue.push({ url: u, depth: 1 });
+      const urls = parsed.urls.filter((x) => !LOW_VALUE.test(x));
+      if (sitemapRank(sm) === 0) for (const u of urls.slice(0, opts.maxPages * 3)) productQueue.push({ url: u, depth: 1 });
+      else for (const u of urls.sort((a, b) => priority(a) - priority(b)).slice(0, opts.maxPages * 3)) queue.push({ url: u, depth: 1 });
     } catch {
       /* sitemap erişilemedi */
     }
   }
+  // Ürün adresleri bilindiğinde her 1 diğer sayfaya 3 ürün sayfası düşer; ürünler bitince diğerleri devam eder.
+  let picks = 0;
+  const nextItem = () => {
+    picks++;
+    if (picks === 1 || !productQueue.length) return queue.shift() ?? productQueue.shift();
+    if (picks % 4 === 0 && queue.length) return queue.shift();
+    return productQueue.shift();
+  };
 
   const visited = new Set<string>();
   const canonicals = new Set<string>();
-  while (queue.length && result.pages.length < opts.maxPages) {
+  while ((queue.length || productQueue.length) && result.pages.length < opts.maxPages) {
     if (overBudget()) {
       result.truncated = true;
       break;
     }
-    const { url, depth } = queue.shift()!;
+    const { url, depth } = nextItem()!;
     let u: URL;
     try {
       u = new URL(url);
@@ -175,8 +230,20 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       result.failed.push({ url: key, reason: (e as Error).message.slice(0, 120) });
     }
   }
-  result.truncated = queue.length > 0;
+  result.truncated = queue.length > 0 || productQueue.length > 0;
   return result;
+}
+
+const MAX_SITEMAPS = 8;
+const SKIP_SITEMAP_RANK = 9;
+/** Alt sitemap önceliği: 0 ürün, 1 kategori/koleksiyon, 2 dizin/diğer, 3 sayfa/marka, 9 blog/haber (atlanır). */
+function sitemapRank(url: string): number {
+  const p = url.toLowerCase();
+  if (/(product|urun|ürün)/.test(p)) return 0;
+  if (/(categor|kategori|collection)/.test(p)) return 1;
+  if (/(blog|news|haber|post|article|makale)/.test(p)) return SKIP_SITEMAP_RANK;
+  if (/(page|sayfa|brand|marka|content|model|tag)/.test(p)) return 3;
+  return 2;
 }
 
 /** Hesap/sepet/arama gibi GEO açısından değersiz ve kişisel sayfalar taranmaz. */

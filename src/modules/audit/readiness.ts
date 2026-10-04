@@ -65,9 +65,14 @@ export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
     {
       id: "crawl_access",
       group: "geo",
-      label: "Tarama erişimi (robots.txt)",
+      label: "Siteye erişim",
       status: crawl.robotsDisallowAll ? "fail" : pages.length > 0 ? "pass" : "fail",
-      detail: crawl.robotsDisallowAll ? "robots.txt tüm siteyi engelliyor" : `${pages.length} sayfa tarandı, ${crawl.skippedByRobots} sayfa robots kuralıyla atlandı`,
+      // Hiç sayfa okunamadıysa gerçek neden (SSL/DNS/zaman aşımı) gösterilir; robots kuralına bağlanmaz.
+      detail: crawl.robotsDisallowAll
+        ? "robots.txt tüm siteyi engelliyor"
+        : pages.length === 0
+          ? `Siteye erişilemedi${crawl.homeError ? ` (${({ ssl: "güvenli bağlantı/SSL hatası", dns: "alan adı bulunamadı", timeout: "zaman aşımı", refused: "bağlantı reddedildi", http: "sunucu hata kodu", network: "bağlantı hatası" } as Record<string, string>)[crawl.homeError.kind] ?? "bağlantı hatası"})` : ""}`
+          : `${pages.length} sayfa okundu, ${crawl.skippedByRobots} sayfa robots kuralıyla atlandı`,
       priority: "high",
     },
     {

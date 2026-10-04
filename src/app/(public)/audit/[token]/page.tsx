@@ -6,7 +6,7 @@ import { AuditResult } from "@/components/data/audit-result";
 import { currentUser } from "@/lib/page-access";
 import { executionMode } from "@/lib/queue";
 
-export const metadata: Metadata = { title: "Audit sonucu", robots: { index: false, follow: false } };
+export const metadata: Metadata = { title: "Ölçüm sonucu", robots: { index: false, follow: false } };
 
 export default async function AuditResultPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;

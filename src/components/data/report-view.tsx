@@ -1,5 +1,5 @@
 import { Badge, Card, CardHeader, TableWrap, Td, Th } from "@/components/ui";
-import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, SURFACE_LABEL } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, plainStoredText, SURFACE_LABEL } from "@/lib/format";
 
 export interface ReportSnapshot {
   generatedAt: string;
@@ -44,7 +44,7 @@ export function ReportView({ snapshot: s, timeZone, brandingName }: { snapshot: 
         <CardHeader title="Öncelikli fırsatlar" />
         <TableWrap label="Fırsatlar">
           <thead><tr><Th>Fırsat</Th><Th>Tür</Th><Th numeric>Skor</Th><Th>Öneri</Th></tr></thead>
-          <tbody>{s.opportunities.map((o, i) => <tr key={i}><Td>{o.title}</Td><Td>{GAP_LABEL[o.gapType]}</Td><Td numeric>{o.score ?? "—"}</Td><Td className="text-muted">{o.recommendedAction}</Td></tr>)}</tbody>
+          <tbody>{s.opportunities.map((o, i) => <tr key={i}><Td>{o.title}</Td><Td>{GAP_LABEL[o.gapType]}</Td><Td numeric>{o.score ?? "—"}</Td><Td className="text-muted">{plainStoredText(o.recommendedAction)}</Td></tr>)}</tbody>
         </TableWrap>
       </Card>
       <Card>

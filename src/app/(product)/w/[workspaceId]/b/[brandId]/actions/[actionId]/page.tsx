@@ -105,7 +105,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
           <Alert tone="warning" title="Bu kayıtta eksikler var">
             Bu içerik uygulandı olarak işaretlenmiş, ancak kayıtlı sürümde doldurulmamış alanlar bulunuyor. Bu aşamada sürüm salt okunurdur; durumu geri almak yerine
             {a.opportunity ? <> fırsattan <a className="font-medium text-primary underline" href={`${base}/opportunities/${a.opportunity.id}`}>yeni bir taslak oluşturun</a></> : " yeni bir taslak oluşturun"}
-            {productCount === 0 ? <> ve önce <a className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`}>ürün bilgilerini tamamlayın</a></> : null}.
+            {productCount === 0 ? <> ve önce <a className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/catalog?return=${encodeURIComponent(`/w/${workspaceId}/b/${brandId}/actions/${actionId}`)}#adaylar`}>ürün bilgilerini tamamlayın</a></> : null}.
           </Alert>
         </div>
       ) : null}
@@ -125,7 +125,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
         permissions={{ edit: can(ctx, "actions.draft"), approve: can(ctx, "actions.approve"), publish: can(ctx, "actions.publish"), export: can(ctx, "export") }}
         canPublishReason={writableConnector ? null : "Yazma destekli ve doğrulanmış mağaza bağlantısı yok — dışa aktarıp manuel uygulayabilirsiniz"}
         integrationsHref={`${base}/integrations`}
-        setupHref={productCount === 0 ? `/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar` : undefined}
+        setupHref={productCount === 0 ? `/w/${workspaceId}/b/${brandId}/catalog?return=${encodeURIComponent(`/w/${workspaceId}/b/${brandId}/actions/${actionId}`)}#adaylar` : undefined}
       />
     </>
   );

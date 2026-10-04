@@ -48,11 +48,12 @@ export function citationForQuote(quote: string | null, citations: Array<{ url: s
 type GapType = "intent_content" | "missing_comparison" | "catalog_mismatch" | "technical_access" | "citation_gap" | "structured_data";
 
 const ACTION_FOR_GAP: Record<GapType, string> = {
-  intent_content: "Bu niyet için hedef sayfaya soru-cevap odaklı içerik bloğu ekleyin",
+  intent_content: "Bu soru grubu için hedef sayfaya soru-cevap odaklı içerik bloğu ekleyin",
   missing_comparison: "Rakiplerle karşılaştırma/alternatif sayfası hazırlayın",
-  catalog_mismatch: "Bu niyete karşılık gelen kategori/ürün sayfası oluşturun veya mevcut ürünleri bu kategoriye bağlayın",
+  catalog_mismatch: "Bu soru grubuna karşılık gelen kategori/ürün sayfası oluşturun veya mevcut ürünleri bu kategoriye bağlayın",
   technical_access: "Sayfanın taranabilir ve indekslenebilir olduğundan emin olun",
-  citation_gap: "Rakibi destekleyen üçüncü taraf kaynaklarda marka görünürlüğü için outreach görevi oluşturun",
+  // Kaynakla rakibin aynı yanıtta geçmesi ilişki kanıtı değildir: önce inceleme, sonra iletişim.
+  citation_gap: "İnceleme gerekli: rakibin anıldığı bu sitelerin markanızın yer alabileceği bir yayın, liste veya pazaryeri olup olmadığını kontrol edin; uygunsa ilgili yayınla iletişime geçin",
   structured_data: "Ürün şemasına fiyat, para birimi ve stok bilgisini (görünür veriyle uyumlu) ekleyin",
 };
 
@@ -135,16 +136,17 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
     const confidence = Math.min(0.9, 0.3 + Math.min(obs.length, 30) / 60);
     const diagnosis: DiagnosisStep[] = [
       {
-        observation: { quote: compMention?.excerpt ?? (sample.rawText ?? "").slice(0, 200), url: sample.citations[0]?.url ?? null, sampledAt: sample.sampledAt.toISOString(), engine: sample.engine, observationId: sample.id },
+        observation: { quote: compMention?.excerpt ?? (sample.rawText ?? "").slice(0, 200), url: citationForQuote(compMention?.excerpt ?? null, sample.citations), sampledAt: sample.sampledAt.toISOString(), engine: sample.engine, observationId: sample.id },
         possibleCause:
           gapType === "citation_gap"
-            ? `Rakip, ${citationGapDomains.slice(0, 3).map(([d]) => d).join(", ")} gibi üçüncü taraf kaynaklarda anılıyor; markanız bu kaynaklarda görünmüyor olabilir`
+            ? `Rakibin anıldığı yanıtlarda ${citationGapDomains.slice(0, 3).map(([d]) => d).join(", ")} kaynak gösterildi; markanız bu sitelerde görünmüyor olabilir (sitelerle ilişki doğrulanmadı)`
             : gapType === "catalog_mismatch"
-              ? "Bu niyet için katalogda eşleşen kategori/ürün bulunamadı"
+              ? "Bu soru grubu için katalogda eşleşen kategori/ürün bulunamadı"
               : gapType === "missing_comparison"
                 ? "Karşılaştırma/alternatif sorularında markanızı konumlandıran içerik eksik olabilir"
-                : "Bu niyete doğrudan yanıt veren içerik eksik veya zayıf olabilir",
-        verification: obs.length >= 10 ? "likely" : "insufficient_evidence",
+                : "Bu soru grubuna doğrudan yanıt veren içerik eksik veya zayıf olabilir",
+        // Kaynak boşluğu ilişki doğrulanmadan kesinleşmez.
+        verification: gapType === "citation_gap" ? "insufficient_evidence" : obs.length >= 10 ? "likely" : "insufficient_evidence",
         confidence: Math.round(confidence * 100) / 100,
         recommendation: ACTION_FOR_GAP[gapType],
       },

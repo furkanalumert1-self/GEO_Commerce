@@ -33,7 +33,7 @@ function resolution(code: string | null): string | null {
   if (code.startsWith("missing_scopes")) return `Gerekli izinler verilmedi (${code.split(":")[1]}). Yeniden bağlanırken tüm izinleri onaylayın.`;
   if (code === "sync_failed") return "Son senkronizasyon başarısız. Biraz sonra yeniden deneyin; sürerse yeniden bağlanın.";
   if (code === "connect_failed") return "Bağlantı tamamlanamadı. Yeniden deneyin.";
-  if (code.startsWith("webhooks_failed")) return "Sipariş bildirimleri (webhook) kaydedilemedi; siparişler yalnız senkronizasyonla gelir. APP_URL'nin herkese açık HTTPS adresi olduğunu kontrol edip yeniden bağlanın.";
+  if (code.startsWith("webhooks_failed")) return "Anlık sipariş bildirimleri kurulamadı; siparişler yine düzenli eşitlemeyle gelir. Sorun sürerse yeniden bağlanın veya destekle iletişime geçin.";
   return "Beklenmeyen bir sorun oluştu. Biraz sonra yeniden deneyin; sürerse yeniden bağlanın.";
 }
 
@@ -145,12 +145,16 @@ export default async function IntegrationsPage({ params, searchParams }: { param
       <Card className="mt-6 p-5">
         <h2 className="font-semibold">Ölçüm kodu</h2>
         <p className="mt-1 text-sm text-text-secondary">AI kaynaklı ziyaret ve siparişleri eşleştirmek için sitenize eklenir; yalnız kullanıcı izni (consent) varsa olay gönderir. Site anahtarı gizli değildir; yalnız {brand.domain} alan adından kabul edilir. Sohbet metni, form alanları ve gereksiz kişisel veri toplanmaz.</p>
-        <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-surface-subtle p-3 text-xs">{`<script>
+        <details className="mt-3 text-sm">
+          <summary className="min-h-9 cursor-pointer py-1 font-medium text-primary">Teknik ayrıntı: sitenize eklenecek kod</summary>
+          <p className="mt-1 text-xs text-text-secondary">Bu kodu sitenizin geliştiricisi veya mağaza panelinizin “özel kod” alanı aracılığıyla ekleyin.</p>
+          <pre className="mt-2 overflow-x-auto rounded-md border border-border bg-surface-subtle p-3 text-xs">{`<script>
   // Consent yönetim aracınız izin verdiğinde çağırın:
   // geoTrack({ type: "page_view", consent: { analytics: true, ads: false } })
   window.GEO_SITE_KEY = "${brand.trackerSiteKey}";
   window.GEO_INGEST = "${config().TRACKER_INGEST_ORIGIN ?? config().APP_URL}/api/v1/events";
 </script>`}</pre>
+        </details>
       </Card>
     </>
   );

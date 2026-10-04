@@ -12,6 +12,8 @@ export interface ProductFacts {
   sku: string | null;
   image: string | null;
   url: string | null;
+  /** Bilginin kaynağı: yapılandırılmış veri (schema) veya sayfa meta etiketleri (meta). */
+  source?: "schema" | "meta";
 }
 
 export interface PageFacts {
@@ -40,6 +42,16 @@ const decode = (s: string) =>
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
+
+const positivePrice = (p: string | null) => (p && Number(p.replace(",", ".")) > 0 ? p : null);
+
+/** Stok metni → true / false / null (belirsiz). Schema (InStock) ve meta ("in stock") biçimlerini kapsar. */
+export function availabilityFlag(v: string | null | undefined): boolean | null {
+  if (!v) return null;
+  if (/out.?of.?stock|outofstock|sold.?out|discontinued|tükendi|stokta yok/i.test(v)) return false;
+  if (/in.?stock|instock|limited.?availability|preorder|pre.?order|stokta/i.test(v)) return true;
+  return null;
+}
 
 function attr(tag: string, name: string): string | null {
   const m = tag.match(new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
@@ -97,12 +109,14 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
       name: str(o.name),
       description: str(o.description),
       category: str(o.category),
-      price: str(offers?.price ?? (offers?.priceSpecification as Record<string, unknown> | undefined)?.price),
+      // Fiyat 0/boş ise bilinmiyor sayılır (varsayılan değer üretilmez).
+      price: positivePrice(str(offers?.price ?? (offers?.priceSpecification as Record<string, unknown> | undefined)?.price)),
       currency: str(offers?.priceCurrency),
       availability: str(offers?.availability)?.replace(/^https?:\/\/schema\.org\//, "") ?? null,
       sku: str(o.sku),
       image: typeof img === "string" ? img : str((img as Record<string, unknown> | undefined)?.url),
       url: str(o.url) ?? baseUrl,
+      source: "schema",
     });
   }
   for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl, crumbs);
@@ -125,6 +139,34 @@ function microdataBreadcrumbs(html: string): string[] {
   return [...block.matchAll(/itemprop\s*=\s*["']name["'][^>]*>([^<]{1,120})</gi)]
     .map((m) => decode(m[1]!).trim())
     .filter((n) => n && !HOME_CRUMB.test(n));
+}
+
+/**
+ * Product şeması olmayan sayfalar için açık ürün sinyali: og:type=product (Open Graph ürün etiketleri).
+ * Yalnız sayfanın kendisinin ürün olduğunu bildirdiği durumda ve ad + en az bir ürün kanıtıyla (fiyat, stok
+ * veya görsel) aday üretilir; eksik alanlar null kalır, uydurulmaz.
+ */
+export function metaProduct(html: string, url: string, h1: string | null): ProductFacts | null {
+  const type = (metaContent(html, "og:type", "property") ?? "").toLowerCase();
+  if (!/(^|\.)product(\.item)?$/.test(type)) return null;
+  const name = h1 ?? metaContent(html, "og:title", "property");
+  const price = metaContent(html, "product:price:amount", "property") ?? metaContent(html, "og:price:amount", "property");
+  const currency = metaContent(html, "product:price:currency", "property") ?? metaContent(html, "og:price:currency", "property");
+  const availability = metaContent(html, "product:availability", "property") ?? metaContent(html, "og:availability", "property");
+  const image = metaContent(html, "og:image", "property");
+  if (!name || !(price || availability || image)) return null;
+  return {
+    name: name.trim(),
+    description: metaContent(html, "og:description", "property"),
+    category: null,
+    price: positivePrice(price),
+    currency: price ? currency : null,
+    availability,
+    sku: metaContent(html, "product:retailer_item_id", "property"),
+    image,
+    url: metaContent(html, "og:url", "property") ?? url,
+    source: "meta",
+  };
 }
 
 export function extractPage(html: string, url: string): PageFacts {
@@ -167,6 +209,10 @@ export function extractPage(html: string, url: string): PageFacts {
   // Microdata (itemtype="https://schema.org/X"): tip listesi ve JSON-LD yoksa breadcrumb adları.
   for (const m of html.matchAll(/itemtype\s*=\s*["']https?:\/\/schema\.org\/([A-Za-z]+)["']/gi)) types.add(m[1]!);
   if (!breadcrumbs.length) breadcrumbs.push(...microdataBreadcrumbs(html));
+  if (!products.length) {
+    const meta = metaProduct(html, url, h1M ? visibleText(h1M[1]!) || null : null);
+    if (meta) products.push(meta);
+  }
   const text = visibleText(html);
   return {
     title: titleM ? visibleText(titleM[1]!) || null : null,

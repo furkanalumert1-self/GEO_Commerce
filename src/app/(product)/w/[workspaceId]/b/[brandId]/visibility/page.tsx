@@ -22,7 +22,16 @@ export default async function VisibilityPage({ params, searchParams }: { params:
   const range = parseRange(sp);
   const { page, pageSize, skip } = pageParams(sp);
   const base = `/w/${workspaceId}/b/${brandId}/visibility`;
-  const obsWhere = { workspaceId, brandId, sampledAt: { gte: range.from, lte: range.to }, ...(sp.engine ? { engine: sp.engine } : {}), ...(sp.status === "failed" ? { status: { in: ["failed", "parse_failed"] as ("failed" | "parse_failed")[] } } : {}) };
+  const obsWhere = { workspaceId, brandId, sampledAt: { gte: range.from, lte: range.to }, ...(sp.engine ? { engine: sp.engine } : {}), ...(sp.status === "failed" ? { status: { in: ["failed", "parse_failed"] as ("failed" | "parse_failed")[] } } : {}) , ...(sp.kind === "branded" || sp.kind === "generic" ? { promptVersion: { prompt: { branded: sp.kind === "branded" } } } : {}) };
+  const kindBase = { workspaceId, brandId, sampledAt: { gte: range.from, lte: range.to }, status: "succeeded" as const, ...(sp.engine ? { engine: sp.engine } : {}) };
+  // Markalı ve genel keşif soruları ayrı özetlenir; puan formülü değişmez (yalnız görünüm).
+  const kindStats = await Promise.all(
+    [false, true].map(async (branded) => {
+      const where = { ...kindBase, promptVersion: { prompt: { branded } } };
+      const [answers, mentioned] = await Promise.all([db.observation.count({ where }), db.observation.count({ where: { ...where, mentions: { some: { entityId: brandId, kind: { not: "negative" } } } } })]);
+      return { branded, answers, mentioned };
+    }),
+  );
   const [metrics, entities, observations, obsTotal, runs, engines, drawer] = await Promise.all([
     brandMetrics(db, workspaceId, brandId, { from: range.from, to: range.to, engines: sp.engine ? [sp.engine] : undefined }),
     brandEntities(db, brandId),
@@ -41,7 +50,11 @@ export default async function VisibilityPage({ params, searchParams }: { params:
 
   return (
     <>
-      <PageHeader title="Görünürlük" description="Platform bazında puan, rakiplere göre görünürlük payı ve yanıtlar. Markanızın anılması ve kaynak gösterilme ayrı ölçülür; alınamayan yanıtlar düşüş sayılmaz." />
+      <PageHeader title="Sonuçlar" description="Platform bazında puan, rakiplere göre görünürlük payı ve yanıtlar. Markanızın anılması ve kaynak gösterilme ayrı ölçülür; alınamayan yanıtlar düşüş sayılmaz." />
+      <div className="mb-5 flex flex-wrap gap-1 border-b border-border" role="navigation" aria-label="Sorular">
+        <Link href={`/w/${workspaceId}/b/${brandId}/prompts`} className="inline-flex min-h-11 items-center border-b-2 border-transparent px-3 text-sm text-text-secondary hover:text-text sm:min-h-10">Takip ettiğim sorular</Link>
+        <Link href={base} aria-current="page" className="inline-flex min-h-11 items-center border-b-2 border-primary px-3 text-sm font-medium text-primary sm:min-h-10">Sonuçlar</Link>
+      </div>
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} engines={engines.map((e) => e.engine)} />
       {metrics.aggregate.smallSample ? (
         <div className="mb-4">
@@ -50,8 +63,8 @@ export default async function VisibilityPage({ params, searchParams }: { params:
       ) : null}
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <CardHeader title="Motor kırılımı" description="Toplam skor yalnız coverage ≥ %80 motorların eşit ağırlıklı ortalamasıdır." />
-          <TableWrap label="Motor kırılımı">
+          <CardHeader title="Platformlar" description="Toplam puan, yanıtlarının en az %80’i alınabilen platformların eşit ağırlıklı ortalamasıdır." />
+          <TableWrap label="Platformlar">
             <thead>
               <tr>
                 <Th>Platform</Th>
@@ -109,8 +122,8 @@ export default async function VisibilityPage({ params, searchParams }: { params:
 
       <Card className="mt-6">
         <CardHeader
-          title="Gözlemler"
-          description="Her satır tek bir AI yanıtıdır. Kanıtı görmek için satırı açın."
+          title="Yanıtlar"
+          description={<>Her satır tek bir AI yanıtıdır; ayrıntı için soruya tıklayın. {kindStats.map((k) => `${k.branded ? "Markalı sorular" : "Genel keşif"}: ${k.answers} yanıt, markanız ${k.mentioned}'inde anıldı`).join(" · ")}. <span className="whitespace-nowrap">Göster: {([["", "Tümü"], ["generic", "Genel keşif"], ["branded", "Markalı"]] as const).map(([k, l]) => <Link key={k} className={(sp.kind ?? "") === k ? "ml-1 font-medium text-text" : "ml-1 text-primary underline"} href={qs({ kind: k, page: "1" })}>{l}</Link>)}</span></>}
           action={<Link className="text-sm text-primary underline" href={qs({ status: sp.status === "failed" ? "" : "failed", page: "1" })}>{sp.status === "failed" ? "Tümünü göster" : "Yalnız başarısızlar"}</Link>}
         />
         {observations.length === 0 ? (
@@ -136,9 +149,9 @@ export default async function VisibilityPage({ params, searchParams }: { params:
                     </Td>
                     <Td>{ENGINE_SHORT[o.engine] ?? o.engine}</Td>
                     <Td>
-                      {o.status !== "succeeded" ? <Badge tone="warning">Başarısız</Badge> : own ? <Badge tone={own.kind === "recommendation" ? "success" : own.kind === "negative" ? "danger" : "primary"}>{own.kind === "recommendation" ? "Önerildi" : own.kind === "negative" ? "Olumsuz" : "Anıldı"}{own.rank ? ` #${own.rank}` : ""}</Badge> : <Badge>Anılmadı</Badge>}
+                      {o.status !== "succeeded" ? <Badge tone="warning">Değerlendirilemedi</Badge> : own ? <Badge tone={own.kind === "recommendation" ? "success" : own.kind === "negative" ? "danger" : "primary"}>{own.kind === "recommendation" ? "Önerildi" : own.kind === "negative" ? "Olumsuz" : "Anıldı"}{own.rank ? ` #${own.rank}` : ""}</Badge> : <Badge>Anılmadı</Badge>}
                     </Td>
-                    <Td numeric>{o.citations.length}</Td>
+                    <Td numeric>{o.status !== "succeeded" ? <span className="text-text-secondary" title="Yanıt alınamadı">bilinmiyor</span> : o.citations.length}</Td>
                     <Td className="text-muted">{fmtDate(o.sampledAt, access.brand.timezone, "tr-TR", true)}</Td>
                   </tr>
                 );

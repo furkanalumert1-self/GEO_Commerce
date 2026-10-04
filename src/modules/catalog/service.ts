@@ -2,9 +2,11 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import type { CrawlResult } from "@/modules/audit/crawler";
 import { parseMoneyMinor } from "@/adapters/commerce/csv";
 import type { NormalizedProduct } from "@/adapters/commerce/types";
+import { candidateFacts } from "./candidates";
 
 /**
  * Crawl/feed/CSV'den katalog kalıcılaştırma. Bilgi yoksa null; external ID connector bazında unique.
+ * Tarama ürünleri doğrudan kataloğa yazmaz: adaylar sayfa kaydında tutulur, aktarım kullanıcı onayıyla yapılır.
  */
 export async function persistCrawl(db: PrismaClient, ids: { workspaceId: string; brandId: string; crawlRunId: string }, crawl: CrawlResult) {
   const now = new Date();
@@ -25,28 +27,17 @@ export async function persistCrawl(db: PrismaClient, ids: { workspaceId: string;
         etag: p.etag,
         title: p.facts.title,
         schemaTypes: p.facts.schemaTypes,
-        findings: { productComplete, noindex: p.facts.robotsNoindex, textLength: p.facts.textLength, trackers: p.facts.trackers },
+        // Ürün adayları yalnız kayıt altına alınır; katalog kullanıcı onayıyla değişir (catalog/candidates).
+        findings: { productComplete, noindex: p.facts.robotsNoindex, textLength: p.facts.textLength, trackers: p.facts.trackers, productCandidates: candidateFacts(p.pageType, p.facts.products) ? (p.facts.products as unknown as object[]) : [] },
         sampledAt: now,
       },
     });
   }
-  const products: NormalizedProduct[] = crawl.pages.flatMap((pg) =>
-    pg.facts.products.map((x) => ({
-      externalId: x.sku ?? pg.url,
-      name: x.name ?? pg.facts.title ?? pg.url,
-      description: x.description,
-      url: x.url ?? pg.url,
-      imageUrl: x.image,
-      categoryExternalIds: x.category ? [x.category] : [],
-      variants: [{ externalId: x.sku ?? pg.url, sku: x.sku, priceMinor: parseMoneyMinor(x.price ?? undefined), currency: x.currency, stock: null, available: x.availability ? /InStock/i.test(x.availability) : null }],
-    })),
-  );
   const categoryPages = crawl.pages.filter((p) => p.pageType === "category");
   for (const c of categoryPages) {
     const name = c.facts.h1 ?? c.facts.title ?? c.url;
     await upsertCategory(db, ids, { externalId: c.url, name, url: c.url });
   }
-  await upsertProducts(db, ids, products, "crawl", null);
   await db.crawlRun.update({ where: { id: ids.crawlRunId }, data: { status: "succeeded", pagesDone: crawl.pages.length, pagesFailed: crawl.failed.length, pagesFound: crawl.pages.length + crawl.failed.length, finishedAt: now } });
 }
 

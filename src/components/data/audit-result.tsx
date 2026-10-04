@@ -25,7 +25,9 @@ interface Summary {
   failedDetails?: Record<string, string>;
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
   readiness: { geoScore: number | null; adsScore: number | null; checks: Check[] };
-  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null };
+  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null; wwwFallback?: boolean };
+  /** Site hiç okunamadı: puan/fırsat/rakip üretilmedi. */
+  siteUnreadable?: { kind: string; detail: string; wwwTried?: boolean };
   competitorCandidates: Array<{ domain: string; observations: number }>;
   opportunityCount: number;
   examples: Array<{ prompt: string; engine: string; competitorDomains: string[]; intentScore: number; intentType: string }>;
@@ -44,9 +46,9 @@ interface View {
 
 const STAGES: Record<string, string> = {
   queued: "Sırada",
-  crawling: "Site taranıyor",
+  crawling: "Site inceleniyor",
   prompts: "Sorular hazırlanıyor",
-  asking_engines: "AI motorlarına soruluyor",
+  asking_engines: "AI platformlarına soruluyor",
   summarizing: "Özet hesaplanıyor",
   done: "Tamamlandı",
   failed: "Başarısız",
@@ -68,6 +70,17 @@ const CALL_ERROR: Record<string, string> = {
   insufficient_quota: "hesapta kredi/kota yok (faturalandırma)",
   timeout: "zaman aşımı",
   network: "ağ hatası",
+};
+
+/** Site okunamadığında neden ve yapılacak iş (kullanıcı dili; ham hata yalnız teknik ayrıntıda). */
+const UNREADABLE: Record<string, { why: (d: string) => string; todo: string }> = {
+  ssl: { why: (d) => `${d} güvenli bağlantı (SSL) hatası veriyor; www adresi de denendi ve açılmadı.`, todo: "Alan adı veya hosting panelinizde sitenin geçerli bir SSL sertifikasıyla açıldığından emin olun; www'suz adresi www adresine yönlendirmek de çözüm olabilir." },
+  dns: { why: (d) => `${d} alan adı bulunamadı (DNS kaydı yok veya yanlış).`, todo: "Alan adını doğru yazdığınızdan ve DNS kayıtlarının siteyi gösterdiğinden emin olun." },
+  timeout: { why: (d) => `${d} zamanında yanıt vermedi.`, todo: "Siteniz yavaş veya geçici olarak kapalı olabilir; biraz sonra tekrar deneyin." },
+  refused: { why: (d) => `${d} sunucusu bağlantıyı reddetti.`, todo: "Sunucunun ziyaretçilere açık olduğunu ve bir güvenlik duvarının otomatik ziyaretleri engellemediğini kontrol edin." },
+  http: { why: (d) => `${d} sayfalarını açarken hata kodu döndü.`, todo: "Ana sayfanızın tarayıcıda açıldığını kontrol edin; sorun sürerse barındırma sağlayıcınızla görüşün." },
+  robots: { why: (d) => `${d} robots.txt dosyası tüm sitenin incelenmesini engelliyor.`, todo: "AI ve arama tarayıcılarının sitenizi okuyabilmesi için robots.txt'deki genel engeli kaldırın." },
+  network: { why: (d) => `${d} adresine bağlanılamadı.`, todo: "Sitenin tarayıcıda açıldığını kontrol edip tekrar deneyin." },
 };
 
 const ENGINE: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", perplexity: "Perplexity API" };
@@ -150,16 +163,19 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
     const measured = list.filter((c) => c.status === "pass" || c.status === "fail");
     const passed = measured.filter((c) => c.status === "pass").length;
     const open = list.length - measured.length;
-    return `Ölçülen kontrol: ${measured.length}/${list.length}, geçen: ${passed}${open ? ` (tespit edilemeyen/doğrulama bekleyen: ${open})` : ""}.`;
+    return `Ölçülen kontrol: ${measured.length}/${list.length}, geçen: ${passed}${open ? ` (ölçülemeyen/doğrulama bekleyen: ${open})` : ""}.`;
   };
   const candidates = (r?.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, view.domain));
+  // Eski raporlarda site okunamadıysa (0 sayfa) kontrol maddeleri "bulunamadı" değil "ölçülemedi"dir.
+  const notRead = (r?.crawl?.pages ?? 0) === 0;
+  const unreadable = r?.siteUnreadable ? UNREADABLE[r.siteUnreadable.kind] ?? UNREADABLE.network! : null;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-2xl font-semibold">Ücretsiz ölçüm: {view.domain}</h1>
         {r?.demo ? <Badge tone="warning">Örnek veri</Badge> : null}
         <Badge tone={view.status === "succeeded" ? "success" : view.status === "partial" ? "warning" : view.status === "failed" ? "danger" : "primary"}>
-          {view.status === "partial" ? "Kısmen tamamlandı" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
+          {view.status === "partial" ? "Kısmen tamamlandı" : r?.siteUnreadable ? "İncelenemedi" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
         </Badge>
       </div>
 
@@ -169,7 +185,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           <p className="tabular mt-1 text-sm text-muted">
             Aşama {view.progress.done} / {view.progress.total}
           </p>
-          <div className="mt-3 h-2 w-full rounded-sm bg-bg" role="progressbar" aria-valuemin={0} aria-valuemax={view.progress.total} aria-valuenow={view.progress.done} aria-label="Audit ilerlemesi">
+          <div className="mt-3 h-2 w-full rounded-sm bg-bg" role="progressbar" aria-valuemin={0} aria-valuemax={view.progress.total} aria-valuenow={view.progress.done} aria-label="Ölçüm ilerlemesi">
             <div className="h-2 rounded-sm bg-primary" style={{ width: `${(view.progress.done / Math.max(1, view.progress.total)) * 100}%` }} />
           </div>
           {inline && step?.progress && step.progress.total > 0 && view.stage === "asking_engines" ? (
@@ -200,53 +216,68 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         </Card>
       ) : null}
 
-      {view.status === "failed" ? (
-        <Alert tone="danger" title="Audit tamamlanamadı">
-          Sitede taranabilir sayfa bulunamadı ve AI platformlarından yanıt alınamadı; aşağıdaki &ldquo;Kaynak ve yöntem&rdquo; bölümünde nedenleri görebilirsiniz. Veri üretmeyen audit ücretsiz hakkınızı tüketmez; sorun giderildikten sonra aynı alan adıyla tekrar deneyebilirsiniz.
+      {r?.siteUnreadable && unreadable ? (
+        <div className="rounded-[var(--radius-lg)] border border-danger/30 bg-danger-soft px-5 py-4" role="alert">
+          <p className="font-semibold">Siteniz incelenemedi; bu yüzden görünürlük puanı ve öneri hesaplamadık.</p>
+          <p className="mt-1">{unreadable.why(view.domain)}</p>
+          <p className="mt-2 text-sm"><span className="font-semibold">Ne yapmalı? </span>{unreadable.todo}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button asChild variant="primary"><Link href="/audit">Düzelttikten sonra yeniden ölç</Link></Button>
+          </div>
+          <details className="mt-3 text-xs text-text-secondary">
+            <summary className="cursor-pointer">Teknik ayrıntı</summary>
+            <p className="mt-1 break-words">{r.siteUnreadable.detail}</p>
+          </details>
+          <p className="mt-3 text-xs text-text-secondary">Veri üretmeyen ölçüm ücretsiz hakkınızı tüketmez.</p>
+        </div>
+      ) : view.status === "failed" ? (
+        <Alert tone="danger" title="Ölçüm tamamlanamadı">
+          Siteniz okunamadı ve AI platformlarından yanıt alınamadı; nedenler aşağıdaki &ldquo;Nasıl ölçüldü&rdquo; bölümünde. Veri üretmeyen ölçüm ücretsiz hakkınızı tüketmez; sorun giderildikten sonra yeniden deneyebilirsiniz.
         </Alert>
       ) : null}
 
-      {r ? (
+      {r && !r.siteUnreadable ? (
         <>
           {view.status === "partial" ? (
-            <Alert tone="warning" title="Kısmi sonuç">
-              Bazı adımlar tamamlanamadı. {r.visibility.missingEngines.length ? `Eksik motor: ${r.visibility.missingEngines.map((e) => ENGINE[e] ?? e).join(", ")}. ` : ""}
-              {r.crawl.failed ? `${r.crawl.failed} sayfa taranamadı.` : ""}
+            <Alert tone="warning" title="Kısmen tamamlandı">
+              Bazı adımlar tamamlanamadı. {r.visibility.missingEngines.length ? `Yanıt alınamayan platform: ${r.visibility.missingEngines.map((e) => ENGINE[e] ?? e).join(", ")}. ` : ""}
+              {r.crawl.failed ? `${r.crawl.failed} sayfa okunamadı.` : ""}
             </Alert>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-3">
             <Card className="p-4">
-              <p className="text-sm text-muted">AI Visibility (örneklem)</p>
+              <p className="text-sm text-muted">AI görünürlüğü</p>
               <p className="tabular mt-2 text-3xl font-semibold">{r.visibility.score ?? "Ölçülemedi"}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 <Badge tone="warning">Küçük örneklem ({r.visibility.sampleCount} yanıt)</Badge>
-                {r.visibility.partial ? <Badge tone="warning">Kısmi</Badge> : null}
+                {r.visibility.partial ? <Badge tone="warning">Kısmen</Badge> : null}
               </div>
             </Card>
             <Card className="p-4">
-              <p className="text-sm text-muted">Site / GEO hazırlığı</p>
+              <p className="text-sm text-muted">Site hazırlığı</p>
               <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.geoScore ?? "Ölçülemedi"}</p>
               <p className="mt-2 text-xs text-muted">{coverage("geo")} Görünürlük puanından ayrıdır.</p>
             </Card>
             <Card className="p-4">
-              <p className="text-sm text-muted">Ads hazırlığı</p>
+              <p className="text-sm text-muted">Reklam hazırlığı</p>
               <p className="tabular mt-2 text-3xl font-semibold">{r.readiness.adsScore ?? "Ölçülemedi"}</p>
-              <p className="mt-2 text-xs text-muted">{coverage("ads")} Hesap uygunluğu ve checkout ayrıca doğrulanmalıdır.</p>
+              <p className="mt-2 text-xs text-muted">{coverage("ads")} Reklam hesabı uygunluğu ve ödeme adımı ayrıca doğrulanmalıdır.</p>
             </Card>
           </div>
 
           <Card>
-            <CardHeader title="Kaynak ve yöntem" />
+            <CardHeader title="Nasıl ölçüldü" />
             <div className="grid gap-2 p-4 text-sm sm:grid-cols-2">
-              <p><span className="text-muted">Yüzey:</span> API (web aramalı) — tüketici uygulamasındaki sonuçla aynı değildir</p>
+              <p><span className="text-muted">Yöntem:</span> AI platformlarının web aramalı API yanıtları — ChatGPT/Gemini uygulamasındaki sonuçla birebir aynı değildir</p>
               <p><span className="text-muted">Ülke / dil:</span> {r.provenance.country} / {r.provenance.language}</p>
               <p><span className="text-muted">Modeller:</span> {r.provenance.models.join(", ") || "—"}</p>
-              <p><span className="text-muted">Örneklem:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
-              <p><span className="text-muted">Tarama:</span> {r.crawl.pages} sayfa, {r.crawl.products} ürün, robots ile atlanan {r.crawl.skippedByRobots}{r.crawl.failed ? `, alınamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>
+              <p><span className="text-muted">Yanıtlar:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
+              <p><span className="text-muted">Site incelemesi:</span> {r.crawl.pages} sayfa okundu, {r.crawl.products} ürün bulundu, robots kuralıyla atlanan {r.crawl.skippedByRobots}{r.crawl.failed ? `, okunamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>
               {r.crawl.siteDomain ? <p><span className="text-muted">Yönlendirme:</span> {view.domain} → {r.crawl.siteDomain} (analiz yönlendirilen alan adında yapıldı)</p> : null}
-              {r.crawl.failures?.length ? <p className="text-xs text-text-secondary">Tarama hataları: {r.crawl.failures.map((f) => `${f.url} → ${f.reason}`).join("; ")}</p> : null}
-              {r.unavailableEngines.length ? <p><span className="text-muted">Bağlı olmayan motorlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
+              {r.crawl.wwwFallback ? <p><span className="text-muted">Not:</span> {view.domain} açılmadığı için www.{view.domain} incelendi. Alan adınızın www&apos;suz halini düzeltmeniz önerilir.</p> : null}
+              {r.crawl.failures?.length ? <p className="text-xs text-text-secondary">Okunamayan sayfalar: {r.crawl.failures.map((f) => `${f.url} → ${f.reason}`).join("; ")}</p> : null}
+              {r.unavailableEngines.length ? <p><span className="text-muted">Kullanılamayan platformlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
               {r.failedCalls?.length ? <p><span className="text-muted">Yanıt alınamayan çağrılar:</span> {r.failedCalls.map((f) => { const [e, c] = f.split(":"); return `${ENGINE[e!] ?? e} (${CALL_ERROR[c ?? ""] ?? c})`; }).join("; ")} — başarısız sorgular görünürlük sıfırı sayılmaz.</p> : null}
               {r.failedDetails && Object.keys(r.failedDetails).length ? (
                 <ul className="text-xs text-text-secondary">
@@ -258,19 +289,19 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
-              <CardHeader title={`Hesaplanan fırsat sayısı: ${r.opportunityCount}`} description="Markanızın anılmadığı ancak başka alan adlarına atıf yapılan sorular. İlk 3 örnek:" />
+              <CardHeader title={`Fırsat sayısı: ${r.opportunityCount}`} description="Markanızın anılmadığı, başka sitelerin kaynak gösterildiği sorular. İlk 3 örnek:" />
               <ul className="divide-y divide-border">
                 {r.examples.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Bu örneklemde fırsat tespit edilmedi.</li> : null}
                 {r.examples.map((e, i) => (
                   <li key={i} className="px-4 py-3 text-sm">
                     <p className="font-medium">&ldquo;{e.prompt}&rdquo;</p>
-                    <p className="mt-1 text-muted">{ENGINE[e.engine] ?? e.engine} · Satın almaya yakınlık {e.intentScore}/100 · Atıf yapılanlar: {e.competitorDomains.join(", ")}</p>
+                    <p className="mt-1 text-muted">{ENGINE[e.engine] ?? e.engine} · Satın almaya yakınlık {e.intentScore}/100 · Kaynak gösterilen siteler: {e.competitorDomains.join(", ")}</p>
                   </li>
                 ))}
               </ul>
             </Card>
             <Card>
-              <CardHeader title="Rakip adayları" description="Yanıtlarda atıf yapılan ticari alan adlarından (haber, kamu ve eğitim siteleri hariç); kayıttan sonra onaylamanız gerekir." />
+              <CardHeader title="Rakip adayları" description="Yanıtlarda kaynak gösterilen ticari sitelerden (haber, kamu ve eğitim siteleri hariç); kayıttan sonra onaylamanız gerekir." />
               <ul className="divide-y divide-border">
                 {candidates.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Aday bulunamadı.</li> : null}
                 {candidates.map((c) => (
@@ -284,17 +315,17 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           </div>
 
           <Card>
-            <CardHeader title="Öncelikli kontrol listesi" description="GEO ve Ads hazırlığı ayrı gruplanmıştır." />
+            <CardHeader title="Öncelikli kontrol listesi" description="Site ve reklam hazırlığı ayrı gruplanmıştır." />
             <ul className="divide-y divide-border">
               {[...r.readiness.checks].sort((a, b) => (a.status === "fail" ? -1 : 1) - (b.status === "fail" ? -1 : 1)).map((c) => (
                 <li key={c.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 text-sm">
                   <div className="min-w-0">
                     <p className="font-medium">
-                      {c.label} <span className="text-xs font-normal text-muted">({c.group === "geo" ? "GEO" : "Ads"})</span>
+                      {c.label} <span className="text-xs font-normal text-muted">({c.group === "geo" ? "Site" : "Reklam"})</span>
                     </p>
                     <p className="text-muted">{c.detail}</p>
                   </div>
-                  <Badge tone={STATUS_BADGE[c.status].tone}>{STATUS_BADGE[c.status].label}</Badge>
+                  {notRead && c.status !== "pass" ? <Badge>Ölçülemedi</Badge> : <Badge tone={STATUS_BADGE[c.status].tone}>{STATUS_BADGE[c.status].label}</Badge>}
                 </li>
               ))}
             </ul>
@@ -303,7 +334,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           <Card className="p-5">
             <h2 className="font-semibold">Sonraki adım</h2>
             <p className="mt-1 text-sm text-muted">
-              Raporu kaydetmek için doğrulanmış hesapla giriş yapın. Kayıt sonrası 7 günlük Starter denemesi (kart gerekmez) ile ilk 10 fırsatın detayını ve haftalık ölçümü açarsınız; tüm fırsat detayları ve Fix with AI Growth paketindedir.
+              Raporu kaydetmek için doğrulanmış hesapla giriş yapın. Kayıt sonrası 7 günlük Starter denemesi (kart gerekmez) ile ilk 10 fırsatın detayını ve haftalık ölçümü açarsınız; tüm fırsat detayları ve AI ile iyileştir Growth paketindedir.
             </p>
             {claimError ? <p className="mt-2 text-sm text-danger" role="alert">{claimError}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">

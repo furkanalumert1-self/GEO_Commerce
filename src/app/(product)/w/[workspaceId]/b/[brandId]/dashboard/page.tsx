@@ -12,8 +12,9 @@ import { brandMetrics, dailyTrend, parseRange } from "@/modules/monitoring/queri
 import { revenueSummary } from "@/modules/commerce/service";
 import { actionsNeedingFix } from "@/modules/actions/readiness";
 import { revenueAvailability, revenueVisible } from "@/modules/commerce/availability";
-import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, SURFACE_LABEL } from "@/lib/format";
-import { absoluteDelta, actionCta, alignPrevious, impactLevel, plainTr, previousPeriod } from "@/lib/view-models";
+import { listCandidates } from "@/modules/catalog/candidates";
+import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, plainStoredText, SURFACE_LABEL } from "@/lib/format";
+import { absoluteDelta, actionCta, alignPrevious, impactLevel, nextStep, plainTr, previousPeriod, STRONG_EVIDENCE_CONFIDENCE } from "@/lib/view-models";
 
 export const metadata: Metadata = { title: "Genel Bakış" };
 
@@ -59,7 +60,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     dailyTrend(db, workspaceId, brandId, filters, tz),
     dailyTrend(db, workspaceId, brandId, { ...prev, engines: engineFilter }, tz),
     db.opportunity.count({ where: { workspaceId, brandId, status: { in: [...OPEN] } } }),
-    db.opportunity.count({ where: { workspaceId, brandId, status: { in: [...OPEN] }, priority: "high" } }),
+    db.opportunity.count({ where: { workspaceId, brandId, status: { in: [...OPEN] }, priority: "high", confidence: { gte: STRONG_EVIDENCE_CONFIDENCE } } }),
     db.opportunity.count({ where: { workspaceId, brandId, status: "new" } }),
     db.opportunity.findMany({
       where: { workspaceId, brandId, status: { in: [...OPEN] } },
@@ -80,6 +81,16 @@ export default async function DashboardPage({ params, searchParams }: { params: 
   ]);
   const actionByOpp = new Map<string, string>();
   for (const a of oppActions) if (a.opportunityId && !actionByOpp.has(a.opportunityId)) actionByOpp.set(a.opportunityId, a.id);
+  const pendingCandidates = productCount === 0 ? (await listCandidates(db, { workspaceId, brandId })).candidates.filter((c) => c.status !== "imported").length : 0;
+  const continuingOpp = topOpps.find((o) => o.status === "in_progress" && actionByOpp.has(o.id));
+  const step = nextStep({
+    productCount,
+    pendingCandidates,
+    promptCount,
+    hasRun: Boolean(lastRun),
+    continuing: continuingOpp ? { title: continuingOpp.title, href: `/actions/${actionByOpp.get(continuingOpp.id)}` } : null,
+    topOpportunity: topOpps[0] ? { title: topOpps[0].title, href: `/opportunities/${topOpps[0].id}` } : null,
+  });
   // Gelir yalnız gerçekten ölçülüyorsa gösterilir; bağlantısız durum 0 satış sayılmaz.
   const revenue = revenueVisible(revenueState) ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
 
@@ -153,13 +164,21 @@ export default async function DashboardPage({ params, searchParams }: { params: 
             url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/runs`}
             body={{ engines: ["chatgpt", "gemini", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1 }}
             idempotent
-            variant="primary"
+            variant="secondary"
             label="Yeni ölçüm başlat"
             pendingLabel="Başlatılıyor…"
             redirectTo={`${base}/runs/{runId}`}
           />
         }
       />
+      <section aria-labelledby="next-step" className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-primary/30 bg-surface px-5 py-4 shadow-[var(--shadow-card)] sm:px-6">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Sıradaki adımınız</p>
+          <h2 id="next-step" className="mt-1 text-lg font-semibold leading-snug [overflow-wrap:anywhere]">{step.title}</h2>
+          <p className="mt-0.5 text-sm text-text-secondary">{step.reason}</p>
+        </div>
+        <Link className="inline-flex min-h-11 items-center rounded-[var(--radius-md)] border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary-hover sm:min-h-10" href={`${base}${step.href}`}>{step.cta}</Link>
+      </section>
       <FilterBar basePath={`${base}/dashboard`} sp={sp} timeZone={tz} engines={engines.map((e) => e.engine)} />
 
       {metrics.aggregate.partial ? (
@@ -200,7 +219,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           label="Büyüme fırsatları"
           value={fmtNumber(openOpps)}
           sentence={oppSentence}
-          scope={highOpps > 0 ? `${highOpps} yüksek öncelikli` : undefined}
+          scope={highOpps > 0 ? `${highOpps} tanesinin tahmini etkisi yüksek (kanıtı güçlü)` : undefined}
           href={`${base}/opportunities`}
           linkLabel="Fırsatları gör"
         />
@@ -228,7 +247,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           <div className="mb-3">
             <Alert tone="warning" title="Ürün bilgileriniz eksik">
               Katalogda ürün yok; bu yüzden içerik taslağı hazırlanamaz. Ürün dosyanızı yükleyin veya mağazanızı bağlayın.{" "}
-              <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`}>Ürün bilgilerini tamamla</Link>
+              <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`/w/${workspaceId}/b/${brandId}/catalog#adaylar`}>Ürün bilgilerini tamamla</Link>
             </Alert>
           </div>
         ) : null}
@@ -266,7 +285,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
                       {o.recommendedAction ? (
                         <p className="mt-2 text-sm">
                           <span className="font-semibold text-primary-hover">{continuing ? "Sıradaki adım: " : "Önerilen adım: "}</span>
-                          {continuing ? "Taslağı gözden geçirip tamamlayın." : o.recommendedAction}
+                          {continuing ? "Taslağı gözden geçirip tamamlayın." : plainStoredText(o.recommendedAction)}
                         </p>
                       ) : null}
                     </div>

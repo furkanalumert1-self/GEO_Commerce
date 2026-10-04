@@ -6,7 +6,8 @@ import { assertJobsRunnable, enqueue } from "@/lib/queue";
 import { assertPublicUrl } from "@/lib/http/safe-fetch";
 import { getAiAdapters } from "@/adapters/ai/providers";
 import { ProviderError, type AiMonitorAdapter, type EngineKey } from "@/adapters/ai/types";
-import { crawlSite, normalizeDomain, liveFetcher, type Fetcher } from "./crawler";
+import { purposeTemplates } from "@/modules/prompts/quality";
+import { classifySiteError, crawlSite, normalizeDomain, liveFetcher, type Fetcher } from "./crawler";
 import { fixtureFetcher } from "./fixture-site";
 import { evaluateReadiness } from "./readiness";
 import { extract } from "@/modules/monitoring/extract";
@@ -164,15 +165,8 @@ export function auditPrompts(categories: string[], country: string): string[] {
       "Yerli markalardan alışveriş yaparken nelere dikkat etmeliyim?",
     ].slice(0, AUDIT_PROMPTS).map((x) => x.replace(/\s+/g, " ").trim());
   }
-  const base = categories;
-  const templates = [
-    (c: string) => `${place} en iyi ${c.toLocaleLowerCase("tr-TR")} markaları hangileri?`,
-    (c: string) => `${c.toLocaleLowerCase("tr-TR")} seçerken hangi özelliklere bakmalıyım, hangi modelleri önerirsin?`.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")),
-    (c: string) => `Uygun fiyatlı ve kaliteli ${c.toLocaleLowerCase("tr-TR")} nereden alabilirim?`,
-    (c: string) => `${c.toLocaleLowerCase("tr-TR")} alırken nelere dikkat etmeliyim, hangi markaları karşılaştırmalıyım?`.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")),
-    (c: string) => `Popüler ${c.toLocaleLowerCase("tr-TR")} markalarına alternatif ne var?`,
-  ];
-  return templates.slice(0, AUDIT_PROMPTS).map((t, i) => t(base[i % base.length]!).replace(/\s+/g, " ").trim());
+  // Tek amaçlı kalıplar (soru kalitesi modülü); birden çok kategori varsa sırayla dağıtılır.
+  return Array.from({ length: AUDIT_PROMPTS }, (_, i) => purposeTemplates(categories[i % categories.length]!, country)[i]!.text);
 }
 
 /** Kategorilerden ticari niyetli sorular: her şablon sırayla tüm kategorilere uygulanır (kategoriler dengeli dağılır). */
@@ -201,6 +195,10 @@ export interface AuditWork {
     failures?: Array<{ url: string; reason: string }>;
     /** Yönlendirme sonrası taranan alan adı (girilenden farklıysa). */
     siteDomain?: string;
+    /** www'suz adres hatalı olduğu için www adresiyle incelendi. */
+    wwwFallback?: boolean;
+    /** Site hiç okunamadıysa nedeni; bu durumda puan/fırsat/rakip üretilmez. */
+    unreadable?: { kind: string; detail: string };
   };
   prompts?: string[];
   answers: AuditAnswer[];
@@ -247,11 +245,36 @@ export async function runAudit(
       truncated: crawl.truncated,
       failures: crawl.failed.slice(0, 3),
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
+      ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
+      ...(crawl.pages.length === 0
+        ? { unreadable: crawl.homeError ?? (crawl.robotsDisallowAll ? { kind: "robots", detail: "robots.txt tüm siteyi kapatıyor" } : { kind: crawl.failed[0] ? classifySiteError(crawl.failed[0].reason) : "network", detail: crawl.failed[0]?.reason ?? "Sayfa alınamadı" }) }
+        : {}),
     };
     await save();
     if (overBudget()) return "continue";
   }
   const { brandName, categories } = work.crawl;
+  // Site okunamadıysa genel sorularla ölçüm yapılmaz: puan, fırsat ve rakip adayı anlamsız olur (ve ücretli çağrı harcanır).
+  if (work.crawl.unreadable) {
+    await db.audit.update({
+      where: { id: auditId },
+      data: {
+        status: "failed",
+        errorCode: "site_unreachable",
+        stage: "done",
+        progressDone: 5,
+        resultSummary: {
+          brandName,
+          demo,
+          siteUnreadable: { ...work.crawl.unreadable, wwwTried: true },
+          readiness: { geoScore: null, adsScore: null, checks: [] },
+          crawl: { pages: 0, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: 0, categories: [], truncated: false, failures: work.crawl.failures ?? [] },
+          prompts: [],
+        },
+      },
+    });
+    return "done";
+  }
 
   const country = audit.locale.split("-")[1] ?? "TR";
   const language = audit.locale.split("-")[0] ?? "tr";
@@ -343,7 +366,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false },
         competitorCandidates,
         opportunityCount,
         examples,

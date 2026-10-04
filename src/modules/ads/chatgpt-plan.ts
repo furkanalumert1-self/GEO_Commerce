@@ -20,6 +20,8 @@ export interface AdGroupPlan {
   lostTo: Array<{ name: string; count: number }>;
   /** Bu reklam grubunun dayandığı ölçülen sorular (en fazla 5). */
   prompts: string[];
+  /** Soru bazında yanıt sayıları (plana hangi soruların dahil olacağını kullanıcı seçer). */
+  promptStats: Array<{ text: string; answers: number; brand: number; lost: number }>;
   priority: "yüksek" | "orta" | "düşük";
   hints: string[];
   competitorHints: string[];
@@ -102,15 +104,23 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
   }).sort((a, b) => b.mentions - a.mentions);
 
   // Reklam grubu = niyet kümesi (kategori). Kaybedilen yanıt sayısına göre öncelik.
-  const byCluster = new Map<string, { label: string; category: string | null; prompts: Set<string>; answers: number; brand: number; lost: Map<string, number> }>();
+  const byCluster = new Map<string, { label: string; category: string | null; prompts: Set<string>; answers: number; brand: number; lost: Map<string, number>; perPrompt: Map<string, { answers: number; brand: number; lost: number }> }>();
   for (const o of observations) {
     const cl = o.promptVersion.prompt.cluster;
-    const e = byCluster.get(cl.id) ?? { label: cl.label, category: cl.category, prompts: new Set<string>(), answers: 0, brand: 0, lost: new Map<string, number>() };
+    const e = byCluster.get(cl.id) ?? { label: cl.label, category: cl.category, prompts: new Set<string>(), answers: 0, brand: 0, lost: new Map<string, number>(), perPrompt: new Map() };
     e.answers++;
     e.prompts.add(o.promptVersion.text);
+    const pp = e.perPrompt.get(o.promptVersion.text) ?? { answers: 0, brand: 0, lost: 0 };
+    pp.answers++;
     const brandHit = o.mentions.some((m) => m.entityId === brand.id && positive(m.kind));
-    if (brandHit) e.brand++;
-    else for (const m of o.mentions) if (compById.has(m.entityId) && positive(m.kind)) e.lost.set(m.entityId, (e.lost.get(m.entityId) ?? 0) + 1);
+    if (brandHit) {
+      e.brand++;
+      pp.brand++;
+    } else {
+      for (const m of o.mentions) if (compById.has(m.entityId) && positive(m.kind)) e.lost.set(m.entityId, (e.lost.get(m.entityId) ?? 0) + 1);
+      if (o.mentions.some((m) => compById.has(m.entityId) && positive(m.kind))) pp.lost++;
+    }
+    e.perPrompt.set(o.promptVersion.text, pp);
     byCluster.set(cl.id, e);
   }
   const productNames = products.map((p) => p.name);
@@ -127,6 +137,7 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
         brandMentioned: e.brand,
         lostTo,
         prompts: [...e.prompts].slice(0, 5),
+        promptStats: [...e.perPrompt.entries()].map(([text, v]) => ({ text, ...v })).sort((a, b) => b.lost - a.lost || b.answers - a.answers).slice(0, 10),
         priority: (lostTotal >= 2 && e.brand === 0 ? "yüksek" : lostTotal >= 1 ? "orta" : "düşük") as AdGroupPlan["priority"],
         hints: contextHints({ prompts: [...e.prompts], category, products: productNames }),
         competitorHints: lostTo.slice(0, 3).map((c) => `${lower(c.name)} alternatifi ${lower(category)}`),
@@ -138,7 +149,7 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
   // Ölçüm yapılmamışsa kategorilerden başlangıç reklam grupları önerilir.
   if (!adGroups.length) {
     for (const c of brand.categories.slice(0, 3)) {
-      adGroups.push({ clusterId: `category:${c}`, label: c, category: c, answers: 0, brandMentioned: 0, lostTo: [], prompts: [], priority: "orta", hints: contextHints({ prompts: [], category: c, products: productNames }), competitorHints: [], copies: copySuggestions(brand.name, c, opts.usps) });
+      adGroups.push({ clusterId: `category:${c}`, label: c, category: c, answers: 0, brandMentioned: 0, lostTo: [], prompts: [], promptStats: [], priority: "orta", hints: contextHints({ prompts: [], category: c, products: productNames }), competitorHints: [], copies: copySuggestions(brand.name, c, opts.usps) });
     }
   }
 

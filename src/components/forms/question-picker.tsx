@@ -4,7 +4,7 @@ import { ChevronDown, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { Badge, Button, cn, inputClass } from "@/components/ui";
-import type { PickerData, PickerGroup } from "@/modules/prompts/picker";
+import type { PickerData, PickerGroup, PickerQuestion } from "@/modules/prompts/picker";
 
 type Source = "suggested" | "archived" | "own";
 type Selected = { text: string; source: Source; id: string | null };
@@ -33,7 +33,7 @@ function usePopover() {
  * (POST /prompts, PATCH /prompts/:id) soru başına çağırır. Mükerrer/kota kuralları sunucudadır;
  * kısmi başarıda kaydedilenler gösterilir, başarısızlar seçimde kalır.
  */
-export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api: string; nextHint?: string }) {
+export function QuestionPicker({ data, api, nextHint, manageHref = "#takip" }: { data: PickerData; api: string; nextHint?: string; manageHref?: string }) {
   const router = useRouter();
   const uid = useId();
   const [groups, setGroups] = useState<PickerGroup[]>(data.groups);
@@ -78,7 +78,7 @@ export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api:
     if (label.length < 2) return;
     const existing = groups.find((g) => norm(g.label) === norm(label));
     if (existing) { pickGroup(existing.key); setNewGroup(null); return; }
-    const g: PickerGroup = { key: `new:${label}`, clusterId: null, label, category: null, tracked: [], archived: [], suggested: [] };
+    const g: PickerGroup = { key: `new:${label}`, clusterId: null, label, category: null, tracked: [], archived: [], suggested: [], needsEdit: [] };
     setGroups((gs) => [...gs, g]);
     pickGroup(g.key);
     setNewGroup(null);
@@ -128,8 +128,10 @@ export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api:
     if (saved.length) router.refresh();
   };
 
-  const section = (title: string, items: Array<{ text: string; id: string | null }>, source: Source | "tracked") => {
-    const visible = items.filter((q) => match(q.text));
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const editAsOwn = (text: string) => { setQOpen(false); setOwn(text); };
+  const section = (title: string, items: PickerQuestion[], source: Source | "tracked" | "edit") => {
+    const visible = items.filter((q) => match(q.text) && !hidden.has(q.text));
     if (!visible.length) return null;
     return (
       <div role="group" aria-label={title}>
@@ -138,15 +140,38 @@ export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api:
           source === "tracked" ? (
             <div key={q.text} className="flex items-start gap-2.5 rounded-md px-2.5 py-2 text-text-secondary">
               <input type="checkbox" checked disabled readOnly className="mt-1 h-4 w-4 flex-none accent-[var(--color-primary)]" aria-label={`${q.text} (takip ediliyor)`} />
-              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{q.text}</span>
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{q.text}{q.purpose ? <span className="ml-1 text-xs">· {q.purpose}</span> : null}</span>
               <Badge tone="success">Takip ediliyor</Badge>
             </div>
+          ) : source === "edit" ? (
+            <div key={q.text} className="rounded-md px-2.5 py-2">
+              <p className="[overflow-wrap:anywhere] text-text-secondary">{q.text}</p>
+              <div className="mt-1 flex flex-wrap gap-1.5">{q.purpose ? <Badge>{q.purpose}</Badge> : null}<Badge tone="warning">Düzenleme gerekli</Badge></div>
+              {q.reason ? <p className="mt-1 text-xs text-text-secondary">{q.reason}</p> : null}
+              <div className="mt-1 flex flex-wrap gap-x-3 text-xs font-medium">
+                {q.suggestion ? <button type="button" className="min-h-8 text-primary hover:underline" onClick={() => editAsOwn(q.suggestion!)}>Önerilen metni kullan: “{q.suggestion}”</button> : null}
+                <button type="button" className="min-h-8 text-primary hover:underline" onClick={() => editAsOwn(q.text)}>Düzenle</button>
+                <button type="button" className="min-h-8 text-primary hover:underline" onClick={() => setHidden((h) => new Set(h).add(q.text))}>Ürünlerimle ilgili değil</button>
+              </div>
+            </div>
           ) : (
-            <label key={q.text} className="flex cursor-pointer items-start gap-2.5 rounded-md px-2.5 py-2 hover:bg-surface-subtle">
-              <input type="checkbox" checked={isSel(q.text)} onChange={() => toggle({ text: q.text, source, id: q.id })} className="mt-1 h-4 w-4 flex-none accent-[var(--color-primary)]" />
-              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{q.text}</span>
-              {source === "archived" ? <Badge>Arşivde</Badge> : null}
-            </label>
+            <div key={q.text} className="rounded-md px-2.5 py-2 hover:bg-surface-subtle">
+              <label className="flex cursor-pointer items-start gap-2.5">
+                <input type="checkbox" checked={isSel(q.text)} onChange={() => toggle({ text: q.text, source, id: q.id })} className="mt-1 h-4 w-4 flex-none accent-[var(--color-primary)]" />
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{q.text}</span>
+                {source === "archived" ? <Badge>Arşivde</Badge> : null}
+              </label>
+              {source === "suggested" ? (
+                <div className="ml-[26px]">
+                  <div className="mt-1 flex flex-wrap gap-1.5">{q.purpose ? <Badge>{q.purpose}</Badge> : null}<Badge tone="success">Uygun</Badge></div>
+                  {q.reason ? <p className="mt-1 text-xs text-text-secondary">Neden önerildi: {q.reason}</p> : null}
+                  <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs font-medium">
+                    <button type="button" className="min-h-8 text-primary hover:underline" onClick={() => editAsOwn(q.text)}>Düzenle</button>
+                    <button type="button" className="min-h-8 text-primary hover:underline" onClick={() => { setHidden((h) => new Set(h).add(q.text)); setSelected((s) => s.filter((x) => x.text !== q.text)); }}>Ürünlerimle ilgili değil</button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ),
         )}
       </div>
@@ -212,6 +237,7 @@ export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api:
                   {section("Kendi yazdıklarınız", ownSelected, "own")}
                   {section("Takip ettiğiniz", questionList.tracked, "tracked")}
                   {section("Arşivdeki sorular", questionList.archived, "archived")}
+                  {section("Düzenleme gerekli", questionList.needsEdit, "edit")}
                   {!questionList.suggested.length && !questionList.tracked.length && !questionList.archived.length && !ownSelected.length ? (
                     <p className="px-2.5 py-3 text-text-secondary">Bu grup için öneri yok. “Kendi sorumu yaz” ile ekleyebilirsiniz.</p>
                   ) : [...questionList.suggested, ...questionList.tracked, ...questionList.archived, ...ownSelected].every((q) => !match(q.text)) ? (
@@ -249,7 +275,7 @@ export function QuestionPicker({ data, api, nextHint }: { data: PickerData; api:
         <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface-subtle px-3 py-2.5 text-sm" role="status">
           <span><b className="tabular">{used}</b>/{data.limit} soru takip ediliyor</span>
           <span className="h-2 min-w-[100px] flex-1 overflow-hidden rounded-full bg-border" aria-hidden><span className="block h-full bg-primary" style={{ width: `${Math.min(100, (used / Math.max(1, data.limit)) * 100)}%` }} /></span>
-          <span className="text-text-secondary">{left ? `${left} yeni soru ekleyebilirsiniz` : "Yeni soru için mevcut takibi düzenleyin"}</span>
+          {left ? <span className="text-text-secondary">{left} yeni soru ekleyebilirsiniz</span> : <a className="font-medium text-primary underline" href={manageHref}>Kota dolu — mevcut takibi düzenleyin</a>}
         </div>
       </div>
 

@@ -33,7 +33,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
         <p className="font-medium">{o.promptVersion.text}</p>
       </div>
       <dl className="grid grid-cols-2 gap-2 text-xs">
-        <div><dt className="text-muted">Motor</dt><dd>{ENGINE_SHORT[o.engine] ?? o.engine} · {o.provider}</dd></div>
+        <div><dt className="text-muted">Platform</dt><dd>{ENGINE_SHORT[o.engine] ?? o.engine} · {o.provider}</dd></div>
         <div><dt className="text-muted">Model</dt><dd>{o.model ?? "—"}</dd></div>
         <div><dt className="text-muted">Yüzey</dt><dd>{SURFACE_LABEL[o.surface] ?? o.surface}</dd></div>
         <div><dt className="text-muted">Ülke / dil</dt><dd>{o.country} / {o.language}</dd></div>
@@ -47,7 +47,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
       </div>
       <div>
         <p className="mb-1 font-medium">Markanın / rakiplerin anılması</p>
-        {o.mentions.length === 0 ? <p className="text-muted">Takip edilen marka anılmadı.</p> : (
+        {o.status !== "succeeded" ? <p className="text-muted">Değerlendirilemedi — yanıt alınamadığı için anılma ve öneri bilinmiyor.</p> : o.mentions.length === 0 ? <p className="text-muted">Takip edilen marka anılmadı.</p> : (
           <ul className="flex flex-col gap-2">
             {o.mentions.map((m) => (
               <li key={`${m.entityId}-${m.kind}`} className="rounded-md border border-border p-2">
@@ -66,7 +66,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
       </div>
       <div>
         <p className="mb-1 font-medium">Gösterilen kaynaklar</p>
-        {o.citations.length === 0 ? <p className="text-muted">Kaynak gösterilmedi.</p> : (
+        {o.status !== "succeeded" ? <p className="text-muted">Değerlendirilemedi — yanıt alınamadığı için kaynaklar bilinmiyor.</p> : o.citations.length === 0 ? <p className="text-muted">Kaynak gösterilmedi.</p> : (
           <ul className="flex flex-col gap-1">
             {o.citations.map((c) => (
               <li key={c.id} className="flex flex-wrap items-center gap-2">

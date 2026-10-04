@@ -14,7 +14,7 @@ import { unlockedOpportunityIds } from "@/modules/opportunities/access";
 import { OPPORTUNITY_WEIGHTS, type OpportunityComponents } from "@/modules/opportunities/scoring";
 import type { DiagnosisStep } from "@/modules/opportunities/engine";
 import { hasFeature } from "@/modules/billing/plans";
-import { ENGINE_SHORT, fmtDate, GAP_LABEL, OPP_STATUS_LABEL } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate, GAP_LABEL, OPP_STATUS_LABEL, plainStoredText } from "@/lib/format";
 import { cleanQuote } from "@/lib/quote";
 
 export const metadata: Metadata = { title: "Fırsat" };
@@ -42,7 +42,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const members = await db.membership.findMany({ where: { workspaceId }, include: { user: { select: { id: true, name: true, email: true } } } });
   const fixAllowed = hasFeature(access.entitlements, "fix_with_ai");
   const productCount = await db.product.count({ where: { brandId, active: true } });
-  const setupHref = `/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`;
+  const setupHref = `/w/${workspaceId}/b/${brandId}/catalog?return=${encodeURIComponent(`/w/${workspaceId}/b/${brandId}/opportunities/${opportunityId}`)}#adaylar`;
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
@@ -141,14 +141,14 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
           <Card>
             <CardHeader title="Neden önemli?" />
             <div className="px-5 pb-5 text-sm sm:px-6">
-              <p>{intent !== null ? `Bu soru grubu satın almaya yakın bir niyet taşıyor (ticari niyet ${intent}/100). ` : ""}AI yanıtında görünmemek, bu soruyu soran müşterinin markanızı hiç görmemesi demek.</p>
-              {first ? <p className="mt-2 text-text-secondary"><span className="font-medium text-text">Olası neden (hipotez):</span> {first.possibleCause}</p> : null}
+              <p>{intent !== null ? `Bu soru grubu satın almaya yakın (satın almaya yakınlık ${intent}/100). ` : ""}AI yanıtında görünmemek, bu soruyu soran müşterinin markanızı hiç görmemesi demek.</p>
+              {first ? <p className="mt-2 text-text-secondary"><span className="font-medium text-text">Olası neden (hipotez):</span> {plainStoredText(first.possibleCause)}</p> : null}
             </div>
           </Card>
           <Card>
             <CardHeader title="Ne yapabilirim?" />
             <div className="px-5 pb-5 text-sm sm:px-6">
-              <p>{first?.recommendation ?? o.recommendedAction ?? "Öneri henüz oluşturulmadı."}</p>
+              <p>{plainStoredText(first?.recommendation ?? o.recommendedAction) ?? "Öneri henüz oluşturulmadı."}</p>
               {productCount === 0 ? (
                 <div className="mt-4"><Alert tone="warning" title="Önce ürün bilgilerinizi tamamlayın">Katalogda ürün yok; bu yüzden taslak hazırlanamaz. Ürün dosyanızı yükleyin veya mağazanızı bağlayın, ardından bu sayfaya dönün.</Alert></div>
               ) : null}

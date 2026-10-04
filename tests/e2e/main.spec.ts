@@ -47,7 +47,7 @@ test("audit → claim → trial onboarding", async ({ page }, info) => {
   await page.getByLabel("Web siteniz").fill("lumabakim.example");
   await page.getByRole("button", { name: /ölçümü başlat/i }).click();
   await page.waitForURL(/\/audit\/.+/);
-  await expect(page.getByText(/Hesaplanan fırsat sayısı/)).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/Fırsat sayısı/)).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/Küçük örneklem/)).toBeVisible();
   const path = new URL(page.url()).pathname;
   await page.goto(`/login?next=${encodeURIComponent(path)}`);

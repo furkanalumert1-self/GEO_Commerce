@@ -96,12 +96,4 @@ details:not([open]) > :not(summary) {
   display: none;
 }
 
-/* Filtre alanı: mobilde açılır, ≥640 px her zaman açık. */
-@media (min-width: 640px) {
-  .filter-sheet > summary {
-    display: none;
-  }
-  .filter-sheet:not([open]) > :not(summary) {
-    display: flex;
-  }
-}
+/* Filtre alanı: mobilde açılır <details>; ≥640 px ayrı, her zaman açık sürüm (filter-bar.tsx). */

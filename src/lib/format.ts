@@ -88,3 +88,23 @@ export const CHANNEL_LABEL = (c: string) =>
 export function daysAgo(n: number, now = new Date()): Date {
   return new Date(now.getTime() - n * 86_400_000);
 }
+
+/**
+ * Kayıtlı (geçmişte üretilmiş) öneri/neden metinlerini güncel kullanıcı diliyle gösterir. Veritabanı değişmez;
+ * yalnız teknik terimler değiştirilir. Kanıt alıntılarına uygulanmaz (anlam değiştirilmez).
+ */
+export function plainStoredText(s: string | null | undefined): string | null {
+  if (!s) return s ?? null;
+  return s
+    .replace(/Rakibi destekleyen üçüncü taraf kaynaklarda marka görünürlüğü için outreach görevi oluşturun/g, "İnceleme gerekli: rakibin anıldığı sitelerin markanızın yer alabileceği bir yayın, liste veya pazaryeri olup olmadığını kontrol edin; uygunsa ilgili yayınla iletişime geçin")
+    .replace(/outreach hedefi/gi, "iletişim kurulabilecek site")
+    .replace(/outreach görevi/gi, "ilgili yayınla iletişim görevi")
+    .replace(/outreach/gi, "ilgili yayınla iletişim")
+    .replace(/üçüncü taraf kaynak(lar)?/gi, (_m, pl) => (pl ? "diğer siteler" : "diğer site"))
+    .replace(/Bu niyete/g, "Bu soru grubuna")
+    .replace(/Bu niyet için/g, "Bu soru grubu için")
+    .replace(/bu niyete/g, "bu soru grubuna")
+    .replace(/bu niyet için/g, "bu soru grubu için")
+    .replace(/ticari niyet/gi, "satın almaya yakınlık")
+    .replace(/\bniyet(ler)?i?\b/gi, "soru grubu");
+}

@@ -34,7 +34,7 @@ export function ReportView({ snapshot: s, timeZone, brandingName }: { snapshot: 
         <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">Teknik detaylar</summary><p className="mt-1 break-all">Formül {s.visibility.formulaVersion} · ölçüm kümesi {s.visibility.cohortHash} · yüzey {s.provenance.surfaces.map((x) => SURFACE_LABEL[x] ?? x).join(", ")} · modeller {s.provenance.models.join(", ")}</p></details>
       </Card>
       <Card>
-        <CardHeader title="Motorlar ve SOV" />
+        <CardHeader title="Platformlar ve görünürlük payı" />
         <div className="grid gap-4 p-4 md:grid-cols-2">
           <ul className="text-sm">{s.visibility.perEngine.map((e) => <li key={e.engine}>{ENGINE_SHORT[e.engine] ?? e.engine}: {e.score ?? "—"} (coverage {fmtPct(e.coverage)})</li>)}</ul>
           <ul className="text-sm">{s.sov.map((x) => <li key={x.id}>{x.name}{x.type === "brand" ? " (siz)" : ""}: {x.value === null ? "ölçülemedi" : `%${fmtNumber(x.value, "tr-TR", 1)}`}</li>)}</ul>

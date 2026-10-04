@@ -318,7 +318,7 @@ export function ActionEditor({
         </Card>
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <CardHeader title="Yapılandırılmış veri (JSON-LD) kontrolü" description="Yapısal kontrol; rich result veya AI citation garantisi değildir." />
+          <CardHeader title="Yapılandırılmış veri (JSON-LD) kontrolü" description="Biçim kontrolüdür; arama sonucunda zengin görünüm veya AI'da kaynak gösterilme garantisi değildir." />
           <div className="p-5 text-sm">
             {!draft.jsonLd ? <p className="text-text-secondary">Bu aksiyonda JSON-LD yok.</p> : ldIssues.length === 0 ? <Badge tone="success">Sorun bulunmadı; SSS görünür metinle uyumlu</Badge> : (
               <ul className="flex flex-col gap-1">{ldIssues.map((i, k) => <li key={k}><Badge tone={i.severity === "error" ? "danger" : "warning"}>{i.path}</Badge> {i.message}</li>)}</ul>

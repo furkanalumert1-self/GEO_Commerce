@@ -1,109 +1,151 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader, cn } from "@/components/ui";
-import { AdsDraftForm } from "@/components/forms/ads-draft-form";
+import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader, TableWrap, Td, Th, cn } from "@/components/ui";
+import { AdsPlanFlow, type FlowGroup } from "@/components/ads/ads-plan-flow";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { hasFeature } from "@/modules/billing/plans";
-import { config } from "@/lib/config";
-import { DEFAULT_RULE } from "@/modules/ads/rules";
-import { CHATGPT_ADS_SPEC, policyIssues } from "@/modules/ads/chatgpt";
+import { policyIssues } from "@/modules/ads/chatgpt";
 import { buildChatgptAdsPlan } from "@/modules/ads/chatgpt-plan";
-import { ChatgptAdsPlan } from "@/components/ads/chatgpt-plan";
 
-export const metadata: Metadata = { title: "Reklam" };
+export const metadata: Metadata = { title: "Reklamlar" };
 
-const TABS = [["chatgpt", "ChatGPT Ads planı"], ["readiness", "Hazırlık"], ["intelligence", "Fırsat istihbaratı"], ["campaigns", "Kampanyalar"], ["rules", "Kurallar"]] as const;
+/** Sekme anahtarları eski bağlantılarla uyumludur (readiness → plan, rules → kampanyalar). */
+const TABS = [["chatgpt", "Reklam planı"], ["intelligence", "Reklam fikirleri"], ["campaigns", "Kampanyalar"]] as const;
+const TAB_ALIAS: Record<string, (typeof TABS)[number][0]> = { readiness: "chatgpt", rules: "campaigns" };
 
 export default async function AdsPage({ params, searchParams }: { params: Promise<{ workspaceId: string; brandId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId, brandId } = await params;
   const sp = await searchParams;
   const access = await pageBrand(workspaceId, brandId);
-  const tab = TABS.find(([k]) => k === sp.tab)?.[0] ?? "chatgpt";
+  const requested = TAB_ALIAS[sp.tab ?? ""] ?? sp.tab;
+  const tab = TABS.find(([k]) => k === requested)?.[0] ?? "chatgpt";
   const base = `/w/${workspaceId}/b/${brandId}/ads`;
   if (!hasFeature(access.entitlements, "ads")) {
-    return (<><PageHeader title="Reklam" /><Alert tone="primary" title="Ads modülü Commerce paketinde">Önce istihbarat ve taslak, ardından erişim ve yetkiye bağlı kontrollü otomasyon. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></>);
+    return (
+      <>
+        <PageHeader title="Reklamlar" />
+        <Alert tone="primary" title="Reklam planı Commerce paketinde">Ölçtüğünüz sorulardan reklam taslağı hazırlamak için paketinizi yükseltin. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert>
+      </>
+    );
   }
-  const [accounts, opps, pages] = await Promise.all([
-    db.adsAccount.findMany({ where: { brandId, workspaceId } }),
-    db.opportunity.findMany({ where: { brandId, status: { in: ["new", "triaged", "in_progress"] } }, orderBy: [{ score: { sort: "desc", nulls: "last" } }], take: 8, include: { cluster: { select: { label: true, type: true } } } }),
-    db.pageSnapshot.findMany({ where: { brandId }, select: { url: true, pageType: true, findings: true }, take: 200 }),
+  const [accounts, plan, brandRow, categories, products, pages] = await Promise.all([
+    db.adsAccount.findMany({ where: { brandId, workspaceId }, select: { provider: true, accessStatus: true } }),
+    buildChatgptAdsPlan(db, { workspaceId, brandId }),
+    db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { name: true, domain: true, country: true, categories: true } }),
+    db.category.findMany({ where: { brandId, url: { not: null } }, select: { name: true, url: true } }),
+    db.product.findMany({ where: { brandId, active: true, url: { not: null } }, select: { name: true, url: true, categories: { select: { category: { select: { name: true } } } } }, take: 300 }),
+    db.pageSnapshot.findMany({ where: { brandId, pageType: "product" }, select: { findings: true }, take: 200 }),
   ]);
-  const usps = [sp.usp1, sp.usp2].filter((x): x is string => typeof x === "string" && x.trim().length > 0).map((x) => x.slice(0, 40));
-  const chatgptPlan = tab === "chatgpt" ? await buildChatgptAdsPlan(db, { workspaceId, brandId }, { usps }) : null;
-  const brandRow = await db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { country: true, categories: true } });
-  const market = CHATGPT_ADS_SPEC.markets[brandRow.country];
-  const policy2 = policyIssues(brandRow.categories, brandRow.country);
-  const productPages = pages.filter((p) => p.pageType === "product");
-  const missingOffer = productPages.filter((p) => (p.findings as { productComplete?: boolean } | null)?.productComplete === false).length;
-  const policy = pages.some((p) => p.pageType === "policy");
+  const norm = (s: string) => s.trim().toLocaleLowerCase("tr-TR");
+  const home = `https://${brandRow.domain.replace(/^www\./, "")}/`;
+  const groups: FlowGroup[] = plan.adGroups.map((g) => {
+    const cat = norm(g.category ?? g.label);
+    const catPage = categories.find((c) => norm(c.name) === cat);
+    const word = cat.split(/\s+/).filter((w) => w.length > 3).pop();
+    const prods = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (word ? norm(p.name).includes(word.slice(0, Math.max(4, word.length - 2))) : false)).slice(0, 3);
+    const targets = [
+      ...(catPage?.url ? [{ url: catPage.url, label: `Kategori sayfası · ${catPage.url.replace(/^https?:\/\//, "")}` }] : []),
+      ...prods.map((p) => ({ url: p.url!, label: `Ürün · ${p.name}` })),
+      { url: home, label: `Ana sayfa · ${home.replace(/^https?:\/\//, "")}` },
+    ];
+    return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, copy: g.copies[0] ?? null, targets };
+  });
+  const activeAccount = accounts.find((a) => a.accessStatus === "active");
+  const status = activeAccount
+    ? "Reklam hesabınız bağlı. Yayın bu ekrandan yapılmaz; taslakları reklam platformunda kullanın."
+    : accounts.length
+      ? "Plan hazırlayabilirsiniz; reklam hesabınızın erişimi henüz doğrulanmadı."
+      : "Plan hazırlayabilirsiniz; reklam hesabınız bağlı değil.";
+  const policy = policyIssues(brandRow.categories, brandRow.country);
+  const missingOffer = pages.filter((p) => (p.findings as { productComplete?: boolean } | null)?.productComplete === false).length;
+  const checks: Array<{ label: string; state: "ok" | "warn" | "unknown"; text: string }> = [
+    { label: "Ürün sayfalarında fiyat ve stok bilgisi", state: pages.length === 0 ? "unknown" : missingOffer ? "warn" : "ok", text: pages.length === 0 ? "Ürün sayfası incelenmedi" : missingOffer ? `${missingOffer} ürün sayfasında eksik` : "Sorun bulunmadı" },
+    { label: "Ürün kategorisi reklam kuralları", state: policy.some((p) => p.level === "error") ? "warn" : policy.length ? "warn" : "unknown", text: policy.length ? policy.map((p) => p.message).join("; ") : "Yerel kontrolde sorun görülmedi; nihai karar reklam platformunda" },
+    { label: "Ülke ve hesap uygunluğu", state: activeAccount ? "ok" : "unknown", text: activeAccount ? "Hesap erişimi doğrulandı" : "Doğrulanmadı — reklam platformunda kontrol edin" },
+  ];
+
   return (
     <>
-      <PageHeader title="Reklam (ChatGPT Ads ve diğerleri)" description="İstihbarat ve taslak her zaman çalışır; kampanya/bütçe işlemleri doğrulanmış hesap erişimi, yetki ve onay gerektirir. Oluşturulan kampanyalar duraklatılmış başlar." />
-      <div className="mb-4 flex flex-wrap gap-1 border-b border-border" role="tablist">
+      <PageHeader title="Reklamlar" description="Ölçtüğünüz sorulardan reklam taslağı hazırlayın; taslağı kopyalayıp reklam platformunda kullanın." />
+      <div className="flex items-start gap-2.5 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 text-sm" role="status">
+        <span aria-hidden className={cn("mt-1.5 h-2.5 w-2.5 flex-none rounded-full", activeAccount ? "bg-success" : "bg-warning")} />
+        <span>{status}</span>
+      </div>
+      <div className="my-4 flex flex-wrap gap-1 border-b border-border" role="navigation" aria-label="Reklam bölümleri">
         {TABS.map(([k, label]) => (
-          <Link key={k} href={`${base}?tab=${k}`} aria-current={tab === k ? "page" : undefined} className={cn("inline-flex min-h-11 items-center border-b-2 px-3 text-sm sm:min-h-9", tab === k ? "border-primary font-medium text-primary" : "border-transparent text-muted")}>{label}</Link>
+          <Link key={k} href={`${base}?tab=${k}`} aria-current={tab === k ? "page" : undefined} className={cn("inline-flex min-h-11 items-center border-b-2 px-3 text-sm sm:min-h-10", tab === k ? "border-primary font-medium text-primary" : "border-transparent text-text-secondary hover:text-text")}>{label}</Link>
         ))}
       </div>
-      {tab === "chatgpt" && chatgptPlan ? <ChatgptAdsPlan plan={chatgptPlan} action={base} usps={usps} downloadUrl={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/ads/chatgpt-plan?${new URLSearchParams(usps.map((u, i) => [`usp${i + 1}`, u]))}`} /> : null}
-      {tab === "readiness" ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card className="p-4 text-sm">
-            <p className="font-medium">Landing ve feed kalitesi</p>
-            <ul className="mt-2 flex flex-col gap-1">
-              <li>{missingOffer === 0 ? <Badge tone="success">Tamam</Badge> : <Badge tone="warning">{missingOffer} ürün</Badge>} Ürün sayfalarında fiyat/stok şeması</li>
-              <li>{policy ? <Badge tone="success">Bulundu</Badge> : <Badge>Tespit edilemedi</Badge>} İade/gizlilik politikaları</li>
-              <li><Badge tone="warning">Doğrulama gerekli</Badge> Ülke/sektör/hesap uygunluğu — güncel sağlayıcı kurallarıyla</li>
+
+      {tab === "chatgpt" ? (
+        <div className="flex flex-col gap-6">
+          <AdsPlanFlow groups={groups} brandName={brandRow.name} domain={brandRow.domain.replace(/^www\./, "")} days={plan.sample.days} initialGroup={sp.group} />
+          <details className="rounded-[var(--radius-lg)] border border-border bg-surface px-5 py-3 text-sm">
+            <summary className="min-h-9 cursor-pointer py-1 font-medium text-primary">Hazırlık kontrolleri</summary>
+            <ul className="mt-2 flex flex-col gap-2">
+              {checks.map((c) => (
+                <li key={c.label} className="flex flex-wrap items-start gap-2">
+                  <Badge tone={c.state === "ok" ? "success" : c.state === "warn" ? "warning" : "neutral"}>{c.state === "ok" ? "Tamam" : c.state === "warn" ? "Kontrol edin" : "Doğrulanmadı"}</Badge>
+                  <span><span className="font-medium">{c.label}:</span> <span className="text-text-secondary">{c.text}</span></span>
+                </li>
+              ))}
             </ul>
-          </Card>
-          <Card className="p-4 text-sm md:col-span-2">
-            <p className="font-medium">ChatGPT Ads uygunluğu <span className="text-xs font-normal text-muted">· kurallar {CHATGPT_ADS_SPEC.version} itibarıyla</span></p>
-            <ul className="mt-2 flex flex-col gap-1">
-              <li>{market?.available ? <Badge tone="success">Açık</Badge> : <Badge tone="warning">Doğrulanmadı</Badge>} Pazar ({brandRow.country}){market?.available ? `: self-serve erişim ${market.since} tarihinden beri; ${market.personalization ? "kişiselleştirme var" : "yalnız sohbet bağlamı, genel konum ve cihaz (kişiselleştirme yok)"}` : ""}</li>
-              <li>{policy2.some((i) => i.level === "error") ? <Badge tone="danger">Risk</Badge> : policy2.length ? <Badge tone="warning">İnceleme</Badge> : <Badge tone="success">Uygun</Badge>} Kategori politikası{policy2.length ? `: ${policy2.map((i) => i.message).join("; ")}` : " (yasak/kısıtlı kategori tespit edilmedi)"}</li>
-              <li><Badge>Bilgi</Badge> Reklamlar yalnız Free ve Go kullanıcılarına, yanıtın altında sohbet kartı olarak gösterilir; 18 yaş altı ve sağlık/siyaset gibi hassas sohbetlerde gösterilmez</li>
-              <li><Badge>Bilgi</Badge> Sohbet kartı: başlık ≤{CHATGPT_ADS_SPEC.title.max}, metin ≤{CHATGPT_ADS_SPEC.body.max} karakter, kare görsel (≥{CHATGPT_ADS_SPEC.image.minPxApi}px, görselde metin yok), tek hedef URL (doğrulanmış alan adı)</li>
-              <li>{missingOffer === 0 && productPages.length > 0 ? <Badge tone="success">Hazır</Badge> : <Badge tone="warning">Eksik</Badge>} Ürün feed reklamları için Google Shopping biçiminde katalog feed&apos;i gerekir (alışveriş yerleşimleri yalnız feed gönderen markalara açık)</li>
-            </ul>
-          </Card>
-          <Card className="p-4 text-sm">
-            <p className="font-medium">Hesaplar</p>
-            {accounts.length === 0 ? <p className="mt-2 text-muted">Bağlı reklam hesabı yok.</p> : accounts.map((a) => (
-              <div key={a.id} className="mt-2 flex flex-wrap items-center gap-2">
-                <span>{a.provider} · {a.externalId}</span>
-                <Badge tone={a.accessStatus === "active" ? "success" : "warning"}>{a.accessStatus === "access_required" ? "Erişim gerekli" : a.accessStatus}</Badge>
-                <span className="text-xs text-muted">Yetenekler: {Object.keys(a.capabilities as object).length ? Object.keys(a.capabilities as object).join(", ") : "doğrulanmadı"}</span>
-              </div>
-            ))}
-            <p className="mt-3 text-xs text-muted">Otomasyon: {config().ADS_AUTOMATION_ENABLED ? "platformda açık" : "platformda kapalı (ADS_AUTOMATION_ENABLED=false)"}.</p>
-          </Card>
+            <p className="mt-3"><a className="text-primary underline" href={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/ads/chatgpt-plan?format=csv`}>Tüm reklam gruplarını CSV olarak indir</a></p>
+          </details>
         </div>
       ) : null}
+
       {tab === "intelligence" ? (
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader title="Ücretli kanal için niyet fırsatları" description="GEO niyet kümeleri ürün içi araştırma verisidir; sağlayıcıda keyword targeting karşılığı değildir. Rakip harcaması veya kullanıcı sohbeti gösterilmez." />
-            <ul className="divide-y divide-border">{opps.map((o) => <li key={o.id} className="px-4 py-3 text-sm"><p className="font-medium">{o.cluster.label}</p><p className="text-muted">Skor {o.score ?? "—"} · {o.paidBlockedReason ?? "Uygun"} · ChatGPT Ads&apos;te bu niyet bağlam ipucu olarak kullanılabilir</p></li>)}</ul>
+            <CardHeader title="Reklam fikirleri" description={`Son ${plan.sample.days} günün ${plan.sample.answers} AI yanıtından: rakiplerin öne çıktığı ürün grupları. Organik görünürlük verisidir; reklam performansı değildir.`} />
+            {groups.length === 0 ? (
+              <EmptyState title="Henüz fikir yok" description="Takip edeceğiniz soruları seçip bir ölçüm yapın; fikirler ölçülen yanıtlardan çıkar." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Soruları seç</Link>} />
+            ) : (
+              <ul className="divide-y divide-border">
+                {groups.map((g) => {
+                  const lost = g.lostTo.reduce((a, b) => a + b.count, 0);
+                  return (
+                    <li key={g.clusterId} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
+                      <div className="min-w-0">
+                        <p className="font-semibold">{g.label}</p>
+                        <p className="text-sm text-text-secondary">{g.answers ? `${g.answers} yanıtın ${g.brandMentioned}'inde markanız anıldı${lost ? `; ${g.lostTo.slice(0, 2).map((c) => c.name).join(", ")} öne çıktı` : ""}` : "Henüz ölçüm yok"}</p>
+                      </div>
+                      <Link className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-4 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`${base}?tab=chatgpt&group=${encodeURIComponent(g.clusterId)}`}>Bu fikirle taslak hazırla</Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
-          <Card>
-            <CardHeader title="Kampanya brief / creative taslağı" description="ChatGPT Ads: karakter sınırları, hedef URL ve kategori politikası yerel olarak kontrol edilir; kaybedilen AI sorularından bağlam ipuçları üretilir. CSV ve OpenAI Ads API (duraklatılmış) taslağı olarak indirilir; nihai inceleme Ads Manager'dadır." />
-            <div className="p-4"><AdsDraftForm url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/ads/drafts`} opportunities={opps.map((o) => ({ id: o.id, label: o.cluster.label }))} domain={access.brand.domain} currency={access.brand.currency} /></div>
-          </Card>
+          {plan.competitorInsights.some((c) => c.mentions > 0) ? (
+            <Card>
+              <CardHeader title="Rakiplerin öne çıktığı sorular" description="Onaylı rakiplerinizin AI yanıtlarında anıldığı yerler." />
+              <TableWrap label="Rakipler">
+                <thead><tr><Th>Rakip</Th><Th numeric>Anıldığı yanıt</Th><Th>En sık geçtiği soru</Th></tr></thead>
+                <tbody>
+                  {plan.competitorInsights.filter((c) => c.mentions > 0).slice(0, 8).map((c) => (
+                    <tr key={c.id}><Td className="font-medium">{c.name}</Td><Td numeric>{c.mentions}</Td><Td className="text-text-secondary [overflow-wrap:anywhere]">{c.topPrompts[0] ?? "—"}</Td></tr>
+                  ))}
+                </tbody>
+              </TableWrap>
+            </Card>
+          ) : null}
         </div>
       ) : null}
+
       {tab === "campaigns" ? (
-        <Card>{accounts.every((a) => a.accessStatus !== "active") ? <EmptyState title="Erişim gerekli (access_required)" description="Kampanya ve harcama verileri yalnız doğrulanmış hesap erişimiyle senkronize edilir. Örnek veya tahmini performans gösterilmez." /> : <EmptyState title="Kampanya yok" description="Senkronize kampanya bulunamadı." />}</Card>
-      ) : null}
-      {tab === "rules" ? (
-        <Card className="p-4 text-sm">
-          <p className="font-medium">Kontrollü otomasyon varsayılanları</p>
-          <ul className="mt-2 list-disc pl-5 text-muted">
-            <li>Seviye: kapalı → öneri → onay gerekli (varsayılan) → kullanıcı açarsa sınırlı kurallar</li>
-            <li>Günlük bütçe değişimi en fazla ±%{DEFAULT_RULE.maxDailyChangePct}; {DEFAULT_RULE.cooldownHours} saat bekleme; kayan harcama tavanı; kill switch</li>
-            <li>Minimum örneklem {DEFAULT_RULE.minConversions} dönüşüm; attribution gecikmesi {DEFAULT_RULE.attributionDelayHours} saat — düşük örneklemde hedef ROAS yalnız öneri</li>
-            <li>Limit/policy/yetki sorunu: işlem yapılmaz (fail-closed). Harcama verisi gecikmeli olabilir.</li>
-          </ul>
-          <p className="mt-3"><Badge tone="warning">Hesap erişimi olmadan kural etkinleştirilemez</Badge></p>
+        <Card>
+          {activeAccount ? (
+            <EmptyState title="Kampanya verisi henüz gelmedi" description="Hesabınız bağlı; kampanya ve harcama verileri eşitlendikçe burada görünür. Örnek veya tahmini performans gösterilmez." />
+          ) : (
+            <EmptyState
+              title="Kampanyalarınız burada görünmez"
+              description="Reklam hesabı bağlı olmadığı için kampanya ve harcama verisi yok. Şimdilik Reklam planı sekmesinde taslak hazırlayıp reklam platformunda kampanyanızı elle oluşturabilirsiniz."
+              action={<Link className="text-primary underline" href={`${base}?tab=chatgpt`}>Reklam planına git</Link>}
+            />
+          )}
         </Card>
       ) : null}
     </>

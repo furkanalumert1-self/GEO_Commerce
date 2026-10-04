@@ -75,7 +75,7 @@ export function hasWorkspaceWideBrandAccess(role: Role): boolean {
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
-  owner: "Sahip",
+  owner: "Hesap sahibi",
   admin: "Yönetici",
   editor: "Editör",
   analyst: "Analist",

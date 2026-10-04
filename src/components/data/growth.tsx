@@ -35,7 +35,7 @@ export function MetricCard({
 }) {
   return (
     <Card className="group relative flex min-h-[140px] flex-col p-4 hover:border-border-strong/60 sm:min-h-[160px] sm:p-5">
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
         <p className="text-[13px] font-medium leading-snug text-text-secondary sm:text-sm">{label}</p>
         {badge}
       </div>

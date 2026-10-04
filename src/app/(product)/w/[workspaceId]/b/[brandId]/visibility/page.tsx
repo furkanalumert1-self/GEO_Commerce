@@ -41,7 +41,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
 
   return (
     <>
-      <PageHeader title="Görünürlük" description="Motor bazında skor, SOV ve kanıt. Mention ve citation ayrı ölçülür; başarısız sorgular düşüş sayılmaz." />
+      <PageHeader title="Görünürlük" description="Platform bazında puan, rakiplere göre görünürlük payı ve yanıtlar. Markanızın anılması ve kaynak gösterilme ayrı ölçülür; alınamayan yanıtlar düşüş sayılmaz." />
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} engines={engines.map((e) => e.engine)} />
       {metrics.aggregate.smallSample ? (
         <div className="mb-4">

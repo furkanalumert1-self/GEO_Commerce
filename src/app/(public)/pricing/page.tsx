@@ -19,7 +19,7 @@ export default function PricingPage() {
     ["Marka / koltuk", (k) => (k === "enterprise" ? "Sözleşme" : `${PLANS[k].limits.brands} / ${PLANS[k].limits.seats}`)],
     ["Rakip / marka", (k) => (k === "enterprise" ? "Özel" : String(PLANS[k].limits.competitorsPerBrand))],
     ["Motorlar", engines],
-    ["Aktif prompt", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.activePrompts)}${k === "agency" ? " (havuz)" : ""}`)],
+    ["Takip edilen soru", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.activePrompts)}${k === "agency" ? " (havuz)" : ""}`)],
     ["Yanıt birimi / ay", (k) => (k === "enterprise" ? "Özel" : `${fmtNumber(PLANS[k].limits.answerUnits)}${k === "agency" ? " (havuz)" : ""}`)],
     ["Otomatik ölçüm", (k) => (k === "enterprise" ? "Özel" : PLANS[k].limits.monitoringFrequency === "weekly" ? "Haftalık" : "Günlük (bütçeli)")],
     ["Fırsatlar", (k) => (k === "starter" ? "İlk 10 detay" : k === "enterprise" ? "Özel" : "Tüm üretilenler")],

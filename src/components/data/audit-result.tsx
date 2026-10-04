@@ -45,7 +45,7 @@ interface View {
 const STAGES: Record<string, string> = {
   queued: "Sırada",
   crawling: "Site taranıyor",
-  prompts: "Niyet soruları hazırlanıyor",
+  prompts: "Sorular hazırlanıyor",
   asking_engines: "AI motorlarına soruluyor",
   summarizing: "Özet hesaplanıyor",
   done: "Tamamlandı",
@@ -156,10 +156,10 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-semibold">GEO Audit: {view.domain}</h1>
+        <h1 className="text-2xl font-semibold">Ücretsiz ölçüm: {view.domain}</h1>
         {r?.demo ? <Badge tone="warning">Örnek veri</Badge> : null}
         <Badge tone={view.status === "succeeded" ? "success" : view.status === "partial" ? "warning" : view.status === "failed" ? "danger" : "primary"}>
-          {view.status === "partial" ? "Kısmi sonuç" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
+          {view.status === "partial" ? "Kısmen tamamlandı" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
         </Badge>
       </div>
 
@@ -264,7 +264,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
                 {r.examples.map((e, i) => (
                   <li key={i} className="px-4 py-3 text-sm">
                     <p className="font-medium">&ldquo;{e.prompt}&rdquo;</p>
-                    <p className="mt-1 text-muted">{ENGINE[e.engine] ?? e.engine} · Ticari niyet {e.intentScore}/100 · Atıf yapılanlar: {e.competitorDomains.join(", ")}</p>
+                    <p className="mt-1 text-muted">{ENGINE[e.engine] ?? e.engine} · Satın almaya yakınlık {e.intentScore}/100 · Atıf yapılanlar: {e.competitorDomains.join(", ")}</p>
                   </li>
                 ))}
               </ul>

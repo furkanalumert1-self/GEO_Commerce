@@ -19,7 +19,7 @@ import { cleanQuote } from "@/lib/quote";
 
 export const metadata: Metadata = { title: "Fırsat" };
 
-const COMP_LABEL: Record<string, string> = { intent: "Ticari niyet", visibilityGap: "Görünürlük farkı", catalogFit: "Katalog uyumu", evidenceStrength: "Kanıt gücü", actionability: "Uygulanabilirlik" };
+const COMP_LABEL: Record<string, string> = { intent: "Satın almaya yakınlık", visibilityGap: "Görünürlük farkı", catalogFit: "Katalog uyumu", evidenceStrength: "Kanıt gücü", actionability: "Uygulanabilirlik" };
 const VERIF: Record<string, string> = { verified: "Doğrulandı", likely: "Olası", insufficient_evidence: "Kanıt yetersiz" };
 
 export default async function OpportunityPage({ params }: { params: Promise<{ workspaceId: string; brandId: string; opportunityId: string }> }) {
@@ -42,7 +42,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const members = await db.membership.findMany({ where: { workspaceId }, include: { user: { select: { id: true, name: true, email: true } } } });
   const fixAllowed = hasFeature(access.entitlements, "fix_with_ai");
   const productCount = await db.product.count({ where: { brandId, active: true } });
-  const setupHref = `/w/${workspaceId}/onboarding?brand=${brandId}&step=3`;
+  const setupHref = `/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`;
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
@@ -58,6 +58,8 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
       label={activeAction ? "AI ile iyileştir: yeni taslak" : "AI ile iyileştir: taslak hazırla"}
       pendingLabel="Taslak hazırlanıyor…"
       redirectTo={`${base}/actions/{id}`}
+      disabled={productCount === 0}
+      disabledReason="Önce ürün bilgilerinizi tamamlayın; ürün verisi olmadan taslak hazırlanmaz"
     />
   ) : (
     <span className="flex flex-col items-end gap-1">
@@ -148,7 +150,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
             <div className="px-5 pb-5 text-sm sm:px-6">
               <p>{first?.recommendation ?? o.recommendedAction ?? "Öneri henüz oluşturulmadı."}</p>
               {productCount === 0 ? (
-                <div className="mt-4"><Alert tone="warning" title="Önce ürün bilgilerinizi tamamlayın">Katalogda ürün yok; AI ile iyileştir taslağı ürün ayrıntısı içeremez ve eksik alanlarla gelir. Siteyi tarayın veya ürünlerinizi aktarın.</Alert></div>
+                <div className="mt-4"><Alert tone="warning" title="Önce ürün bilgilerinizi tamamlayın">Katalogda ürün yok; bu yüzden taslak hazırlanamaz. Ürün dosyanızı yükleyin veya mağazanızı bağlayın, ardından bu sayfaya dönün.</Alert></div>
               ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 {productCount === 0 ? setupLink : null}

@@ -30,7 +30,7 @@ export default async function ClientsPage({ params }: { params: Promise<{ worksp
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <Card>
           <TableWrap label="Müşteri markaları">
-            <thead><tr><Th>Müşteri</Th><Th numeric>Aktif prompt</Th><Th numeric>Fırsat</Th><Th>Son veri</Th><Th>Müşteri erişimi</Th></tr></thead>
+            <thead><tr><Th>Müşteri</Th><Th numeric>Takip edilen soru</Th><Th numeric>Fırsat</Th><Th>Son veri</Th><Th>Müşteri erişimi</Th></tr></thead>
             <tbody>
               {brands.map((b) => (
                 <tr key={b.id}>

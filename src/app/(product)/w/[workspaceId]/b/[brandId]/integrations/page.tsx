@@ -11,8 +11,9 @@ import { hasFeature } from "@/modules/billing/plans";
 import { getCommerceAdapters } from "@/adapters/commerce";
 import { shopifyConfigured } from "@/modules/commerce/connect";
 import { fmtDate } from "@/lib/format";
+import { revenueAvailability } from "@/modules/commerce/availability";
 
-export const metadata: Metadata = { title: "Entegrasyon" };
+export const metadata: Metadata = { title: "Mağaza bağlantıları" };
 
 /** Bağlantı durumları (UI): gerçek kontrol sonucu olmadan "Bağlı" gösterilmez. */
 const STATE: Record<string, { label: string; tone: "success" | "warning" | "danger" | "neutral" | "primary" }> = {
@@ -33,7 +34,7 @@ function resolution(code: string | null): string | null {
   if (code === "sync_failed") return "Son senkronizasyon başarısız. Biraz sonra yeniden deneyin; sürerse yeniden bağlanın.";
   if (code === "connect_failed") return "Bağlantı tamamlanamadı. Yeniden deneyin.";
   if (code.startsWith("webhooks_failed")) return "Sipariş bildirimleri (webhook) kaydedilemedi; siparişler yalnız senkronizasyonla gelir. APP_URL'nin herkese açık HTTPS adresi olduğunu kontrol edip yeniden bağlanın.";
-  return `Hata kodu: ${code}`;
+  return "Beklenmeyen bir sorun oluştu. Biraz sonra yeniden deneyin; sürerse yeniden bağlanın.";
 }
 
 const CALLBACK_ERROR: Record<string, string> = {
@@ -50,9 +51,10 @@ export default async function IntegrationsPage({ params, searchParams }: { param
   const access = await pageBrand(workspaceId, brandId);
   const allowed = hasFeature(access.entitlements, "commerce");
   const manage = can({ role: access.brandRole, isApprover: access.isApprover }, "integrations.manage");
-  const [existing, brand] = await Promise.all([
+  const [existing, brand, revenue] = await Promise.all([
     db.integration.findMany({ where: { brandId, workspaceId }, orderBy: { updatedAt: "desc" } }),
     db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { trackerSiteKey: true, domain: true } }),
+    revenueAvailability(db, { workspaceId, brandId }, access.entitlements),
   ]);
   const adapters = getCommerceAdapters();
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
@@ -61,13 +63,31 @@ export default async function IntegrationsPage({ params, searchParams }: { param
   return (
     <>
       <PageHeader
-        breadcrumb={[{ label: "Ayarlar" }, { label: "Entegrasyon" }]}
-        title="Entegrasyon"
-        description="Mağaza bağlantıları, CSV/feed importu ve ölçüm etiketi. Bir bağlantı yalnız gerçek yetki ve API kontrolünden sonra “Bağlı” görünür."
+        breadcrumb={[{ label: "Ayarlar" }, { label: "Mağaza bağlantıları" }]}
+        title="Mağaza bağlantıları"
+        description="Ürün ve sipariş bilgilerinizi GeoAdra'ya aktarın. Bir bağlantı yalnız gerçek yetki kontrolünden sonra “Bağlı” görünür."
       />
+      {revenue.state !== "not_in_plan" ? (
+        <Card id="gelir" className="mb-6 flex flex-col gap-2 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-semibold">Gelir ölçümü</h2>
+            <Badge tone={revenue.state === "active" ? "success" : revenue.state === "error" ? "warning" : "neutral"}>{revenue.state === "active" ? "Etkin" : revenue.state === "error" ? "Güncellenemedi" : "Etkin değil"}</Badge>
+          </div>
+          {revenue.state === "inactive" ? (
+            <>
+              <p className="text-sm text-text-secondary">AI&apos;dan gelen ziyaretlerin siparişe dönüşünü görmek için iki şey gerekir: sipariş kaynağı (mağaza bağlantısı veya sipariş dosyası) ve sitenizdeki ölçüm kodu (aşağıda).</p>
+              <Link className="inline-flex min-h-11 items-center self-start rounded-md border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary-hover sm:min-h-10" href={`/w/${workspaceId}/b/${brandId}/catalog?import=orders#urun-aktar`}>Gelir ölçümünü etkinleştir</Link>
+            </>
+          ) : revenue.state === "error" ? (
+            <p className="text-sm">Siparişler son eşitlemede alınamadı{revenue.lastSyncAt ? `; son başarılı aktarım ${fmtDate(revenue.lastSyncAt, tz, "tr-TR", true)}` : ""}. Aşağıdaki bağlantının çözüm önerisini izleyin.</p>
+          ) : (
+            <p className="text-sm text-text-secondary">Siparişler okunuyor{revenue.lastSyncAt ? ` · son aktarım ${fmtDate(revenue.lastSyncAt, tz, "tr-TR", true)}` : ""}. Sonuçlar Gelir sayfasında.</p>
+          )}
+        </Card>
+      ) : null}
       {sp.connected === "shopify" ? <div className="mb-4"><Alert tone="success" title="Shopify bağlandı">Mağaza erişimi doğrulandı. Katalog ve sipariş senkronizasyonu kuyruğa alındı; tamamlandığında son senkronizasyon zamanı güncellenir.</Alert></div> : null}
       {sp.error ? <div className="mb-4"><Alert tone="danger" title="Bağlantı tamamlanmadı">{CALLBACK_ERROR[sp.error] ?? "Bağlantı sırasında hata oluştu; yeniden deneyin."}</Alert></div> : null}
-      {!allowed ? <div className="mb-4"><Alert tone="primary" title="Mağaza entegrasyonları Commerce paketinde">CSV/feed importu her pakette kullanılabilir. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></div> : null}
+      {!allowed ? <div className="mb-4"><Alert tone="primary" title="Mağaza entegrasyonları Commerce paketinde">Ürün dosyası yükleme her pakette kullanılabilir. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert></div> : null}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {Object.values(adapters).map((a) => {
           const conn = existing.find((e) => e.provider === a.provider && e.status !== "not_configured") ?? existing.find((e) => e.provider === a.provider);
@@ -90,22 +110,22 @@ export default async function IntegrationsPage({ params, searchParams }: { param
                   <dd>{conn.lastSyncAt ? fmtDate(conn.lastSyncAt, tz, "tr-TR", true) : "Henüz yok"}</dd>
                   {conn.scopes.length ? (
                     <>
-                      <dt className="text-text-secondary">Kapsam</dt>
+                      <dt className="text-text-secondary">İzinler</dt>
                       <dd className="min-w-0 break-words">{conn.scopes.join(", ")}</dd>
                     </>
                   ) : null}
                 </dl>
               ) : (
-                <p className="text-xs text-text-secondary">Yetenekler: {a.capabilities().join(", ")}</p>
+                <p className="text-xs text-text-secondary">{a.capabilities().includes("ordersRead") ? "Ürün ve sipariş bilgileri aktarılır." : "Ürün bilgileri aktarılır."}</p>
               )}
               {fix ? <p className="rounded-md bg-surface-subtle px-3 py-2 text-sm"><span className="font-medium">Çözüm: </span>{fix}</p> : null}
               {av.reason && !conn ? <p className="text-sm text-text-secondary">{av.reason}</p> : null}
               <div className="mt-auto flex flex-col gap-2">
                 {a.provider === "csv_feed" ? (
-                  <Link className="inline-flex min-h-11 items-center self-start rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`/w/${workspaceId}/b/${brandId}/catalog`}>CSV içe aktar</Link>
+                  <Link className="inline-flex min-h-11 items-center self-start rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`}>Dosya yükle</Link>
                 ) : a.provider === "shopify" ? (
                   !shopifyReady ? (
-                    <p className="text-sm text-text-secondary">Shopify uygulama anahtarları sunucuda yapılandırılmadığı için bağlantı kullanılamıyor.</p>
+                    <p className="text-sm text-text-secondary">Shopify bağlantısı şu an kullanılamıyor; ürün ve sipariş dosyası yükleyebilirsiniz.</p>
                   ) : conn && (conn.status === "healthy" || conn.status === "degraded") ? (
                     <div className="flex flex-wrap gap-2">
                       <ApiButton url={`${api}/integrations/shopify/sync`} label="Şimdi senkronize et" pendingLabel="Kuyruğa alınıyor…" onSuccessMessage="Senkronizasyon kuyruğa alındı" disabled={Boolean(blockReason)} disabledReason={blockReason} />
@@ -115,7 +135,7 @@ export default async function IntegrationsPage({ params, searchParams }: { param
                     <ShopifyConnectForm url={`${api}/integrations/shopify/connect`} initialShop={conn?.storeId} label={conn && conn.status !== "not_configured" ? "Yeniden bağlan" : "Bağlan"} disabledReason={blockReason} />
                   )
                 ) : (
-                  <p className="text-sm text-text-secondary">Bu sağlayıcı için canlı bağlantı henüz yok; CSV/feed importunu kullanın.</p>
+                  <p className="text-sm text-text-secondary">Bu mağaza için doğrudan bağlantı henüz yok; mağaza panelinizden dışa aktardığınız dosyayı yükleyin.</p>
                 )}
               </div>
             </Card>
@@ -123,7 +143,7 @@ export default async function IntegrationsPage({ params, searchParams }: { param
         })}
       </div>
       <Card className="mt-6 p-5">
-        <h2 className="font-semibold">Ölçüm etiketi (first-party tracker)</h2>
+        <h2 className="font-semibold">Ölçüm kodu</h2>
         <p className="mt-1 text-sm text-text-secondary">AI kaynaklı ziyaret ve siparişleri eşleştirmek için sitenize eklenir; yalnız kullanıcı izni (consent) varsa olay gönderir. Site anahtarı gizli değildir; yalnız {brand.domain} alan adından kabul edilir. Sohbet metni, form alanları ve gereksiz kişisel veri toplanmaz.</p>
         <pre className="mt-3 overflow-x-auto rounded-md border border-border bg-surface-subtle p-3 text-xs">{`<script>
   // Consent yönetim aracınız izin verdiğinde çağırın:

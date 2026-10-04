@@ -94,16 +94,35 @@ function sourceTypeFor(domain: string): string {
   return "other";
 }
 
-/** Açık liste: numaralı veya madde işaretli satırlar ≥2. */
+/**
+ * Açık liste: numaralı veya madde işaretli üst düzey satırlar ≥2.
+ * Numaralı satırda sıra, yazılan numaradır (ör. "4. Bellona" → 4). Madde işaretli listede sıra,
+ * o listedeki konumdur; yeni bir başlık/paragrafla başlayan liste sayacı sıfırlar. Girintili alt
+ * maddeler ayrı sıra almaz, üst maddenin parçası sayılır.
+ */
 function listItems(text: string): Array<{ index: number; start: number; end: number }> {
   const lines = text.split("\n");
   const items: Array<{ index: number; start: number; end: number }> = [];
   let offset = 0;
-  let n = 0;
+  let bulletN = 0;
+  let last: { index: number; start: number; end: number } | null = null;
   for (const line of lines) {
-    if (/^\s*(\d+[.)]|[-*•])\s+/.test(line)) {
-      n++;
-      items.push({ index: n, start: offset, end: offset + line.length });
+    const numbered = /^ {0,1}(\d{1,3})[.)]\s+/.exec(line);
+    const bullet = /^ {0,1}[-*•]\s+/.test(line);
+    const indented = /^(\s{2,}|\t)\S/.test(line);
+    if (numbered) {
+      last = { index: Number(numbered[1]), start: offset, end: offset + line.length };
+      items.push(last);
+      bulletN = 0;
+    } else if (bullet) {
+      bulletN++;
+      last = { index: bulletN, start: offset, end: offset + line.length };
+      items.push(last);
+    } else if (indented && last) {
+      last.end = offset + line.length; // alt madde/devam satırı üst maddeye aittir
+    } else if (line.trim()) {
+      bulletN = 0;
+      last = null;
     }
     offset += line.length + 1;
   }
@@ -125,7 +144,8 @@ export function extract(answer: string, urls: string[], entities: Entity[]): Ext
     const matchedOnlyShortAlias = terms
       .filter((t) => findAll(lower, t).length > 0)
       .every((t) => t.trim().length <= 3);
-    const item = items.find((it) => first >= it.start && first <= it.end);
+    // Sıra: markanın liste maddesi içindeki ilk geçişi (önce düz metinde geçse bile).
+    const item = items.find((it) => positions.some((p) => p >= it.start && p <= it.end));
     let kind: ExtractedMention["kind"] = "mention";
     if (NEGATIVE.some((k) => around.includes(k))) kind = "negative";
     else if (item || RECOMMEND.some((k) => around.includes(k))) kind = "recommendation";

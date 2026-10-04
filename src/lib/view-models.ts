@@ -55,8 +55,12 @@ export const IMPACT_LABEL: Record<ImpactLevel, string> = {
 };
 
 /** Mevcut öncelik alanını kullanır; geçici (provisional) skorlu fırsatta etki belirlenmiş sayılmaz. */
-export function impactLevel(o: { priority?: string | null; score?: number | null; provisional?: boolean }): ImpactLevel {
+/** Kanıt güveni bu eşiğin altındaysa (≈12 başarılı yanıttan az) etki en fazla "Orta" gösterilir; az veriyle kesin teşhis verilmez. */
+export const STRONG_EVIDENCE_CONFIDENCE = 0.5;
+
+export function impactLevel(o: { priority?: string | null; score?: number | null; provisional?: boolean; confidence?: number | null }): ImpactLevel {
   if (o.provisional || o.score === null || o.score === undefined) return "unknown";
+  if (o.priority === "high" && typeof o.confidence === "number" && o.confidence < STRONG_EVIDENCE_CONFIDENCE) return "medium";
   if (o.priority === "high" || o.priority === "medium" || o.priority === "low") return o.priority;
   return "unknown";
 }
@@ -202,4 +206,21 @@ export function plainTr(text: string): string {
     .replace(/cohort/gi, "soru kümesi")
     .replace(/prompt'un/gi, "sorunun")
     .replace(/\bprompt\b/gi, "soru");
+}
+
+// ── Yanıt metni durumu ─────────────────────────────────────────────────────
+
+export const RAW_TEXT_RETENTION_DAYS = 30;
+
+/**
+ * Yanıt metni yoksa nedeni: alınamadı / işlenemedi / süresi doldu / saklanmadı ayrı söylenir.
+ * Başarısız yanıt "değerlendirilemedi"dir; sıfır görünürlük veya silinmiş kayıt gibi gösterilmez.
+ */
+export function rawTextNote(o: { status: string; rawText: string | null; sampledAt: Date; errorCode?: string | null }, now = new Date()): string | null {
+  if (o.rawText) return null;
+  if (o.status === "failed" || o.status === "pending") return `Yanıt alınamadı${o.errorCode ? ` (${o.errorCode})` : ""}. Bu ölçüm değerlendirilemedi; sıfır görünürlük sayılmaz.`;
+  if (o.status === "parse_failed") return "Yanıt alındı ancak işlenemedi; bu ölçüm değerlendirilemedi.";
+  const ageDays = (now.getTime() - o.sampledAt.getTime()) / 86_400_000;
+  if (ageDays > RAW_TEXT_RETENTION_DAYS) return `Yanıt metni saklama süresi (${RAW_TEXT_RETENTION_DAYS} gün) dolduğu için silindi; ölçüm sonuçları korunur.`;
+  return "Bu yanıtın metni saklanmadı; ölçüm sonuçları korunur.";
 }

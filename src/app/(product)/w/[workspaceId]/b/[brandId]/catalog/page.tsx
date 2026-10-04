@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Badge, Card, CardHeader, EmptyState, PageHeader, TableWrap, Td, Th, cn } from "@/components/ui";
+import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader, TableWrap, Td, Th, cn } from "@/components/ui";
 import { Pager, pageParams } from "@/components/data/pager";
 import { ApiButton } from "@/components/forms/api-button";
 import { CsvImportForm } from "@/components/forms/csv-import";
@@ -10,7 +10,10 @@ import { fmtDate, fmtMoney, fmtNumber } from "@/lib/format";
 import { JobStartButton } from "@/components/forms/job-start-button";
 import { executionMode } from "@/lib/queue";
 
-export const metadata: Metadata = { title: "Katalog" };
+export const metadata: Metadata = { title: "Ürünlerim" };
+
+const SOURCE_LABEL: Record<string, string> = { crawl: "Site incelemesi", feed: "Ürün dosyası", csv: "Ürün dosyası", connector: "Mağaza bağlantısı" };
+const PROVIDER_LABEL: Record<string, string> = { shopify: "Shopify", ikas: "ikas", ticimax: "Ticimax", ideasoft: "IdeaSoft", csv_feed: "Ürün/sipariş dosyası", openai_ads: "ChatGPT Ads" };
 
 export default async function CatalogPage({ params, searchParams }: { params: Promise<{ workspaceId: string; brandId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId, brandId } = await params;
@@ -28,7 +31,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
     ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}),
     ...(stock === "out" ? { variants: { some: { available: false } } } : stock === "in" ? { variants: { some: { available: true } } } : {}),
   };
-  const [products, productTotal, categories, pages, pageTotal, lastCrawl, integrations] = await Promise.all([
+  const [products, productTotal, categories, pages, pageTotal, lastCrawl, integrations, productPageCount, activeProducts] = await Promise.all([
     tab === "products" ? db.product.findMany({ where: productWhere, include: { variants: { take: 1 }, categories: { include: { category: { select: { name: true } } } } }, orderBy: { name: "asc" }, skip, take: pageSize }) : [],
     db.product.count({ where: productWhere }),
     tab === "categories" ? db.category.findMany({ where: { brandId }, include: { _count: { select: { products: true } } }, orderBy: { name: "asc" } }) : [],
@@ -36,7 +39,16 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
     db.pageSnapshot.count({ where: { brandId } }),
     db.crawlRun.findFirst({ where: { brandId }, orderBy: { createdAt: "desc" } }),
     db.integration.findMany({ where: { brandId }, select: { provider: true, status: true, lastSyncAt: true } }),
+    db.pageSnapshot.count({ where: { brandId, pageType: "product" } }),
+    db.product.count({ where: { brandId, workspaceId } }),
   ]);
+  // "Tarandı ama ürün yok": nedeni sayfa türünden söylenir; çözüm yeniden tarama değil, ürün dosyası/mağaza bağlantısıdır.
+  const emptyReason =
+    activeProducts > 0 || pageTotal === 0
+      ? null
+      : productPageCount === 0
+        ? `${fmtNumber(pageTotal)} sayfa incelendi ancak hiçbiri ürün sayfası olarak tanınmadı. Ürün sayfalarınızda ürün bilgisi işaretlemesi (ad, fiyat, stok) olmayabilir veya ürün sayfaları ilk incelenen sayfalar arasına girmemiş olabilir.`
+        : `${fmtNumber(productPageCount)} ürün sayfası bulundu ancak ürün adı/fiyatı okunamadı (sayfalarda ürün bilgisi işaretlemesi eksik).`;
 
   const tabLink = (t: string, label: string) => (
     <Link href={`${base}?tab=${t}`} aria-current={tab === t ? "page" : undefined} className={cn("inline-flex min-h-11 items-center border-b-2 px-3 text-sm sm:min-h-9", tab === t ? "border-primary font-medium text-primary" : "border-transparent text-muted hover:text-text")}>
@@ -47,22 +59,29 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
   return (
     <>
       <PageHeader
-        title="Katalog"
-        description={`Ürünler, kategoriler ve taranan URL'ler. Son tarama: ${lastCrawl ? fmtDate(lastCrawl.finishedAt ?? lastCrawl.createdAt, access.brand.timezone, "tr-TR", true) : "henüz yok"}.`}
-        action={<JobStartButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} label="Siteyi yeniden tara" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />}
+        title="Ürünlerim"
+        description={`Taslaklarda kullanılan ürün bilgileri. Son site incelemesi: ${lastCrawl ? fmtDate(lastCrawl.finishedAt ?? lastCrawl.createdAt, access.brand.timezone, "tr-TR", true) : "henüz yok"}.`}
+        action={<JobStartButton url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/crawls`} body={{ maxPages: 50 }} label="Siteyi yeniden incele" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />}
       />
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         {integrations.map((i) => (
           <Badge key={i.provider} tone={i.status === "healthy" ? "success" : i.status === "reauth_required" || i.status === "degraded" ? "warning" : "neutral"}>
-            {i.provider}: {i.status}
+            {PROVIDER_LABEL[i.provider] ?? i.provider}: {i.status === "healthy" ? "bağlı" : i.status === "reauth_required" ? "yeniden yetki gerekli" : i.status === "degraded" ? "sorunlu" : "kurulmadı"}
           </Badge>
         ))}
       </div>
+      {emptyReason ? (
+        <div className="mb-4">
+          <Alert tone="warning" title="Ürün bulunamadı">
+            {emptyReason} Siteyi yeniden incelemek bunu genelde değiştirmez. <a className="font-medium text-primary underline" href="#urun-aktar">Ürün dosyanızı yükleyin</a> veya mağazanızı <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations`}>bağlayın</Link>.
+          </Alert>
+        </div>
+      ) : null}
       <Card>
         <div className="flex flex-wrap gap-1 border-b border-border px-2" role="tablist" aria-label="Katalog görünümü">
-          {tabLink("products", `Ürünler (${fmtNumber(productTotal)})`)}
+          {tabLink("products", `Ürünlerim (${fmtNumber(productTotal)})`)}
           {tabLink("categories", "Kategoriler")}
-          {tabLink("pages", `URL'ler (${fmtNumber(pageTotal)})`)}
+          {tabLink("pages", `İncelenen sayfalar (${fmtNumber(pageTotal)})`)}
         </div>
         {tab === "products" ? (
           <>
@@ -84,7 +103,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
               {q || stock ? <Link className="min-h-9 py-2 text-sm text-primary underline" href={base}>Filtreleri sıfırla</Link> : null}
             </form>
             {products.length === 0 ? (
-              <EmptyState title={q || stock ? "Sonuç yok" : "Katalog boş"} description={q || stock ? "Filtrelere uyan ürün yok." : "Siteyi tarayın veya CSV/feed ile ürün içe aktarın."} />
+              <EmptyState title={q || stock ? "Sonuç yok" : "Katalog boş"} description={q || stock ? "Filtrelere uyan ürün yok." : "Ürün dosyanızı aşağıdan yükleyin veya mağazanızı bağlayın."} />
             ) : (
               <TableWrap label="Ürünler">
                 <thead>
@@ -94,7 +113,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
                     <Th>SKU</Th>
                     <Th numeric>Fiyat</Th>
                     <Th>Stok</Th>
-                    <Th>Kaynak</Th>
+                    <Th>Nereden</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -107,7 +126,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
                         <Td className="text-muted">{v?.sku ?? "—"}</Td>
                         <Td numeric>{v?.priceMinor != null && v.currency ? fmtMoney(v.priceMinor, v.currency) : "Ölçülemedi"}</Td>
                         <Td>{v?.available == null ? <Badge>Bilinmiyor</Badge> : v.available ? <Badge tone="success">Stokta</Badge> : <Badge tone="danger">Yok</Badge>}</Td>
-                        <Td className="text-muted">{p.source}</Td>
+                        <Td className="text-muted">{SOURCE_LABEL[p.source] ?? p.source}</Td>
                       </tr>
                     );
                   })}
@@ -139,12 +158,12 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
         ) : null}
         {tab === "pages" ? (
           <>
-            <TableWrap label="Taranan URL'ler">
+            <TableWrap label="İncelenen sayfalar">
               <thead>
                 <tr>
-                  <Th>URL</Th>
+                  <Th>Sayfa</Th>
                   <Th>Tür</Th>
-                  <Th>Şema</Th>
+                  <Th>Ürün bilgisi işaretlemesi</Th>
                   <Th>Durum</Th>
                   <Th>Örnekleme</Th>
                 </tr>
@@ -158,7 +177,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
                       <Td>{p.pageType ?? "—"}</Td>
                       <Td className="text-muted">{p.schemaTypes.join(", ") || "—"}</Td>
                       <Td>
-                        {p.excluded ? <Badge>Hariç</Badge> : f?.noindex ? <Badge tone="danger">noindex</Badge> : f?.productComplete === false ? <Badge tone="warning">Eksik Offer</Badge> : <Badge tone="success">OK</Badge>}
+                        {p.excluded ? <Badge>Hariç</Badge> : f?.noindex ? <Badge tone="danger">Arama motorlarına kapalı</Badge> : f?.productComplete === false ? <Badge tone="warning">Fiyat/stok bilgisi eksik</Badge> : <Badge tone="success">Sorun yok</Badge>}
                       </Td>
                       <Td className="text-muted">{fmtDate(p.sampledAt, access.brand.timezone)}</Td>
                     </tr>
@@ -170,10 +189,10 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
           </>
         ) : null}
       </Card>
-      <Card className="mt-6">
-        <CardHeader title="CSV / feed içe aktarma" description="Tüm platformlarda kullanılabilen, açıkça etiketli yedek yöntem. Sütun eşlemesini aşağıda belirtin." />
+      <Card className="mt-6" id="urun-aktar">
+        <CardHeader title="Ürün dosyası içe aktarma" description="Mağaza panelinizden ürün listesini CSV olarak dışa aktarıp yükleyin. Örnek dosyayı indirip sütunları karşılaştırabilirsiniz." />
         <div className="p-4">
-          <CsvImportForm url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/catalog/import`} />
+          <CsvImportForm url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/catalog/import`} initialKind={sp.import === "orders" ? "orders" : "products"} />
         </div>
       </Card>
     </>

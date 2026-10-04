@@ -48,7 +48,7 @@ export function OpportunityControls({ url, status, ownerId, priority, dueAt, mem
         }}
         onChange={() => setDirty(true)}
       >
-        <Field label="Sahip" htmlFor="o-owner">
+        <Field label="Sorumlu" htmlFor="o-owner">
           <select id="o-owner" className={inputClass} value={owner} onChange={(e) => setOwner(e.target.value)}>
             <option value="">Atanmadı</option>
             {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -61,7 +61,7 @@ export function OpportunityControls({ url, status, ownerId, priority, dueAt, mem
             <option value="low">Düşük</option>
           </select>
         </Field>
-        <Field label="Termin" htmlFor="o-due">
+        <Field label="Hedef tarih" htmlFor="o-due">
           <input id="o-due" type="date" className={inputClass} value={due} onChange={(e) => setDue(e.target.value)} />
         </Field>
         {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}

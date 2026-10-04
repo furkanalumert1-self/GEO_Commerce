@@ -38,7 +38,7 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
   // Ürün verisi yoksa taslak yalnız yer tutuculardan oluşur; kota harcamadan önce açıkça söylenir.
   const productCount = await db.product.count({ where: { brandId: access.brandId, active: true } });
   if (productCount === 0 && !fixturesAllowed(access)) {
-    throw new AppError("conflict", "Katalogda ürün yok: önce Kurulum › Keşfi onayla adımında siteyi tarayın veya mağazanızı bağlayın; ürün verisi olmadan taslak yer tutuculardan oluşur");
+    throw new AppError("conflict", "Katalogda ürün yok: önce Katalog › Ürün dosyası içe aktarma ile ürünlerinizi yükleyin veya mağazanızı bağlayın; ürün verisi olmadan taslak hazırlanmaz");
   }
   const period = await currentPeriod(db, access.workspaceId);
   await ensureBucket(db, access.workspaceId, "fix_units", period, access.entitlements.fixUnits);

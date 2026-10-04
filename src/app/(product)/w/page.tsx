@@ -17,7 +17,7 @@ export default async function WorkspaceIndex() {
         <h1 className="text-xl font-semibold">Henüz bir çalışma alanınız yok</h1>
         <p className="mt-2 text-sm text-text-secondary">Hesabınız boş başlar; örnek veri eklenmez. Kurulum adımları:</p>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-text-secondary">
-          <li>Alan adınızla ücretsiz GEO Audit başlatın ve raporu hesabınıza kaydedin (marka ve 7 günlük Starter denemesi oluşur).</li>
+          <li>Alan adınızla ücretsiz ölçüm başlatın ve raporu hesabınıza kaydedin (marka ve 7 günlük Starter denemesi oluşur).</li>
           <li>Alan adı doğrulaması ve mağaza/katalog bağlantısı.</li>
           <li>Soruları onaylayıp ilk ölçümü başlatın.</li>
         </ol>

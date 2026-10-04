@@ -50,12 +50,12 @@ export default async function CitationsPage({ params, searchParams }: { params: 
   const csvHref = `/api/v1/workspaces/${workspaceId}/brands/${brandId}/citations/export?days=${range.days}`;
   return (
     <>
-      <PageHeader title="Kaynaklar (citation)" description="Yanıtlarda atıf yapılan siteler. Bir bağlantının varlığı sayfanın belirli markayı önerdiğini tek başına kanıtlamaz." action={<a className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm hover:bg-bg sm:min-h-9" href={csvHref}>Kaynak listesini indir</a>} />
+      <PageHeader title="AI'ın kullandığı kaynaklar" description="Yanıtlarda atıf yapılan siteler. Bir bağlantının varlığı sayfanın belirli markayı önerdiğini tek başına kanıtlamaz." action={<a className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm hover:bg-bg sm:min-h-9" href={csvHref}>Kaynak listesini indir</a>} />
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} showEngine={false} />
       <div className="mb-4 flex gap-2 text-sm">
         <Link href={`${base}?range=${sp.range ?? "30"}`} className={onlyGap ? "text-primary underline" : "font-medium"}>Tüm kaynaklar</Link>
         <span aria-hidden>·</span>
-        <Link href={`${base}?range=${sp.range ?? "30"}&gap=1`} className={onlyGap ? "font-medium" : "text-primary underline"}>Yalnız citation boşluğu</Link>
+        <Link href={`${base}?range=${sp.range ?? "30"}&gap=1`} className={onlyGap ? "font-medium" : "text-primary underline"}>Yalnız görünürlük fırsatları</Link>
       </div>
       <Card>
         <CardHeader title={`${rows.length} site · ${rows.reduce((s, r) => s + r.urls.size, 0)} URL`} description="Boşluk: rakip anılan yanıtlarda atıf yapılan, markanızın anıldığı hiçbir yanıtta görünmeyen yayın, pazaryeri ve inceleme siteleri (outreach hedefi). Olası rakip: başka bir markanın mağazası olabilir; Rakipler sayfasından ekleyebilirsiniz." />

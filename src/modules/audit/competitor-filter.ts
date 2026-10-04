@@ -59,3 +59,20 @@ export function nonCompetitorReason(domain: string, ownDomain?: string): NonComp
 }
 
 export const isCompetitorCandidate = (domain: string, ownDomain?: string) => nonCompetitorReason(domain, ownDomain) === null;
+
+/** Genel bilgi kaynakları (kamu/akademik kurum, ansiklopedi, sağlık otoriteleri, sosyal ağ): tanıtım/iletişim hedefi değildir. */
+const GENERAL_INFO = new Set([
+  "wikipedia", "wikihow", "britannica", "dergipark", "researchgate", "academia", "springer", "sciencedirect", "ncbi", "nih", "jstor",
+  "who", "cdc", "mayoclinic", "webmd", "healthline", "medlineplus",
+  "google", "youtube", "instagram", "facebook", "twitter", "x", "tiktok", "linkedin", "pinterest", "reddit", "quora", "eksisozluk", "uludagsozluk",
+]);
+
+/**
+ * "Diğer sitelerde görünürlük fırsatı" için uygun mu: rakip mağaza, kendi site ve genel bilgi kaynağı değil.
+ * Haber/medya, inceleme ve pazaryeri siteleri uygundur (gerçek tanıtım/listeleme ilişkisi kurulabilir).
+ */
+export function isOutreachTarget(domain: string, ownDomain?: string): boolean {
+  const reason = nonCompetitorReason(domain, ownDomain);
+  if (reason === null || reason === "own" || reason === "invalid" || reason === "institutional") return false;
+  return !GENERAL_INFO.has(registrableLabel(domain.toLowerCase().trim().replace(/^www\./, "")));
+}

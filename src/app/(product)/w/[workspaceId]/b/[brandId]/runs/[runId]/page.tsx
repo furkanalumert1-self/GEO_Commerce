@@ -34,7 +34,7 @@ export default async function RunPage({ params }: { params: Promise<{ workspaceI
         description={`${run.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")} · ${run.locales.join(", ")} · ${run.repetitions} tekrar`}
       />
       <Card className="mb-6 p-4" aria-live="polite">
-        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(run.completedCount)], ["Başarısız", String(run.failedCount)], ["Coverage", fmtPct(run.coverage)], ["Config", run.configVersion], ["Tetikleyici", run.trigger]]} />
+        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(run.completedCount)], ["Başarısız", String(run.failedCount)], ["Tamamlanan ölçüm", fmtPct(run.coverage)], ["Config", run.configVersion], ["Tetikleyici", run.trigger]]} />
         {running && inline && job && !["succeeded", "partial", "dead", "canceled"].includes(job.status) ? (
           <div className="mt-3">
             <InlineJobDriver advanceUrl={`/api/v1/jobs/${job.id}/advance`} initialStatus={job.status} label="Ölçüm" />

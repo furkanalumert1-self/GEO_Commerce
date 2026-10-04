@@ -18,6 +18,8 @@ export interface AdGroupPlan {
   answers: number;
   brandMentioned: number;
   lostTo: Array<{ name: string; count: number }>;
+  /** Bu reklam grubunun dayandığı ölçülen sorular (en fazla 5). */
+  prompts: string[];
   priority: "yüksek" | "orta" | "düşük";
   hints: string[];
   competitorHints: string[];
@@ -34,10 +36,11 @@ export function copySuggestions(brand: string, category: string, usps: string[] 
   const c = category.trim();
   const cl = lower(c);
   const usp = usps.map((u) => u.trim()).filter(Boolean);
+  // Kategori tekil ("Güneş kremi") veya çoğul ("Nemlendiriciler") olabilir; tamlama kurmayan kalıplar kullanılır.
   const out = [
-    { title: `${c} Modelleri`, body: `${brand} ${cl} seçeneklerini inceleyin, size uygun modeli bulun` },
-    { title: `${brand} ${c}`, body: usp[0] ? `${usp[0]}. ${c} modellerini karşılaştırın` : `Ölçü, renk ve fiyatlara göre ${cl} modellerini karşılaştırın` },
-    { title: `${c} Seçenekleri`, body: usp[1] ? `${usp[1]}. İhtiyacınıza uygun ${cl} seçenekleri` : `İhtiyacınıza uygun ${cl} seçeneklerini keşfedin` },
+    { title: `${brand} ${c}`, body: `${c} için ölçü, özellik ve fiyatları karşılaştırın; size uygun olanı seçin` },
+    { title: `${c} | ${brand}`, body: usp[0] ? `${usp[0]}. ${c} için seçenekleri karşılaştırın` : `${c} için ihtiyacınıza uygun seçenekleri inceleyin` },
+    { title: `${brand}: ${cl}`, body: usp[1] ? `${usp[1]}. ${c} için size uygun seçenekler` : `${c} seçerken özellikleri ve fiyatları yan yana görün` },
   ];
   return out.map((x) => ({ title: fit(x.title, CHATGPT_ADS_SPEC.title.max), body: fit(x.body, CHATGPT_ADS_SPEC.body.max) }));
 }
@@ -123,6 +126,7 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
         answers: e.answers,
         brandMentioned: e.brand,
         lostTo,
+        prompts: [...e.prompts].slice(0, 5),
         priority: (lostTotal >= 2 && e.brand === 0 ? "yüksek" : lostTotal >= 1 ? "orta" : "düşük") as AdGroupPlan["priority"],
         hints: contextHints({ prompts: [...e.prompts], category, products: productNames }),
         competitorHints: lostTo.slice(0, 3).map((c) => `${lower(c.name)} alternatifi ${lower(category)}`),
@@ -134,7 +138,7 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
   // Ölçüm yapılmamışsa kategorilerden başlangıç reklam grupları önerilir.
   if (!adGroups.length) {
     for (const c of brand.categories.slice(0, 3)) {
-      adGroups.push({ clusterId: `category:${c}`, label: c, category: c, answers: 0, brandMentioned: 0, lostTo: [], priority: "orta", hints: contextHints({ prompts: [], category: c, products: productNames }), competitorHints: [], copies: copySuggestions(brand.name, c, opts.usps) });
+      adGroups.push({ clusterId: `category:${c}`, label: c, category: c, answers: 0, brandMentioned: 0, lostTo: [], prompts: [], priority: "orta", hints: contextHints({ prompts: [], category: c, products: productNames }), competitorHints: [], copies: copySuggestions(brand.name, c, opts.usps) });
     }
   }
 

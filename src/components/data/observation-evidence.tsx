@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui";
 import { ENGINE_SHORT, SURFACE_LABEL, fmtDate } from "@/lib/format";
+import { rawTextNote } from "@/lib/view-models";
 
 export interface EvidenceObservation {
   id: string;
@@ -21,9 +22,9 @@ export interface EvidenceObservation {
   citations: Array<{ id: string; url: string; domain: string; association: string; sourceType: string | null }>;
 }
 
-const KIND: Record<string, string> = { mention: "Mention", recommendation: "Öneri", negative: "Olumsuz", incidental: "Tesadüfi" };
+const KIND: Record<string, string> = { mention: "Anıldı", recommendation: "Öneri", negative: "Olumsuz", incidental: "Tesadüfi" };
 
-/** Ham yanıt + citation provenance. Ham metin 30 gün sonra silinir (retention). */
+/** Yanıt + kaynak bilgisi. Yanıt metni 30 gün sonra silinir; başarısız yanıt "değerlendirilemedi" olarak ayrılır. */
 export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObservation; names: Record<string, string>; timeZone: string }) {
   return (
     <div className="flex flex-col gap-4 text-sm">
@@ -39,10 +40,10 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
         <div><dt className="text-muted">Örnekleme</dt><dd>{fmtDate(o.sampledAt, timeZone, "tr-TR", true)}</dd></div>
         <div><dt className="text-muted">Tekrar / deneme</dt><dd>{o.repetition} / {o.attempt}</dd></div>
       </dl>
-      {o.status !== "succeeded" ? <Badge tone="warning">Başarısız ({o.errorCode ?? o.status}) — görünürlük düşüşü sayılmaz</Badge> : null}
+      {o.status !== "succeeded" ? <Badge tone="warning">Değerlendirilemedi — görünürlük düşüşü sayılmaz</Badge> : null}
       <div>
-        <p className="mb-1 text-xs text-muted">Ham yanıt {o.listDetected ? "(açık liste tespit edildi — sıra yalnız listede anlamlı)" : "(liste yok — sıra verilmez)"}</p>
-        <pre className="max-h-72 overflow-auto rounded-md border border-border bg-bg p-3 font-sans text-sm whitespace-pre-wrap">{o.rawText ?? "Ham yanıt saklama süresi (30 gün) dolduğu için silindi."}</pre>
+        <p className="mb-1 text-xs text-muted">AI yanıtı {o.listDetected ? "(numaralı liste var — sıra yalnız listede gösterilir)" : "(liste yok — sıra gösterilmez)"}</p>
+        {o.rawText ? <pre className="max-h-72 overflow-auto rounded-md border border-border bg-bg p-3 font-sans text-sm whitespace-pre-wrap">{o.rawText}</pre> : <p className="rounded-md border border-border bg-bg p-3 text-sm text-text-secondary">{rawTextNote(o)}</p>}
       </div>
       <div>
         <p className="mb-1 font-medium">Markanın / rakiplerin anılması</p>
@@ -53,7 +54,7 @@ export function ObservationEvidence({ o, names, timeZone }: { o: EvidenceObserva
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{names[m.entityId] ?? m.entityId}</span>
                   <Badge tone={m.kind === "recommendation" ? "success" : m.kind === "negative" ? "danger" : "neutral"}>{KIND[m.kind] ?? m.kind}</Badge>
-                  {m.rank !== null ? <Badge>Liste sırası {m.rank}</Badge> : null}
+                  {m.rank !== null && o.listDetected ? <Badge>Liste sırası {m.rank}</Badge> : null}
                   {m.needsReview ? <Badge tone="warning">İnceleme gerekli</Badge> : null}
                   <span className="text-xs text-muted">güven {Math.round(m.confidence * 100)}%</span>
                 </div>

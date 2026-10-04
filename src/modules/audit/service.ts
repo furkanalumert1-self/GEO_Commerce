@@ -167,7 +167,7 @@ export function auditPrompts(categories: string[], country: string): string[] {
   const base = categories;
   const templates = [
     (c: string) => `${place} en iyi ${c.toLocaleLowerCase("tr-TR")} markaları hangileri?`,
-    (c: string) => `Küçük bir ev için hangi ${c.toLocaleLowerCase("tr-TR")} modellerini önerirsin?`,
+    (c: string) => `${c.toLocaleLowerCase("tr-TR")} seçerken hangi özelliklere bakmalıyım, hangi modelleri önerirsin?`.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")),
     (c: string) => `Uygun fiyatlı ve kaliteli ${c.toLocaleLowerCase("tr-TR")} nereden alabilirim?`,
     (c: string) => `${c.toLocaleLowerCase("tr-TR")} alırken nelere dikkat etmeliyim, hangi markaları karşılaştırmalıyım?`.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR")),
     (c: string) => `Popüler ${c.toLocaleLowerCase("tr-TR")} markalarına alternatif ne var?`,

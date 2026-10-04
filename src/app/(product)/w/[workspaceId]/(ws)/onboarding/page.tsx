@@ -12,10 +12,12 @@ import { engineAvailability } from "@/modules/monitoring/start";
 import { isUuid } from "@/modules/tenancy/access";
 import { JobStartButton } from "@/components/forms/job-start-button";
 import { executionMode } from "@/lib/queue";
+import { QuestionPicker } from "@/components/forms/question-picker";
+import { loadPickerData } from "@/modules/prompts/picker";
 
 export const metadata: Metadata = { title: "Kurulum" };
 
-const STEPS = ["Marka ve alan adı", "Pazar ve marka bilgileri", "Keşfi onayla", "Rakipleri onayla", "Niyet listesi ve bütçe", "İlk ölçüm", "Mağaza bağlantısı"];
+const STEPS = ["Marka ve alan adı", "Pazar ve marka bilgileri", "Keşfi onayla", "Rakipleri onayla", "Takip edeceğiniz sorular", "İlk ölçüm", "Mağaza bağlantısı"];
 
 export default async function OnboardingPage({ params, searchParams }: { params: Promise<{ workspaceId: string }>; searchParams: Promise<Record<string, string | undefined>> }) {
   const { workspaceId } = await params;
@@ -44,6 +46,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
     db.prompt.count({ where: { brandId, active: true } }),
     db.monitoringRun.count({ where: { brandId } }),
   ]);
+  const picker = step === 5 ? await loadPickerData(db, { workspaceId, brandId }, brand, access.entitlements.activePrompts) : null;
   const nav = (
     <div className="mt-6 flex flex-wrap justify-between gap-2">
       {step > 1 ? <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm" href={`${base}&step=${step - 1}`}>Geri</Link> : <span />}
@@ -96,18 +99,14 @@ export default async function OnboardingPage({ params, searchParams }: { params:
               <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/competitors`}>Rakip ekle/çıkar</Link>
             </div>
           ) : null}
-          {step === 5 ? (
-            <div className="flex flex-col gap-2">
-              <p>{prompts} aktif prompt · paket limiti {access.entitlements.activePrompts}. Sorular ürün kategorilerinizden üretilir; düzenleyebilir veya arşivleyebilirsiniz.</p>
-              {prompts < access.entitlements.activePrompts ? (
-                <div>
-                  <ApiButton url={`${api}/prompts/generate`} variant={prompts === 0 ? "primary" : "secondary"} label={prompts === 0 ? `Kategorilerden soru üret (${brand.categories.join(", ") || "önce adım 2'de kategori girin"})` : "Kategorilerden soru ekle"} disabled={!brand.categories.length} disabledReason="Önce adım 2'de ürün kategorilerini girin" onSuccessMessage="Sorular eklendi" />
-                </div>
-              ) : null}
-              <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Niyet listesini düzenle</Link>
+          {step === 5 && picker ? (
+            <div className="flex flex-col gap-3">
+              <p className="text-text-secondary">Müşterilerinizin AI asistanlarına sorabileceği soruları seçin. Ölçüm bu sorularla yapılır; reklam bütçesiyle ilgisi yoktur.</p>
+              <QuestionPicker data={picker} api={api} nextHint="Sıradaki adım: İlk ölçüm." />
+              <Link className="text-sm text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Tüm takip ettiğim soruları gör</Link>
             </div>
           ) : null}
-          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce soru listesi oluşturun: <Link className="text-primary underline" href={`${base}&step=5`}>Adım 5 — Niyet listesi</Link> sayfasında &ldquo;Kategorilerden soru üret&rdquo;e basın.</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
+          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce takip edeceğiniz soruları seçin: <Link className="text-primary underline" href={`${base}&step=5`}>Adım 5 — Takip edeceğiniz sorular</Link>.</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
           {step === 7 ? (
             <div className="flex flex-col gap-2">
               <p>Gözlemlenen gelir için mağazanızı bağlayın veya CSV sipariş importu kullanın. Reklam erişimi olmaması GEO kullanımını engellemez.</p>

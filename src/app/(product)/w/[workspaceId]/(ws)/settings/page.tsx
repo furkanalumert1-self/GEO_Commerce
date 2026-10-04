@@ -80,12 +80,12 @@ export default async function SettingsPage({ params, searchParams }: { params: P
         <Card className="max-w-2xl p-4 text-sm">
           <p>Giden webhook zarfı: <code>{"{id,type,occurredAt,workspaceId,brandId,data,schemaVersion}"}</code>; imza HMAC-SHA256(raw body + timestamp), 5 dakika replay penceresi, üstel yeniden deneme.</p>
           <p className="mt-2 text-muted">Olaylar: audit.completed, monitoring.completed, opportunity.created, action.published, report.ready, integration.degraded, usage.threshold.</p>
-          <Alert tone="warning" title="Uç nokta yönetim arayüzü henüz açık değil">İmzalama ve teslim altyapısı hazır; uç nokta ekleme ve 7 günlük replay arayüzü açık iş listesinde (docs/progress.md).</Alert>
+          <Alert tone="warning" title="Webhook adresi ekleme henüz açık değil">Bu bölüm geliştiriciler içindir; adres ekleme arayüzü yakında gelecek.</Alert>
         </Card>
       ) : null}
       {tab === "privacy" ? (
         <Card className="max-w-2xl p-4 text-sm">
-          <p>Minimum pseudonymous veri; ham yanıt/tarama içeriği 30 gün, anonim audit 7 gün saklanır. Kullanıcı verisi başka tenant&apos;ın promptuna veya model eğitimine gönderilmez. KVKK/GDPR uyumu teknik önlemlerle desteklenir; otomatik hukuki uygunluk garantisi verilmez.</p>
+          <p>Yalnız hizmet için gereken veriyi tutarız. AI yanıt metinleri ve site inceleme içerikleri 30 gün, giriş yapmadan yapılan ücretsiz ölçümler 7 gün saklanır. Verileriniz başka müşterilerin sorularında veya yapay zekâ modeli eğitiminde kullanılmaz. KVKK/GDPR için teknik önlemler uygulanır; bu, hukuki uygunluk garantisi değildir.</p>
           <div className="mt-3"><ApiButton url={`${api}/privacy/export`} label="Veri dışa aktarma talebi oluştur" onSuccessMessage="Talep oluşturuldu" /></div>
           <ul className="mt-3 divide-y divide-border rounded-md border border-border">{privacy.map((p) => <li key={p.id} className="px-3 py-2">{p.kind} · {p.status} · son tarih {fmtDate(p.dueAt, ws.timezone)}</li>)}</ul>
         </Card>

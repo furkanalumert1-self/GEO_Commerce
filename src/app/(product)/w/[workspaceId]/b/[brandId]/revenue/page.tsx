@@ -5,6 +5,7 @@ import { FilterBar } from "@/components/layout/filter-bar";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { hasFeature } from "@/modules/billing/plans";
+import { revenueAvailability } from "@/modules/commerce/availability";
 import { revenueSummary } from "@/modules/commerce/service";
 import { FIRST_TOUCH, LAST_NON_DIRECT } from "@/modules/attribution/engine";
 import { parseRange } from "@/modules/monitoring/queries";
@@ -21,21 +22,22 @@ export default async function RevenuePage({ params, searchParams }: { params: Pr
     return (
       <>
         <PageHeader title="Gelir" />
-        <Alert tone="primary" title="Gözlemlenen gelir ölçümü Commerce paketinde">Mağaza bağlantısı, first-party tracker ve sipariş bazlı attribution Commerce ve Agency paketlerinde. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert>
+        <Alert tone="primary" title="Gelir ölçümü paketinizde yok">AI&apos;dan gelen ziyaretlerin siparişe dönüşünü görmek Commerce ve Agency paketlerinde. <Link className="text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link></Alert>
       </>
     );
   }
   const range = parseRange(sp);
   const model = sp.model === "first" ? FIRST_TOUCH : LAST_NON_DIRECT;
-  const [rev, connectors] = await Promise.all([revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to, model }), db.integration.count({ where: { brandId, capabilities: { path: ["ordersRead"], equals: true } } })]);
-  if (connectors === 0) {
+  const availability = await revenueAvailability(db, { workspaceId, brandId }, access.entitlements);
+  if (availability.state === "inactive") {
     return (
       <>
         <PageHeader title="Gelir" />
-        <Card><EmptyState title="Sipariş kaynağı bağlı değil" description="Gelir ölçümü için mağaza bağlantısı veya CSV sipariş importu gerekir." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations`}>Entegrasyonlar</Link>} /></Card>
+        <Card><EmptyState title="Gelir ölçümü etkin değil" description="Bu markada sipariş kaynağı yok; bu yüzden satış gösterilmez (0 satış anlamına gelmez). Mağazanızı bağlayın veya sipariş dosyası yükleyin." action={<Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations#gelir`}>Gelir ölçümünü etkinleştir</Link>} /></Card>
       </>
     );
   }
+  const rev = await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to, model });
   const q = (m: string) => `${base}?${new URLSearchParams({ ...(sp.range ? { range: sp.range } : {}), model: m })}`;
   return (
     <>
@@ -45,6 +47,14 @@ export default async function RevenuePage({ params, searchParams }: { params: Pr
         action={<span className="flex gap-1 text-sm"><Link className={model === LAST_NON_DIRECT ? "font-medium" : "text-primary underline"} href={q("last")}>Son dokunuş (varsayılan)</Link><span aria-hidden>·</span><Link className={model === FIRST_TOUCH ? "font-medium" : "text-primary underline"} href={q("first")}>İlk dokunuş</Link></span>}
       />
       <FilterBar basePath={base} sp={sp} timeZone={access.brand.timezone} showEngine={false} />
+      {availability.state === "error" ? (
+        <div className="mb-4">
+          <Alert tone="warning" title="Siparişler güncellenemedi">
+            {availability.lastSyncAt ? `Son başarılı aktarım ${fmtDate(availability.lastSyncAt, access.brand.timezone, "tr-TR", true)}; rakamlar o tarihe kadardır. ` : "Rakamlar son başarılı aktarıma kadardır. "}
+            <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/integrations`}>Bağlantıyı kontrol et</Link>
+          </Alert>
+        </div>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="AI kaynaklı net gelir" value={Object.keys(rev.aiNetByCurrency).length ? <span className="flex flex-col gap-0.5 text-xl">{Object.entries(rev.aiNetByCurrency).map(([c, v]) => <span key={c}><span className="mr-2 text-xs font-medium text-text-secondary">{c}</span>{fmtMoney(v, c)}</span>)}</span> : fmtMoney(0, access.brand.currency)} hint="Para birimleri ayrı; kur dönüşümü yapılmadı" />
         <Stat label="AI siparişleri" value={fmtNumber(rev.aiOrders)} hint={`${rev.model === FIRST_TOUCH ? "İlk dokunuş" : "Son dokunuş (doğrudan hariç)"} · 30 gün pencere`} />

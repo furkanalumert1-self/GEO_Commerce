@@ -42,12 +42,12 @@ export const SURFACE_LABEL: Record<string, string> = {
 };
 
 export const GAP_LABEL: Record<string, string> = {
-  intent_content: "Niyet-içerik boşluğu",
+  intent_content: "Bu soruya yönelik içerik önerisi",
   missing_comparison: "Eksik karşılaştırma",
-  catalog_mismatch: "Katalog uyumsuzluğu",
+  catalog_mismatch: "Ürün grubu kataloğunuzda yok",
   technical_access: "Teknik erişim",
-  citation_gap: "Citation boşluğu",
-  structured_data: "Yapılandırılmış veri",
+  citation_gap: "Diğer sitelerde görünürlük fırsatı",
+  structured_data: "Ürün bilgisi işaretlemesi eksik",
 };
 
 export const RUN_STATUS_LABEL: Record<string, string> = {

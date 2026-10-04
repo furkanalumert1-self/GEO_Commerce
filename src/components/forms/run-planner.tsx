@@ -75,7 +75,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
           <p className="tabular">
             Talep: {preview.unitsRequested} unit · Planlanan: {preview.unitsPlanned} unit · Kalan kota: {preview.available}
           </p>
-          {!preview.fits ? <p className="mt-1 text-warning">Kota yetmediği için {preview.promptCount} prompt örneklenecek (%{Math.round(preview.sampledFraction * 100)}); kalanlar sonraki turlarda döndürülür.</p> : null}
+          {!preview.fits ? <p className="mt-1 text-warning">Kota yetmediği için {preview.promptCount} soru ölçülecek (%{Math.round(preview.sampledFraction * 100)}); kalanlar sonraki turlarda döndürülür.</p> : null}
         </div>
       ) : null}
       {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { absoluteDelta, actionCta, alignPrevious, deltaText, impactLevel, measurementOutcome, measurementWindows, previousPeriod, relativeChange, workflowView } from "@/lib/view-models";
+import { absoluteDelta, actionCta, alignPrevious, deltaText, impactLevel, rawTextNote, measurementOutcome, measurementWindows, previousPeriod, relativeChange, workflowView } from "@/lib/view-models";
 
 describe("dönem farkı", () => {
   it("önceki eşit dönem", () => {
@@ -65,6 +65,12 @@ describe("öncelik ve ölçüm penceresi", () => {
     expect(impactLevel({ priority: "x", score: 10 })).toBe("unknown");
   });
 
+  it("az kanıtta yüksek etki gösterilmez", () => {
+    expect(impactLevel({ priority: "high", score: 80, confidence: 0.33 })).toBe("medium");
+    expect(impactLevel({ priority: "high", score: 80, confidence: 0.8 })).toBe("high");
+    expect(impactLevel({ priority: "low", score: 30, confidence: 0.33 })).toBe("low");
+  });
+
   it("sonraki pencere dolmadıysa kısmi dönem", () => {
     const pub = new Date("2026-09-20T00:00:00Z");
     const w = measurementWindows(pub, 14, new Date("2026-09-25T00:00:00Z"));
@@ -104,5 +110,17 @@ describe("ölçüm yeterliliği", () => {
   it("kısmi dönem + baseline var + sonrası yok → bekleniyor", () => {
     expect(measurementOutcome(true, 30, 0).title).toBe("Sonraki dönem verisi bekleniyor");
     expect(measurementOutcome(true, 30, 5).kind).toBe("computable");
+  });
+});
+
+describe("yanıt metni durumu", () => {
+  const now = new Date("2026-10-04T00:00:00Z");
+  it("yeni başarısız yanıt silindi değil, değerlendirilemedi", () => {
+    expect(rawTextNote({ status: "failed", rawText: null, sampledAt: new Date("2026-10-03T00:00:00Z"), errorCode: "quota" }, now)).toMatch(/alınamadı \(quota\).*değerlendirilemedi/);
+  });
+  it("süresi dolan ve saklanmayan ayrılır", () => {
+    expect(rawTextNote({ status: "succeeded", rawText: null, sampledAt: new Date("2026-08-01T00:00:00Z") }, now)).toMatch(/saklama süresi/);
+    expect(rawTextNote({ status: "succeeded", rawText: null, sampledAt: new Date("2026-10-01T00:00:00Z") }, now)).toMatch(/saklanmadı/);
+    expect(rawTextNote({ status: "succeeded", rawText: "x", sampledAt: now }, now)).toBeNull();
   });
 });

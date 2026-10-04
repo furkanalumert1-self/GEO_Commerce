@@ -34,4 +34,12 @@ describe("extract", () => {
   it("javascript: URL reddedilir", () => {
     expect(canonicalizeUrl("javascript:alert(1)")).toBeNull();
   });
+
+  it("sıra yazılan numaradır; alt maddeler ve ikinci liste sayacı bozmaz", () => {
+    const ents = [{ id: "y", type: "competitor" as const, name: "Yataş", aliases: [], domain: "yatas.com.tr" }, { id: "b", type: "competitor" as const, name: "Bellona", aliases: [], domain: "bellona.com.tr" }];
+    const text = "Öneriler:\n\n1. Yataş\n   - Ortopedik seri\n   - Visco seri\n2. İstikbal\n3. Doqu\n4. Bellona\n\nDikkat edilecekler:\n- Sertlik\n- Garanti";
+    const r = extract(text, [], ents);
+    expect(r.mentions.find((m) => m.entityId === "y")?.rank).toBe(1);
+    expect(r.mentions.find((m) => m.entityId === "b")?.rank).toBe(4);
+  });
 });

@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@/generated/prisma/client";
-import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
+import { isOutreachTarget, registrableLabel } from "@/modules/audit/competitor-filter";
 import { evidenceStrength, opportunityDedupeKey, opportunityScore, visibilityGap, type OpportunityComponents } from "./scoring";
 
 /**
@@ -23,6 +23,26 @@ export function catalogFit(category: string, brandCats: Set<string>, catalogName
   const names = [...catalogNames];
   if (names.some((n) => n === c || (words.length && words.every((w) => n.includes(w.slice(0, Math.max(4, w.length - 2))))))) return 100;
   return 30;
+}
+
+/**
+ * Alıntıyı destekleyen kaynak: alıntıda alan adı/marka etiketi geçen ya da alıntıyla örtüşen atıf.
+ * Eşleşme yoksa null — kanıt yalnız tam yanıta bağlanır (rastgele ilk kaynağa bağlanmaz).
+ */
+export function citationForQuote(quote: string | null, citations: Array<{ url: string; domain: string; excerpt?: string | null }>): string | null {
+  if (!quote) return null;
+  // "IKEA" → "ıkea" (tr-TR) eşleşmesini kaçırmamak için ı/i farkı yok sayılır.
+  const q = quote.toLocaleLowerCase("tr-TR").replace(/ı/g, "i");
+  for (const c of citations) {
+    const domain = c.domain.toLowerCase().replace(/^www\./, "");
+    const label = registrableLabel(domain);
+    if (q.includes(domain) || (label.length >= 4 && new RegExp(`(^|[^\\p{L}\\p{N}])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\p{L}\\p{N}]|$)`, "u").test(q))) return c.url;
+  }
+  for (const c of citations) {
+    const ex = (c.excerpt ?? "").toLocaleLowerCase("tr-TR").replace(/ı/g, "i").trim();
+    if (ex.length >= 20 && (q.includes(ex) || ex.includes(q.slice(0, Math.min(q.length, 60))))) return c.url;
+  }
+  return null;
 }
 
 type GapType = "intent_content" | "missing_comparison" | "catalog_mismatch" | "technical_access" | "citation_gap" | "structured_data";
@@ -78,8 +98,9 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
         if (brandMentioned) thirdPartyWithBrand.add(ct.domain);
       }
     }
-    // Rakip mağazalar (ticari alan adları) outreach hedefi değildir; boşluk yalnız yayın/pazaryeri/inceleme kaynaklarıdır.
-    const citationGapDomains = [...thirdPartyForComp.entries()].filter(([d]) => !thirdPartyWithBrand.has(d) && !isCompetitorCandidate(d, brand.domain));
+    // Rakip mağazalar ve genel bilgi kaynakları (kamu/akademik/ansiklopedi/sosyal ağ) tanıtım hedefi değildir;
+    // boşluk yalnız gerçek ilişki kurulabilecek yayın/pazaryeri/inceleme kaynaklarıdır.
+    const citationGapDomains = [...thirdPartyForComp.entries()].filter(([d]) => !thirdPartyWithBrand.has(d) && isOutreachTarget(d, brand.domain));
     // Katalog uyumu: markanın onayladığı kategoriler veya taranmış kategori/ürün sayfaları; katalog verisi yoksa bilinmiyor (null).
     const catalogFitValue = cluster.category ? catalogFit(cluster.category, brandCats, catNames) : null;
     const gapType: GapType =
@@ -159,7 +180,7 @@ export async function generateOpportunities(db: PrismaClient, workspaceId: strin
         opportunityId: opp.id,
         observationId: o.id,
         quote: o.mentions.find((m) => m.entityId === best.c.id)?.excerpt ?? (o.rawText ?? "").slice(0, 160),
-        pageUrl: o.citations[0]?.url ?? null,
+        pageUrl: citationForQuote(o.mentions.find((m) => m.entityId === best.c.id)?.excerpt ?? null, o.citations),
       })),
     });
     upserted++;

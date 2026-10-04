@@ -20,7 +20,7 @@ export interface ShellWorkspace {
  * Bilgi mimarisi: Genel Bakış · AI Görünürlüğü · Büyüme Fırsatları · Satış & Reklam · Raporlar; altta Ayarlar ve hesap.
  * Route'lar değişmedi; yalnız gruplama ve etiketler. En çok iki seviye.
  */
-export function buildNav(ws: ShellWorkspace, brandId: string | null): NavModel {
+export function buildNav(ws: ShellWorkspace, brandId: string | null, opts: { revenue?: boolean } = {}): NavModel {
   const W = `/w/${ws.id}`;
   const canBilling = ws.role === "owner" || ws.role === "admin" || ws.role === "billing";
   const canSettings = ws.role === "owner" || ws.role === "admin";
@@ -51,16 +51,19 @@ export function buildNav(ws: ShellWorkspace, brandId: string | null): NavModel {
           { label: "Aksiyonlar", href: `${B}/actions` },
         ],
       },
-      {
-        kind: "group",
-        id: "sales",
-        label: "Satış & Reklam",
-        icon: "sales",
-        items: [
-          { label: "Gelir", href: `${B}/revenue` },
-          { label: "Reklamlar", href: `${B}/ads` },
-        ],
-      },
+      // Gelir yalnız gerçekten ölçülüyorsa menüde; aksi halde tek "Reklamlar" bağlantısı.
+      opts.revenue
+        ? {
+            kind: "group",
+            id: "sales",
+            label: "Satış & Reklam",
+            icon: "sales",
+            items: [
+              { label: "Gelir", href: `${B}/revenue` },
+              { label: "Reklamlar", href: `${B}/ads` },
+            ],
+          }
+        : { kind: "link", label: "Reklamlar", href: `${B}/ads`, icon: "sales" },
       { kind: "link", label: "Raporlar", href: `${B}/reports`, icon: "reports" },
     );
   }
@@ -73,8 +76,8 @@ export function buildNav(ws: ShellWorkspace, brandId: string | null): NavModel {
   const settingsItems = [
     ...(brandId
       ? [
-          { label: "Katalog", href: `${W}/b/${brandId}/catalog` },
-          { label: "Entegrasyon", href: `${W}/b/${brandId}/integrations` },
+          { label: "Ürünlerim", href: `${W}/b/${brandId}/catalog` },
+          { label: "Mağaza bağlantıları", href: `${W}/b/${brandId}/integrations` },
         ]
       : []),
     ...(canSettings ? [{ label: "Ekip", href: `${W}/settings?tab=members`, match: [`${W}/settings`] }] : []),
@@ -107,15 +110,18 @@ export function AppShell({
   current,
   brandId,
   user,
+  revenue = false,
   children,
 }: {
   workspaces: ShellWorkspace[];
   current: ShellWorkspace;
   brandId: string | null;
   user: { email: string; name: string | null };
+  /** Gelir ölçümü bu markada etkin mi (menüde Gelir gösterilir). */
+  revenue?: boolean;
   children: ReactNode;
 }) {
-  const nav = buildNav(current, brandId);
+  const nav = buildNav(current, brandId, { revenue });
   const brand = (
     <Link href={`/w/${current.id}/overview`} className="flex min-w-0 items-center rounded-md">
       <Logo priority className="h-12" />

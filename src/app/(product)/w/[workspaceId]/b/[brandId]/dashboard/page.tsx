@@ -11,7 +11,7 @@ import { pageBrand } from "@/lib/page-access";
 import { brandMetrics, dailyTrend, parseRange } from "@/modules/monitoring/queries";
 import { revenueSummary } from "@/modules/commerce/service";
 import { actionsNeedingFix } from "@/modules/actions/readiness";
-import { hasFeature } from "@/modules/billing/plans";
+import { revenueAvailability, revenueVisible } from "@/modules/commerce/availability";
 import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, SURFACE_LABEL } from "@/lib/format";
 import { absoluteDelta, actionCta, alignPrevious, impactLevel, plainTr, previousPeriod } from "@/lib/view-models";
 
@@ -53,7 +53,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
   const keep = new URLSearchParams(Object.entries({ range: sp.range, from: sp.from, to: sp.to, engine: sp.engine }).filter((e): e is [string, string] => Boolean(e[1])));
   const qs = keep.toString() ? `?${keep.toString()}` : "";
 
-  const [metrics, prevMetrics, trend, prevTrend, openOpps, highOpps, newOpps, topOpps, recentActions, promptCount, lastRun, engines, orderSources] = await Promise.all([
+  const [metrics, prevMetrics, trend, prevTrend, openOpps, highOpps, newOpps, topOpps, recentActions, promptCount, lastRun, engines, revenueState] = await Promise.all([
     brandMetrics(db, workspaceId, brandId, filters),
     brandMetrics(db, workspaceId, brandId, { ...prev, engines: engineFilter }),
     dailyTrend(db, workspaceId, brandId, filters, tz),
@@ -71,7 +71,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     db.prompt.count({ where: { workspaceId, brandId, active: true } }),
     db.monitoringRun.findFirst({ where: { workspaceId, brandId }, orderBy: { scheduledAt: "desc" } }),
     db.observation.findMany({ where: { workspaceId, brandId }, distinct: ["engine"], select: { engine: true } }),
-    db.integration.count({ where: { brandId, capabilities: { path: ["ordersRead"], equals: true } } }),
+    revenueAvailability(db, { workspaceId, brandId }, access.entitlements),
   ]);
   const [needsFix, productCount, oppActions] = await Promise.all([
     actionsNeedingFix(db, recentActions),
@@ -80,8 +80,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
   ]);
   const actionByOpp = new Map<string, string>();
   for (const a of oppActions) if (a.opportunityId && !actionByOpp.has(a.opportunityId)) actionByOpp.set(a.opportunityId, a.id);
-  const revenueAllowed = hasFeature(access.entitlements, "revenue");
-  const revenue = revenueAllowed && orderSources > 0 ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
+  // Gelir yalnız gerçekten ölçülüyorsa gösterilir; bağlantısız durum 0 satış sayılmaz.
+  const revenue = revenueVisible(revenueState) ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
 
   if (promptCount === 0 && !lastRun) {
     return (
@@ -172,7 +172,7 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         </div>
       ) : null}
 
-      <section aria-label="Temel göstergeler" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+      <section aria-label="Temel göstergeler" className={revenue ? "grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4" : "grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4"}>
         <MetricCard
           label="AI görünürlüğü"
           value={score ?? undefined}
@@ -208,20 +208,13 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           <MetricCard
             label="AI kaynaklı satış"
             value={<CurrencyAmounts byCurrency={revenue.aiNetByCurrency} fallbackCurrency={access.brand.currency} />}
+            badge={revenueState.state === "error" ? <Badge tone="warning">Güncellenemedi</Badge> : undefined}
             sentence={`${fmtNumber(revenue.aiOrders)} sipariş AI ziyaretleriyle eşleşti.`}
-            scope={`Son dokunuş · eşleşen sipariş oranı ${fmtPct(revenue.attributionCoverage)}`}
+            scope={revenueState.state === "error" && revenueState.lastSyncAt ? `Son güncelleme ${fmtDate(revenueState.lastSyncAt, tz, "tr-TR", true)}; rakamlar o tarihe kadardır` : `Son dokunuş · eşleşen sipariş oranı ${fmtPct(revenue.attributionCoverage)}`}
             href={`${base}/revenue${qs}`}
             linkLabel="Geliri gör"
           />
-        ) : (
-          <MetricCard
-            label="AI kaynaklı satış"
-            missing="Henüz ölçülmüyor"
-            sentence={revenueAllowed ? "Mağaza bağlantısı veya CSV sipariş aktarımı gerekiyor." : "Satış ölçümü Commerce ve üzeri paketlerde."}
-            href={revenueAllowed ? `${base}/integrations` : `/w/${workspaceId}/billing`}
-            linkLabel={revenueAllowed ? "Kurulumu tamamla" : "Paketleri gör"}
-          />
-        )}
+        ) : null}
       </section>
 
       <section aria-labelledby="focus" className="mt-10">
@@ -234,8 +227,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
         {productCount === 0 && topOpps.length ? (
           <div className="mb-3">
             <Alert tone="warning" title="Ürün bilgileriniz eksik">
-              Katalogda ürün yok; bu yüzden AI ile iyileştir taslakları ürün ayrıntısı içeremez. Önce siteyi tarayın veya ürünlerinizi aktarın.{" "}
-              <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`/w/${workspaceId}/onboarding?brand=${brandId}&step=3`}>Ürün bilgilerini tamamla</Link>
+              Katalogda ürün yok; bu yüzden içerik taslağı hazırlanamaz. Ürün dosyanızı yükleyin veya mağazanızı bağlayın.{" "}
+              <Link className="font-medium text-primary underline-offset-2 hover:underline" href={`/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`}>Ürün bilgilerini tamamla</Link>
             </Alert>
           </div>
         ) : null}

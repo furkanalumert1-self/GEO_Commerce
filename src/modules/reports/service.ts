@@ -3,6 +3,7 @@ import { hashToken, randomToken } from "@/lib/crypto";
 import { AppError, notFound } from "@/lib/http/errors";
 import { brandMetrics } from "@/modules/monitoring/queries";
 import { revenueSummary } from "@/modules/commerce/service";
+import { revenueAvailability, revenueVisible } from "@/modules/commerce/availability";
 import { hasFeature } from "@/modules/billing/plans";
 import type { BrandAccess } from "@/modules/tenancy/access";
 import { toCsv } from "./csv";
@@ -17,7 +18,8 @@ export async function createReportSnapshot(db: PrismaClient, access: BrandAccess
     db.opportunity.findMany({ where: { brandId: access.brandId, status: { in: ["new", "triaged", "in_progress"] } }, orderBy: [{ score: { sort: "desc", nulls: "last" } }], take: 10, select: { title: true, score: true, gapType: true, status: true, recommendedAction: true } }),
     db.action.findMany({ where: { brandId: access.brandId }, orderBy: { updatedAt: "desc" }, take: 10, select: { title: true, status: true, type: true, publishedAt: true } }),
   ]);
-  const revenue = hasFeature(access.entitlements, "revenue") ? await revenueSummary(db, access.workspaceId, access.brandId, { from: input.from, to: input.to }) : null;
+  // Rapor gelir bloğu yalnız gelir ölçümü gerçekten etkinse; bağlantısız durumda 0 satış raporlanmaz.
+  const revenue = revenueVisible(await revenueAvailability(db, { workspaceId: access.workspaceId, brandId: access.brandId }, access.entitlements)) ? await revenueSummary(db, access.workspaceId, access.brandId, { from: input.from, to: input.to }) : null;
   const snapshot = {
     generatedAt: new Date().toISOString(),
     asOf: input.to.toISOString(),

@@ -77,8 +77,8 @@ export default async function OpportunitiesPage({ params, searchParams }: { para
                 <Th>Tahmini etki</Th>
                 <Th numeric>Skor</Th>
                 <Th>Durum</Th>
-                <Th>Sahip</Th>
-                <Th><Link href={link({ sort: "due" })} aria-sort={sort === "due" ? "ascending" : "none"}>Termin</Link></Th>
+                <Th>Sorumlu</Th>
+                <Th><Link href={link({ sort: "due" })} aria-sort={sort === "due" ? "ascending" : "none"}>Hedef tarih</Link></Th>
               </tr>
             </thead>
             <tbody>

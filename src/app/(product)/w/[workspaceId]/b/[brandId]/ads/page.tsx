@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { hasFeature } from "@/modules/billing/plans";
 import { policyIssues } from "@/modules/ads/chatgpt";
-import { buildChatgptAdsPlan } from "@/modules/ads/chatgpt-plan";
+import { adDrafts, buildChatgptAdsPlan } from "@/modules/ads/chatgpt-plan";
 
 export const metadata: Metadata = { title: "Reklamlar" };
 
@@ -44,21 +44,21 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     const cat = norm(g.category ?? g.label);
     const catPage = categories.find((c) => norm(c.name) === cat);
     const word = cat.split(/\s+/).filter((w) => w.length > 3).pop();
-    const prods = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (word ? norm(p.name).includes(word.slice(0, Math.max(4, word.length - 2))) : false)).slice(0, 3);
+    const matched = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (word ? norm(p.name).includes(word.slice(0, Math.max(4, word.length - 2))) : false));
+    const prods = matched.slice(0, 3);
     // Hedef sayfalar yalnız gerçek kayıtlardan (kategori/ürün); uydurma URL yok. Ana sayfa varsayılan seçili değil.
     const targets: FlowGroup["targets"] = [
       ...(catPage?.url ? [{ url: catPage.url, label: `Kategori sayfası · ${catPage.url.replace(/^https?:\/\//, "")}`, kind: "category" as const }] : []),
       ...prods.map((p) => ({ url: p.url!, label: `Ürün · ${p.name}`, kind: "product" as const })),
       { url: home, label: `Ana sayfa · ${home.replace(/^https?:\/\//, "")}`, kind: "home" as const },
     ];
-    return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, promptStats: g.promptStats, copy: g.copies[0] ?? null, targets };
+    const productNames = matched.slice(0, 10).map((p) => p.name);
+    return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, promptStats: g.promptStats, products: productNames, drafts: adDrafts({ brand: brandRow.name, label: g.label, products: productNames }), targets };
   });
   const activeAccount = accounts.find((a) => a.accessStatus === "active");
-  const status = activeAccount
-    ? "Reklam hesabınız bağlı. Yayın bu ekrandan yapılmaz; taslakları reklam platformunda kullanın."
-    : accounts.length
-      ? "Plan hazırlayabilirsiniz; reklam hesabınızın erişimi henüz doğrulanmadı."
-      : "Plan hazırlayabilirsiniz; reklam hesabınız bağlı değil.";
+  // Nötr durum: bu ekran taslak hazırlar; hesap bağlantısı ayrıntıda.
+  const status = "Taslak hazırlama — taslağı dışa aktararak reklam platformunda kullanabilirsiniz.";
+  const accountDetail = activeAccount ? "Reklam hesabınız bağlı; yayın bu ekrandan yapılmaz." : accounts.length ? "Reklam hesabınızın erişimi henüz doğrulanmadı." : "Reklam hesabı bağlı değil (taslak hazırlamak için gerekmez).";
   const policy = policyIssues(brandRow.categories, brandRow.country);
   const missingOffer = pages.filter((p) => (p.findings as { productComplete?: boolean } | null)?.productComplete === false).length;
   const checks: Array<{ label: string; state: "ok" | "warn" | "unknown"; text: string }> = [
@@ -71,8 +71,8 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     <>
       <PageHeader title="Reklamlar" description="Ölçtüğünüz sorulardan reklam taslağı hazırlayın; taslağı kopyalayıp reklam platformunda kullanın." />
       <div className="flex items-start gap-2.5 rounded-[var(--radius-lg)] border border-border bg-surface px-4 py-3 text-sm" role="status">
-        <span aria-hidden className={cn("mt-1.5 h-2.5 w-2.5 flex-none rounded-full", activeAccount ? "bg-success" : "bg-warning")} />
-        <span>{status}</span>
+        <span aria-hidden className="mt-1.5 h-2.5 w-2.5 flex-none rounded-full bg-primary" />
+        <span>{status} <span className="block text-xs text-text-secondary">{accountDetail}</span></span>
       </div>
       <div className="my-4 flex flex-wrap gap-1 border-b border-border" role="navigation" aria-label="Reklam bölümleri">
         {TABS.map(([k, label]) => (

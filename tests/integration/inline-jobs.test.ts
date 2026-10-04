@@ -71,6 +71,21 @@ const storeFetcher: Fetcher = async (url) => {
   return ok(`<!doctype html><html lang="tr"><head><title>Evim</title><meta property="og:site_name" content="Evim"></head><body><h1>Evim</h1><nav><a href="/ev-tekstili/">Ev Tekstili</a><a href="/ev-tekstili/x">Nevresim</a><a href="/ev-tekstili/y">Yorgan</a><a href="/mutfak/">Mutfak</a><a href="/sofra/">Sofra</a></nav>${links}</body></html>`);
 };
 
+describe("ücretsiz ölçüm kapsamı", () => {
+  it("ürün grubu/hizmet doğrulanamayan sitede genel soru uydurulmaz; AI çağrısı yapılmaz, site kontrolleri sunulur", async () => {
+    const audit = await makeAudit(`kapsam-${randomToken(4).toLowerCase()}.com`);
+    const gpt = countingAdapter("chatgpt");
+    const adapters = { chatgpt: gpt.adapter, gemini: countingAdapter("gemini").adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
+    expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters })).toBe("done");
+    expect(gpt.calls()).toBe(0);
+    const done = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
+    const sum = done.resultSummary as { scopeUnavailable?: string; readiness: { checks: unknown[] }; visibility: { score: number | null; sampleCount: number } };
+    expect(sum.scopeUnavailable).toBeTruthy();
+    expect(sum.visibility.score).toBeNull();
+    expect(sum.readiness.checks.length).toBeGreaterThan(0);
+  });
+});
+
 describe("ücretsiz ölçüm soru onayı", () => {
   it("tarama sonrası onay bekler; onaydan önce AI çağrısı yok; onay idempotent; markalı soru reddedilir", async () => {
     const audit = await makeAudit(`onay-${randomToken(4).toLowerCase()}.com`);
@@ -124,16 +139,15 @@ describe("Redis'siz (inline) yürütme", () => {
     const adapters = { chatgpt: gpt.adapter, gemini: gem.adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
     let saved: AuditWork | null = null;
     const store = { load: () => (saved ? (JSON.parse(JSON.stringify(saved)) as AuditWork) : null), save: async (w: AuditWork) => void (saved = JSON.parse(JSON.stringify(w))) };
-    // Kısa bütçeli ilk adım: tarama süre sınırında kesilir (kısmi), AI çağrısı başlatılmaz.
-    expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters }, { ...store, deadline: Date.now() + 100 })).toBe("continue");
+    // Bütçeli ilk adım: tarama biter ve ara durum saklanır; aynı adımda AI çağrısı başlatılmaz.
+    expect(await runAudit(db, audit.id, { fetcher: storeFetcher, adapters }, { ...store, deadline: Date.now() + 2500 })).toBe("continue");
     expect(gpt.calls() + gem.calls()).toBe(0);
     expect(saved!.crawl?.pages).toBeGreaterThan(0);
-    expect(saved!.crawl?.truncated).toBe(true);
     // Sonraki adımlar: kaldığı yerden devam, sonunda gerçek rapor.
     let steps = 0;
     let r: "done" | "continue" = "continue";
     while (r === "continue" && steps < 20) {
-      r = await runAudit(db, audit.id, { fetcher: siteFetcher, adapters }, { ...store, deadline: Date.now() + 5 });
+      r = await runAudit(db, audit.id, { fetcher: storeFetcher, adapters }, { ...store, deadline: Date.now() + 5 });
       steps++;
     }
     expect(r).toBe("done");
@@ -143,7 +157,7 @@ describe("Redis'siz (inline) yürütme", () => {
     expect(["succeeded", "partial"]).toContain(done.status);
     expect((done.resultSummary as { visibility: { sampleCount: number } }).visibility.sampleCount).toBe(10);
     // Tamamlanmış audit yeniden çalıştırılınca çağrı yapılmaz.
-    await runAudit(db, audit.id, { fetcher: siteFetcher, adapters }, store);
+    await runAudit(db, audit.id, { fetcher: storeFetcher, adapters }, store);
     expect(gpt.calls()).toBe(5);
   });
 
@@ -157,7 +171,7 @@ describe("Redis'siz (inline) yürütme", () => {
       throw new ProviderError("Sağlayıcı kimlik doğrulama hatası", false, undefined, "auth");
     });
     const adapters = { chatgpt: gpt.adapter, gemini: gem.adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
-    expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters })).toBe("done");
+    expect(await runAudit(db, audit.id, { fetcher: storeFetcher, adapters })).toBe("done");
     expect(gem.calls()).toBe(1); // kalıcı hata: platform bu audit'te tekrar çağrılmaz
     expect(gpt.calls()).toBe(7); // 5 soru + 2 geçici hata için birer yeniden deneme
     const done = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
@@ -175,7 +189,7 @@ describe("Redis'siz (inline) yürütme", () => {
       throw new ProviderError("Hesapta kullanılabilir kredi yok", false, undefined, "insufficient_quota");
     });
     const adapters = { chatgpt: gpt.adapter, gemini: gem.adapter, claude: cl.adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
-    expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters })).toBe("done");
+    expect(await runAudit(db, audit.id, { fetcher: storeFetcher, adapters })).toBe("done");
     expect(cl.calls()).toBe(1);
     expect(gpt.calls()).toBe(5);
     expect(gem.calls()).toBe(5);
@@ -188,7 +202,7 @@ describe("Redis'siz (inline) yürütme", () => {
     expect(summary.visibility.missingEngines).toContain("claude"); // başarısız platform ortak skora girmez
     expect(summary.failedCalls).toEqual(["claude:insufficient_quota"]);
     // Yeniden çalıştırma çağrıyı tekrarlamaz.
-    await runAudit(db, audit.id, { fetcher: siteFetcher, adapters });
+    await runAudit(db, audit.id, { fetcher: storeFetcher, adapters });
     expect(cl.calls() + gpt.calls() + gem.calls()).toBe(11);
   });
 

@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button, Field, inputClass } from "@/components/ui";
@@ -35,9 +35,13 @@ function fingerprint(): string {
 export function AuditForm({ demo }: { demo: boolean }) {
   const router = useRouter();
   const [serverError, setServerError] = useState<{ message: string; requestId?: string } | null>(null);
+  // Çift tıklama/yeniden gönderim ikinci ölçüm başlatmaz (yönlendirme tamamlanana kadar kilitli).
+  const sent = useRef(false);
   const { register, handleSubmit, formState, setError } = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { domain: "", locale: "tr-TR" } });
 
   const onSubmit = async (v: Values) => {
+    if (sent.current) return;
+    sent.current = true;
     setServerError(null);
     const res = await fetch("/api/v1/audits", {
       method: "POST",
@@ -48,7 +52,8 @@ export function AuditForm({ demo }: { demo: boolean }) {
     if (!res.ok) {
       const fe = body?.error?.fieldErrors?.domain?.[0];
       if (fe) setError("domain", { message: fe });
-      setServerError({ message: body?.error?.message ?? "Audit başlatılamadı", requestId: body?.requestId });
+      setServerError({ message: body?.error?.message ?? "Ölçüm başlatılamadı", requestId: body?.requestId });
+      sent.current = false;
       return;
     }
     router.push(`/audit/${body.data.token}`);
@@ -56,7 +61,7 @@ export function AuditForm({ demo }: { demo: boolean }) {
 
   const err = formState.errors.domain?.message;
   return (
-    <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-3">
+    <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate className="flex flex-col gap-3">
       {serverError ? (
         <div role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm">
           {serverError.message}
@@ -66,14 +71,17 @@ export function AuditForm({ demo }: { demo: boolean }) {
       <Field label="Web siteniz" htmlFor="domain" error={err} hint={demo ? "Web siteniz canlı taranır. Örnek veriyle denemek için lumabakim.example yazabilirsiniz." : "Yalnız herkese açık sayfalar taranır; robots.txt kurallarına uyulur."}>
         <input id="domain" placeholder="magazaniz.com" inputMode="url" autoComplete="url" className={inputClass} aria-invalid={Boolean(err)} aria-describedby={err ? "domain-error" : "domain-hint"} {...register("domain")} />
       </Field>
-      <Field label="Hedef ülke ve dil" htmlFor="locale">
-        <select id="locale" className={inputClass} {...register("locale")}>
-          <option value="tr-TR">Türkiye · Türkçe</option>
-          <option value="en-US">ABD · İngilizce</option>
-        </select>
-      </Field>
-      <Button type="submit" variant="primary" className="mt-1 min-h-12 text-base sm:min-h-12" disabled={formState.isSubmitting}>
-        {formState.isSubmitting ? "Başlatılıyor…" : "Ücretsiz ölçümü başlat"}
+      <details className="text-sm">
+        <summary className="min-h-11 cursor-pointer py-2 text-text-secondary sm:min-h-9">Pazar: Türkiye · Türkçe (değiştir)</summary>
+        <Field label="Hedef ülke ve dil" htmlFor="locale">
+          <select id="locale" className={inputClass} {...register("locale")}>
+            <option value="tr-TR">Türkiye · Türkçe</option>
+            <option value="en-US">ABD · İngilizce</option>
+          </select>
+        </Field>
+      </details>
+      <Button type="submit" variant="primary" className="mt-1 min-h-12 text-base sm:min-h-12" disabled={formState.isSubmitting || (formState.isSubmitSuccessful && !serverError)}>
+        {formState.isSubmitting || formState.isSubmitSuccessful ? "Başlatılıyor…" : "Ücretsiz ölçümü başlat"}
       </Button>
     </form>
   );

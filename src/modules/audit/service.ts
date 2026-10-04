@@ -21,7 +21,7 @@ import { isCompetitorCandidate } from "./competitor-filter";
 import { seedPrompts } from "@/modules/prompts/seed";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
-import { buildQuestionSet, detectBusiness, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind } from "./business";
+import { buildQuestionSet, detectBusiness, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -237,6 +237,8 @@ type AuditAnswer = { engine: string; model: string; surface: string; prompt: str
 export interface AuditProposal {
   business: Pick<BusinessProfile, "type" | "confidence" | "reasons" | "evidenceUrls" | "offerings" | "softwareOfferings" | "agencyWording">;
   topics: string[];
+  /** Ürün grubu kanıtı (ölçüm kapsamı): grup, alan, örnek ürünler, kaynak URL'ler. */
+  groups?: TopicGroup[];
   questions: AuditQuestion[];
   incomplete: string | null;
   brandName: string;
@@ -319,9 +321,12 @@ export async function runAudit(
     const home = crawl.pages.find((p) => p.pageType === "home");
     const business = detectBusiness(crawl.pages, crawl.domain);
     const brandForQuestions = siteBrandName(crawl.pages, crawl.domain);
-    const topics = topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), (audit.locale.split("-")[0] ?? "tr").toLowerCase());
-    const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions });
-    work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
+    const lang = (audit.locale.split("-")[0] ?? "tr").toLowerCase();
+    // Kanıtlı ürün grupları (alan → grup → alt tür); yoksa doğrulanmış konu adları.
+    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : productGroups(crawl.pages, lang).slice(0, 2);
+    const topics = groups.length ? groups.map((g) => g.label) : topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), lang);
+    const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions, groups, gift: hasGiftSection(crawl.pages) });
+    work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
     work.crawl = {
       readiness: evaluateReadiness(crawl),
       brandName: home?.facts.ogSiteName ?? home?.facts.h1 ?? audit.domain.split(".")[0]!,
@@ -391,6 +396,38 @@ export async function runAudit(
       return "done";
     }
     const proposed = work.proposal?.questions ?? [];
+    if (!proposed.length && work.proposal) {
+      // Kanıtlı kapsam oluşturulamadı: genel sorularla puan uydurulmaz; site kontrolleri sunulur, AI çağrısı yapılmaz.
+      await db.audit.update({
+        where: { id: auditId },
+        data: {
+          status: "partial",
+          stage: "done",
+          progressDone: 5,
+          resultSummary: {
+            brandName,
+            demo,
+            scopeUnavailable: work.proposal.incomplete ?? "Ölçülecek ürün grubu veya hizmet doğrulanamadı.",
+            displayName: work.proposal.brandName,
+            business: { type: work.proposal.business.type, confidence: work.proposal.business.confidence, reasons: work.proposal.business.reasons, topics: [] },
+            visibility: { score: null, smallSample: true, sampleCount: 0, scheduled: 0, partial: true, missingEngines: [] },
+            engines: [],
+            unavailableEngines: [],
+            scopeEngines: [],
+            provenance: { models: [], surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: 0 },
+            readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
+            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+            competitorCandidates: [],
+            opportunityCount: 0,
+            opportunityAnalyzed: false,
+            examples: [],
+            prompts: [],
+            questions: [],
+          },
+        },
+      });
+      return "done";
+    }
     work.prompts = proposed.length ? proposed.map((q) => q.text) : auditPrompts(categories, country);
     work.kinds = Object.fromEntries(proposed.map((q) => [q.text, q.kind]));
     work.engines = scopeNow.engines;
@@ -505,7 +542,11 @@ export async function runAudit(
         opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),
         examples,
         prompts,
-        questions: prompts.map((text) => ({ text, kind: kindOf(text) })),
+        questions: prompts.map((text) => ({ text, kind: kindOf(text), topic: work.proposal?.questions.find((q) => q.text === text)?.topic ?? null })),
+        groups: (work.proposal?.groups ?? []) as unknown as object[],
+        displayName: work.proposal?.brandName ?? null,
+        // Anılma, önerilme ve kendi sayfanın kaynak gösterilmesi ayrı sayılır (geçerli yanıtlar üzerinden).
+        counts: { answers: okCount, mentioned: answers.filter((x) => x.ok && x.mentioned).length, recommended: answers.filter((x) => x.ok && x.recommended).length, ownCitation: answers.filter((x) => x.ok && x.ownCitation).length },
         kindStats,
         business: work.proposal ? { type: work.proposal.business.type, confidence: work.proposal.business.confidence, reasons: work.proposal.business.reasons, topics: work.proposal.topics } : null,
         crawlDiagnostics: work.crawl.diagnostics ?? null,
@@ -533,7 +574,9 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
   const out = await db.$transaction(async (tx) => {
     const consumed = await tx.audit.updateMany({ where: { id: audit.id, claimedAt: null }, data: { claimedAt: new Date(), claimUserId: userId } });
     if (consumed.count === 0) throw new AppError("conflict", "Bu audit zaten sahiplenildi");
-    const summary = (audit.resultSummary ?? {}) as { brandName?: string; prompts?: string[]; crawl?: { categories?: string[] }; competitorCandidates?: Array<{ domain: string }> };
+    const summary = (audit.resultSummary ?? {}) as { brandName?: string; prompts?: string[]; questions?: Array<{ text: string; topic?: string | null }>; business?: { topics?: string[] } | null; crawl?: { categories?: string[] }; competitorCandidates?: Array<{ domain: string }> };
+    // Raporda ölçülen ürün grupları hesapta kategori olur; sorular aynı gruplara bağlanır (isim tahmini yok).
+    const reportTopics = (summary.business?.topics ?? []).filter(Boolean);
     const existingTrial = await tx.membership.findFirst({ where: { userId, role: "owner", workspace: { subscription: { isNot: null } } } });
     const slugBase = audit.domain.replace(/[^a-z0-9]+/g, "-").slice(0, 40);
     const ws = await tx.workspace.create({
@@ -545,12 +588,12 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
       await tx.subscription.create({ data: { workspaceId: ws.id, planKey: "starter", status: "trialing", currentPeriodStart: now, currentPeriodEnd: end, trialEnd: end } });
     }
     const brand = await tx.brand.create({
-      data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: summary.crawl?.categories ?? [], onboarding: { step: 2, fromAuditId: audit.id } },
+      data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: reportTopics.length ? reportTopics : (summary.crawl?.categories ?? []), onboarding: { step: 2, fromAuditId: audit.id } },
     });
     await tx.audit.update({ where: { id: audit.id }, data: { workspaceId: ws.id } });
     // Analizdeki sorular + kategorilerden üretilenler aktif prompt olarak eklenir; ilk ölçüm hemen başlatılabilir.
     const country = audit.locale.split("-")[1] ?? "TR";
-    const categories = summary.crawl?.categories ?? [];
+    const categories = reportTopics.length ? reportTopics : (summary.crawl?.categories ?? []);
     const promptLimit = existingTrial ? PLANS.free_audit.limits.activePrompts : TRIAL.activePrompts;
     await seedPrompts(tx, {
       workspaceId: ws.id,
@@ -559,7 +602,9 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
       locale: audit.locale,
       source: "audit",
       activeLimit: promptLimit,
-      texts: [...(summary.prompts ?? []).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) })), ...categoryPrompts(categories, country, promptLimit).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) }))],
+      texts: summary.questions?.some((q) => q.topic)
+        ? summary.questions.map((q) => ({ text: q.text, category: q.topic ?? undefined }))
+        : [...(summary.prompts ?? []).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) })), ...categoryPrompts(categories, country, promptLimit).map((text) => ({ text, category: categories.find((c) => text.toLocaleLowerCase("tr-TR").includes(c.toLocaleLowerCase("tr-TR"))) }))],
     });
     // Eski raporlardaki adaylar da aynı filtreden geçer.
     for (const c of (summary.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, audit.domain)).slice(0, PLANS.starter.limits.competitorsPerBrand)) {

@@ -55,13 +55,14 @@ async function assertTenantActive(ctx: JobContext, paid: boolean) {
 
 export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult>> = {
   async audit(ctx) {
-    const { auditId, startPath, phase } = ctx.job.payloadRef as { auditId: string; startPath?: string; phase?: string };
+    const { auditId, startPath } = ctx.job.payloadRef as { auditId: string; startPath?: string; phase?: string };
     const stepMode = ctx.deadline !== undefined;
     return runAudit(ctx.db, auditId, {}, {
       deadline: ctx.deadline,
       startPath,
-      // Tarama işi soru önerisinde durur; ücretli çağrılar kullanıcı onayından sonraki yanıt işinde yapılır.
-      requireConfirmation: phase !== "answers",
+      // Ücretsiz akış tek adımdır: tarama → otomatik kapsam/soru → AI yanıtları (soru onayı yok). Önceki sürümde
+      // onay aşamasında kalmış audit'ler onay uç noktasıyla tamamlanabilir (phase "answers").
+      requireConfirmation: false,
       callTimeoutMs: stepMode ? INLINE_CALL_TIMEOUT_MS : undefined,
       crawlMaxPages: stepMode ? INLINE_AUDIT_CRAWL_PAGES : undefined,
       load: () => (ctx.step as AuditWork | undefined) ?? null,

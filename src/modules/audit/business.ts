@@ -197,8 +197,21 @@ const soft = (s: string) => s.split(/\s+/).map((w) => ((w.match(/[A-ZÇĞİÖŞ�
  * Ücretsiz ölçüm soru seti: 2 keşif + 2 ihtiyaç + 1 bilgi, en çok 2 konu. Konu yoksa (veri yetersiz) eksik set
  * döner; 5'e tamamlamak için genel soru uydurulmaz. Marka adı geçen soru üretilmez (genel keşif ölçülür).
  */
-export function buildQuestionSet(profile: Pick<BusinessProfile, "type" | "offerings" | "softwareOfferings" | "agencyWording">, categories: string[], opts: { country: string; brandName: string }): QuestionSet {
+export function buildQuestionSet(profile: Pick<BusinessProfile, "type" | "offerings" | "softwareOfferings" | "agencyWording">, categories: string[], opts: { country: string; brandName: string; groups?: TopicGroup[]; gift?: boolean }): QuestionSet {
   const place = opts.country === "TR" ? "Türkiye'de " : "";
+  const brandKeyG = norm(opts.brandName);
+  // Kanıtlı ürün grupları varsa (mağaza/üretici/karma) somut soru seti; menü/oda adıyla genel soru üretilmez.
+  const groups = (opts.groups ?? []).filter((g) => !(brandKeyG.length >= 3 && norm(g.label).includes(brandKeyG))).slice(0, 2);
+  if (groups.length && !["service", "saas", "service_saas"].includes(profile.type)) {
+    const seenG = new Set<string>();
+    const outG = groupQuestions(profile.type, groups, { country: opts.country, gift: Boolean(opts.gift) }).filter((x) => {
+      const k = norm(x.text);
+      if (seenG.has(k) || (brandKeyG.length >= 3 && k.includes(brandKeyG))) return false;
+      seenG.add(k);
+      return true;
+    });
+    return { questions: outG, topics: groups.map((g) => g.label), incomplete: outG.length < 5 ? "Bazı sorular tekrar ettiği için çıkarıldı." : null };
+  }
   const service = ["service", "service_saas"].includes(profile.type);
   const software = ["saas", "service_saas"].includes(profile.type);
   const rawTopics = service || software ? profile.offerings : categories;
@@ -233,8 +246,8 @@ export function buildQuestionSet(profile: Pick<BusinessProfile, "type" | "offeri
     case "manufacturer":
       list = [
         q(`${place}en iyi ${A} markaları hangileri?`, "discovery", a),
-        q(a !== b ? `${capTr(BG)} için hangi markaları önerirsin?` : `${capTr(AG)} alacağım; hangi markaları karşılaştırmalıyım?`, "discovery", b),
-        q(`${place}kaliteli ve uzun ömürlü ${AG} arıyorum, hangi markaları değerlendirmeliyim?`, "need", a),
+        q(a !== b ? `${capTr(BG)} için hangi markaları önerirsin?` : `${capTr(AG)} için hangi markaları karşılaştırabilirim?`, "discovery", b),
+        q(`${capTr(AG)} alacağım; hangi seçenekleri değerlendirmeliyim?`, "need", a),
         q(`${capTr(BG)} için fiyat/performans açısından hangi markalar öne çıkıyor?`, "need", b),
         q(`${capTr(AG)} seçerken nelere dikkat etmeliyim?`, "info", a),
       ];
@@ -371,4 +384,106 @@ export function topicsFor(profile: Pick<BusinessProfile, "type" | "offerings">, 
     if (tops.length) return tops.slice(0, 2);
   }
   return representativeTopics(clean([...terms, ...categoryH1, ...crumbTops.keys()]), pages);
+}
+
+/** Ölçüm grubu: ana alan → anlamlı ürün grubu (→ alt tür), tarama kanıtıyla. */
+export interface TopicGroup {
+  label: string;
+  area: string | null;
+  subtype: string | null;
+  products: string[];
+  evidenceUrls: string[];
+  /** Grup ürün adlarının en az ikisinde geçen malzeme/özellik (doğrulanmış). */
+  attributes: string[];
+  /** Grup ürünlerinden en az biri set (ör. "Aile Seti"). */
+  hasSet: boolean;
+}
+
+/** Oda/alan adları tek başına ölçüm grubu olamaz ("Banyo" vitrifiye mi tekstil mi belirsiz). */
+const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım)$/i;
+const MATERIALS = ["%100 pamuk", "pamuk", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "saten", "deri", "yün", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
+
+/**
+ * Ürün sayfalarının breadcrumb'larından (yoksa ürün kategori yolundan) gruplar: alan = 1. düzey, grup = 2. düzey,
+ * alt tür = 3. düzey. Oda/alan adı tek başına grup sayılmaz (alt düzeye inilir). Sıralama: grupta kanıtlı ürün
+ * sayısı (taranan örneklemde), eşitlikte ilk görülme. Hiçbiri yoksa boş döner (uydurma yok).
+ */
+export function productGroups(pages: Page[], language: string): TopicGroup[] {
+  const acc = new Map<string, { label: string; area: string | null; first: number; products: string[]; urls: string[]; subtypes: Map<string, number> }>();
+  let order = 0;
+  for (const p of pages) {
+    if (p.pageType !== "product") continue;
+    const name = p.facts.products.find((x) => x.name)?.name?.trim() ?? p.facts.h1?.trim() ?? "";
+    if (!name) continue;
+    let path = (p.facts.breadcrumbs ?? []).map((c) => c.trim()).filter(Boolean);
+    if (path.length && norm(path[path.length - 1]!) === norm(name)) path = path.slice(0, -1);
+    if (!path.length) {
+      const cat = p.facts.products.find((x) => (x as { category?: string | null }).category)?.category;
+      if (cat) path = cat.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean);
+    }
+    path = path.map((c) => cleanTopic(c, language) ?? "").filter(Boolean);
+    if (!path.length) continue;
+    let gi = path.length >= 2 ? 1 : 0;
+    while (gi < path.length - 1 && AREA_ONLY.test(path[gi]!)) gi++;
+    const label = path[gi]!;
+    if (AREA_ONLY.test(label)) continue;
+    const k = norm(label);
+    const cur = acc.get(k) ?? { label, area: gi > 0 ? path[0]! : null, first: order++, products: [] as string[], urls: [] as string[], subtypes: new Map<string, number>() };
+    if (!cur.products.includes(name)) {
+      cur.products.push(name);
+      cur.urls.push(p.url);
+    }
+    const sub = path[gi + 1];
+    if (sub) cur.subtypes.set(sub, (cur.subtypes.get(sub) ?? 0) + 1);
+    acc.set(k, cur);
+  }
+  return [...acc.values()]
+    .sort((a, b) => b.products.length - a.products.length || a.first - b.first)
+    .map((g) => {
+      const names = g.products.map((n) => lowerTr(n));
+      const attributes = MATERIALS.filter((m) => names.filter((n) => n.includes(m)).length >= 2).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m)));
+      const subtype = [...g.subtypes.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+      return { label: g.label, area: g.area, subtype, products: g.products.slice(0, 5), evidenceUrls: g.urls.slice(0, 3), attributes: attributes.slice(0, 2), hasSet: names.some((n) => /\bset(i)?\b/.test(n)) };
+    });
+}
+
+/** Sitede hediye bölümü/bağlantısı var mı (hediye sorusu yalnız bu kanıtla sorulur). */
+export function hasGiftSection(pages: Page[]): boolean {
+  return pages.some((p) => (p.facts.anchors ?? []).some((a) => /hediye|gift/i.test(a.text) || /hediye|gift/i.test(a.url)));
+}
+
+/**
+ * Ürün grubu kanıtıyla somut soru seti (mağaza/üretici/karma): 1 mağaza keşfi + 1 marka/mağaza karşılaştırma +
+ * 1 somut ihtiyaç (doğrulanmış alt tür/malzeme) + 1 hediye (yalnız hediye bölümü ve set ürünü varsa) veya seçenek
+ * sorusu + 1 bilgi. İki grup varsa sorular gruplara dağıtılır.
+ */
+export function groupQuestions(type: BusinessType, groups: TopicGroup[], opts: { country: string; gift: boolean }): AuditQuestion[] {
+  const place = opts.country === "TR" ? "Türkiye'de " : "";
+  const g1 = groups[0]!;
+  const g2 = groups[1] ?? g1;
+  const L1 = soft(g1.label);
+  const L2 = soft(g2.label);
+  const q = (text: string, kind: QuestionKind, topic: string): AuditQuestion => ({ text: capTr(text.replace(/\s+/g, " ").trim()), kind, topic });
+  const store = type === "retailer" || type === "marketplace";
+  const concrete = [g1.attributes[0], g1.subtype ? soft(g1.subtype) : null].filter(Boolean).join(" ").trim();
+  const needText = concrete ? `${capTr(concrete)} arıyorum; hangi seçenekleri önerirsin?` : `${capTr(L1)} alacağım; hangi seçenekleri değerlendirmeliyim?`;
+  // Hediye sorusu yalnız sitede hediye bölümü varsa ve set ürünü olan grup için sorulur.
+  const giftGroup = opts.gift ? ([g2, g1].find((g) => g.hasSet) ?? null) : null;
+  const list: AuditQuestion[] = [
+    // Ürün sayfası olan (online satış yapan) sitede ilk soru mağaza keşfidir; üreticide marka karşılaştırması ikinci soruda.
+    q(`${place}${L1} satın alabileceğim online mağazalar hangileri?`, "discovery", g1.label),
+    q(store ? `${capTr(L2)} için hangi online mağazaları karşılaştırabilirim?` : `${capTr(L2)} için hangi markaları karşılaştırabilirim?`, "discovery", g2.label),
+    q(needText, "need", g1.label),
+    q(
+      giftGroup
+        ? `Hediye olarak ${soft(giftGroup.label)} seti alabileceğim mağazalar hangileri?`
+        : store
+          ? `${capTr(L2)} alırken geniş seçenek sunan online mağazalar hangileri?`
+          : `${capTr(L2)} için fiyat/performans açısından hangi markalar öne çıkıyor?`,
+      "need",
+      giftGroup?.label ?? g2.label,
+    ),
+    q(`${capTr(L1)} seçerken ${g1.attributes.length ? "malzeme ve kullanım açısından " : ""}nelere dikkat etmeliyim?`, "info", g1.label),
+  ];
+  return list;
 }

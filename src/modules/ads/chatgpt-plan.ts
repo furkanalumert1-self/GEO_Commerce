@@ -179,3 +179,80 @@ export async function buildChatgptAdsPlan(db: PrismaClient, ids: { workspaceId: 
     steps,
   };
 }
+
+export interface AdDraft {
+  key: "discover" | "need" | "gift" | "compare";
+  angle: string;
+  title: string;
+  body: string;
+  cta: string;
+  /** Taslakta kullanılan doğrulanmış ürün bilgileri (açılır "Kullanılan ürün bilgileri"). */
+  facts: string[];
+}
+
+const COLOR_WORDS = /\b(beyaz|ekru|natural|naturel|antrasit|kil|mavi|marın mavı|lacivert|bej|gri|siyah|renkli|karışık|karisik|asorti|pembe|yeşil|kırmızı|sarı|turuncu|mor|kahverengi|krem|vizon|bordo)\b/gi;
+const DRAFT_MATERIALS = ["%100 pamuk", "pamuk", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "saten", "deri", "yün", "organik"];
+
+/** "Solıd Bambu Yüz Havlusu 50X90 Cm Ekru" → "yüz havlusu" (ölçü/renk ve ürün adı öncesi atılır; son iki kelime). */
+export function productTypePhrase(name: string): string | null {
+  const base = name.split(/\s[-–]\s/)[0]!.replace(/\b\d[\d.,x×*/ ]*\s*(cm|mm|ml|lt|gr|g|kg|cc|adet|li|lü|lu|lık|lik)?\b/gi, " ").replace(COLOR_WORDS, " ").replace(/[%()/]+/g, " ").replace(/\s+/g, " ").trim();
+  const words = base.split(" ").filter((w) => w.length > 1);
+  if (words.length < 2) return null;
+  return words.slice(-2).join(" ").toLocaleLowerCase("tr-TR");
+}
+
+/**
+ * Reklam grubu için 3 farklı açıdan taslak: ürün keşfi / kullanım ihtiyacı / hediye (yalnız set ürünü varsa) veya
+ * karşılaştırma. Yalnız doğrulanmış ürün adlarından türetilen ürün tipi, malzeme (≥2 üründe) ve ölçü bilgisi
+ * kullanılır; fiyat, indirim, stok, "en iyi" veya performans iddiası eklenmez. Ürün yoksa genel taslak (işaretli).
+ */
+export function adDrafts(input: { brand: string; label: string; products: string[] }): AdDraft[] {
+  const L = input.label.trim();
+  const lowerL = lower(L);
+  const capL = L.charAt(0).toLocaleUpperCase("tr-TR") + L.slice(1);
+  const names = input.products.map((n) => n.trim()).filter(Boolean);
+  const lowNames = names.map((n) => lower(n));
+  const typeCount = new Map<string, number>();
+  for (const n of names) {
+    const t = productTypePhrase(n);
+    if (t) typeCount.set(t, (typeCount.get(t) ?? 0) + 1);
+  }
+  const types = [...typeCount.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 2);
+  const materials = DRAFT_MATERIALS.filter((m) => lowNames.filter((n) => n.includes(m)).length >= 2).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m))).slice(0, 2);
+  const sized = lowNames.filter((n) => /\d+\s*[x×]\s*\d+|\d+\s*cm\b/.test(n)).length >= 2;
+  const sets = lowNames.filter((n) => /\bset(i|leri)?\b/.test(n));
+  // "dekoratif obje" + "dekoratif kase" → "dekoratif obje ve kase"
+  const typePair = types.length >= 2 ? (types[0]!.split(" ")[0] === types[1]!.split(" ")[0] ? `${types[0]} ve ${types[1]!.split(" ").slice(1).join(" ")}` : `${types[0]} ve ${types[1]}`) : (types[0] ?? null);
+  const facts: string[] = [];
+  if (types.length) facts.push(`Ürün tipleri (ürün adlarından): ${types.join(", ")}`);
+  if (materials.length) facts.push(`Malzeme (en az iki üründe): ${materials.join(", ")}`);
+  if (sized) facts.push("Ölçü bilgisi ürün adlarında var");
+  if (sets.length) facts.push(`Set ürünü: ${sets.length} ürün`);
+  if (names.length) facts.push(`Örnek ürünler: ${names.slice(0, 3).join("; ")}`);
+  const capFirst = (s: string) => s.charAt(0).toLocaleUpperCase("tr-TR") + s.slice(1);
+  const f = (d: Omit<AdDraft, "title" | "body"> & { title: string; body: string }): AdDraft => ({ ...d, title: fit(d.title, CHATGPT_ADS_SPEC.title.max), body: fit(d.body, CHATGPT_ADS_SPEC.body.max) });
+  const drafts: AdDraft[] = [
+    f({
+      key: "discover",
+      angle: "Ürün keşfi",
+      title: `${input.brand} ${capL}`,
+      body: `${capFirst(typePair ?? lowerL)} seçeneklerini keşfedin; size uygun modeli seçin.`,
+      cta: "Ürünleri incele",
+      facts,
+    }),
+    f({
+      key: "need",
+      angle: "Kullanım ihtiyacı",
+      title: `${capL}: ihtiyacınıza göre seçin`,
+      body: materials.length
+        ? `${capFirst(materials.join(" ve "))} seçenekleri arasından kullanımınıza uygun ${lowerL} modelini bulun${sized ? "; ölçüleri karşılaştırın" : ""}.`
+        : `Kullanım alanınıza${sized ? " ve ölçüye" : ""} göre ${lowerL} modellerini inceleyin; size uygun olanı seçin.`,
+      cta: "Modelleri karşılaştır",
+      facts,
+    }),
+    sets.length
+      ? f({ key: "gift", angle: "Hediye", title: `Hediyelik ${lowerL} setleri`, body: `${input.brand} ${lowerL} setlerini inceleyin; sevdiklerinize uygun seti seçin.`, cta: "Setleri gör", facts })
+      : f({ key: "compare", angle: "Karşılaştırma", title: `${capL} modellerini karşılaştırın`, body: `${input.brand} ${lowerL} modellerini yan yana görün; özelliklere göre size uygun olanı seçin.`, cta: "Karşılaştır", facts }),
+  ];
+  return drafts;
+}

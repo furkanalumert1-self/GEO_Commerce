@@ -133,3 +133,55 @@ describe("hesaplama", () => {
     expect(isStalled({ status: "succeeded", startedAt: old, scheduledAt: old }, undefined, now)).toBe(false);
   });
 });
+
+describe("ürün grubu hiyerarşisi ve somut sorular", () => {
+  const chakra = [
+    page("https://c.com/", "home", { anchors: [{ url: "https://c.com/hediye-rehberi", text: "Hediye Rehberi" }] }),
+    page("https://c.com/a", "product", { breadcrumbs: ["Banyo", "Havlu", "Yüz Havlusu", "Solid Bambu Yüz Havlusu 50X90"], products: [product("Solid Bambu Yüz Havlusu 50X90", "chakra")] }),
+    page("https://c.com/b", "product", { breadcrumbs: ["Banyo", "Havlu", "Yüz Havlusu", "Viola Bambu Yüz Havlusu 50X90"], products: [product("Viola Bambu Yüz Havlusu 50X90", "chakra")] }),
+    page("https://c.com/c", "product", { breadcrumbs: ["Banyo", "Havlu", "El Havlusu", "Chic Pamuk Aile Seti"], products: [product("Chic Pamuk Aile Seti", "chakra")] }),
+    page("https://c.com/d", "product", { breadcrumbs: ["Ev Dekorasyonu", "Aydınlatma", "Sarkıt", "Gogo Sarkıt"], products: [product("Gogo Sarkıt", "chakra")] }),
+    page("https://c.com/e", "product", { breadcrumbs: ["Hediye Rehberi"], products: [product("Hediye Kutusu", "chakra")] }),
+  ];
+
+  it("oda/alan adı ('Banyo') ve menü öğesi ('Hediye Rehberi') tek başına grup olmaz; alt düzey ve kanıt tutulur", async () => {
+    const { productGroups } = await import("@/modules/audit/business");
+    const groups = productGroups(chakra, "tr");
+    expect(groups.map((g) => g.label)).toEqual(["Havlu", "Aydınlatma"]);
+    expect(groups[0]).toMatchObject({ area: "Banyo", subtype: "Yüz Havlusu", attributes: ["bambu"], hasSet: true });
+    expect(groups[0]!.evidenceUrls).toHaveLength(3);
+  });
+
+  it("somut sorular: doğrulanmış alt tür/malzeme, hediye yalnız hediye bölümü + set ürünüyle; marka adı yok", async () => {
+    const { productGroups, groupQuestions, hasGiftSection } = await import("@/modules/audit/business");
+    const groups = productGroups(chakra, "tr");
+    const qs = groupQuestions("brand_store", groups, { country: "TR", gift: hasGiftSection(chakra) });
+    expect(qs.map((q) => q.text)).toEqual([
+      "Türkiye'de havlu satın alabileceğim online mağazalar hangileri?",
+      "Aydınlatma için hangi markaları karşılaştırabilirim?",
+      "Bambu yüz havlusu arıyorum; hangi seçenekleri önerirsin?",
+      "Hediye olarak havlu seti alabileceğim mağazalar hangileri?",
+      "Havlu seçerken malzeme ve kullanım açısından nelere dikkat etmeliyim?",
+    ]);
+    const noGift = groupQuestions("retailer", groups, { country: "TR", gift: false });
+    expect(noGift[3]!.text).toBe("Aydınlatma alırken geniş seçenek sunan online mağazalar hangileri?");
+    expect(noGift[1]!.text).toMatch(/online mağazaları karşılaştırabilirim/);
+    expect([...qs, ...noGift].some((q) => /^banyo|kaliteli ve güvenilir banyo/i.test(q.text))).toBe(false);
+  });
+});
+
+describe("reklam taslakları", () => {
+  it("3 farklı açı; yalnız doğrulanmış ürün bilgisi; gruplar arasında yalnız ad değişmez", async () => {
+    const { adDrafts, productTypePhrase } = await import("@/modules/ads/chatgpt-plan");
+    expect(productTypePhrase("Solıd Bambu Yüz Havlusu 50X90 Cm Ekru")).toBe("yüz havlusu");
+    const towel = adDrafts({ brand: "Chakra", label: "Havlu", products: ["Chıc %100 Pamuk Aile Seti Beyaz", "Solıd Bambu Yüz Havlusu 50X90 Cm Ekru", "Vıola Bambu Yüz Havlusu 50X90 Cm Kil"] });
+    expect(towel.map((d) => d.key)).toEqual(["discover", "need", "gift"]);
+    expect(new Set(towel.map((d) => d.body)).size).toBe(3);
+    expect(towel[1]!.body).toMatch(/Bambu/);
+    const decor = adDrafts({ brand: "Chakra", label: "Aydınlatma", products: ["Gogo Sarkıt Gövde Natural", "Lume Masa Lambası"] });
+    expect(decor[2]!.key).toBe("compare"); // set ürünü yok → hediye taslağı yok
+    // Gruplar arasında metin yalnız kategori adıyla değişmemeli (ürün tipi/malzeme farkı).
+    expect(towel[0]!.body.replace(/havlu/gi, "X")).not.toBe(decor[0]!.body.replace(/aydınlatma/gi, "X"));
+    for (const d of [...towel, ...decor]) expect(`${d.title} ${d.body}`).not.toMatch(/en iyi|indirim|ucuz|stokta|garanti|%\d+ ?pamuk/i);
+  });
+});

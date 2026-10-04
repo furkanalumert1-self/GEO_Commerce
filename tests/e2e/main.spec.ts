@@ -47,11 +47,10 @@ test("audit → claim → trial onboarding", async ({ page }, info) => {
   await page.getByLabel("Web siteniz").fill("lumabakim.example");
   await page.getByRole("button", { name: /ölçümü başlat/i }).click();
   await page.waitForURL(/\/audit\/.+/);
-  // Tarama sonrası onay ekranı: soru/platform/kapsam görünür, onay gelmeden AI çağrısı yapılmaz.
-  await expect(page.getByRole("heading", { name: "Ölçüm öncesi onay" })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByText(/soru × \d platform/)).toBeVisible();
-  await page.getByRole("button", { name: "Onayla ve ölçümü başlat" }).click();
-  await expect(page.getByText(/Fırsat (sinyali|analizi)/)).toBeVisible({ timeout: 60_000 });
+  // Tek CTA: ikinci onay ekranı yok; rapor otomatik hazırlanır, başlıkta marka adı ve kapsam metni görünür.
+  await expect(page.getByText(/Fırsat (sinyali|analizi)/)).toBeVisible({ timeout: 90_000 });
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("AI Görünürlük Ön Analizi");
+  await expect(page.getByTestId("report-scope")).toContainText("tüm ürünlerinizi kapsamaz");
   await expect(page.getByText(/Küçük örneklem/)).toBeVisible();
   const path = new URL(page.url()).pathname;
   await page.goto(`/login?next=${encodeURIComponent(path)}`);

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Button, Card, CardHeader } from "@/components/ui";
 import { isCompetitorCandidate } from "@/modules/audit/competitor-filter";
 import { AuditConfirm, type Proposal } from "@/components/forms/audit-confirm";
+import { ENGINE_SHORT } from "@/lib/format";
 
 interface Check {
   id: string;
@@ -38,11 +39,15 @@ interface Summary {
   phase?: string;
   proposal?: Proposal;
   /** Yeni raporlar: soru türleri ve türe göre sonuçlar, fırsat analizinin yapılıp yapılamadığı, işletme türü. */
-  questions?: Array<{ text: string; kind: "discovery" | "need" | "info" | null }>;
+  questions?: Array<{ text: string; kind: "discovery" | "need" | "info" | null; topic?: string | null }>;
   prompts?: string[];
   kindStats?: Record<"discovery" | "need" | "info", { answers: number; mentioned: number; ownCitation: number }>;
   opportunityAnalyzed?: boolean;
   business?: { type: string; confidence: string; reasons: string[]; topics: string[] } | null;
+  displayName?: string | null;
+  counts?: { answers: number; mentioned: number; recommended: number; ownCitation: number };
+  groups?: Array<{ label: string; area: string | null; subtype: string | null; products: string[]; evidenceUrls: string[] }>;
+  scopeUnavailable?: string;
 }
 
 interface View {
@@ -57,22 +62,24 @@ interface View {
 }
 
 const STAGES: Record<string, string> = {
-  queued: "Sırada",
-  crawling: "Site inceleniyor",
+  queued: "Siteniz inceleniyor",
+  crawling: "Siteniz inceleniyor",
   prompts: "Sorular hazırlanıyor",
   confirm: "Soruları onaylayın",
-  asking_engines: "AI platformlarına soruluyor",
-  summarizing: "Özet hesaplanıyor",
+  asking_engines: "AI yanıtları kontrol ediliyor",
+  summarizing: "Raporunuz hazırlanıyor",
   done: "Tamamlandı",
   failed: "Başarısız",
 };
 
-const STATUS_BADGE: Record<Check["status"], { tone: "success" | "danger" | "neutral" | "warning"; label: string }> = {
-  pass: { tone: "success", label: "Geçti" },
-  fail: { tone: "danger", label: "Sorun var" },
-  not_detected: { tone: "neutral", label: "Tespit edilemedi" },
-  requires_verification: { tone: "warning", label: "Doğrulama gerekli" },
-};
+/** Gerçek iş aşamasına bağlı adımlar (sahte ilerleme yok). */
+const STEPS: Array<{ label: string; stages: string[] }> = [
+  { label: "Siteniz inceleniyor", stages: ["queued", "crawling"] },
+  { label: "Sorular hazırlanıyor", stages: ["prompts", "confirm"] },
+  { label: "AI yanıtları kontrol ediliyor", stages: ["asking_engines"] },
+  { label: "Raporunuz hazırlanıyor", stages: ["summarizing"] },
+];
+
 
 const CALL_ERROR: Record<string, string> = {
   auth: "API anahtarı reddedildi",
@@ -178,58 +185,80 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
   const r = view.result;
   // Eski raporlarda kalmış haber/kamu/eğitim alan adları da gösterilmez.
   // Puan yalnız ölçülebilen kontrollerden hesaplanır; kaç kontrolün ölçüldüğü açıkça yazılır.
-  const coverage = (group: "geo" | "ads") => {
-    const list = r?.readiness?.checks.filter((c) => c.group === group) ?? [];
-    const measured = list.filter((c) => c.status === "pass" || c.status === "fail");
-    const passed = measured.filter((c) => c.status === "pass").length;
-    const open = list.length - measured.length;
-    return `Ölçülen kontrol: ${measured.length}/${list.length}, geçen: ${passed}${open ? ` (ölçülemeyen/doğrulama bekleyen: ${open})` : ""}.`;
-  };
-  /**
-   * Puan formülü değişmez (ölçülebilen kontrollerin geçme oranı); yalnız sunum: kontrollerin yarısından azı
-   * ölçülebildiyse sayı yerine "Yetersiz veri", bir kısmı ölçülemediyse "Kısmi" rozeti gösterilir.
-   */
-  const readinessView = (group: "geo" | "ads", value: number | null) => {
-    const list = r?.readiness?.checks.filter((c) => c.group === group) ?? [];
-    const passed = list.filter((c) => c.status === "pass").length;
-    const failed = list.filter((c) => c.status === "fail").length;
-    const open = list.length - passed - failed;
-    const gap = `Değerlendirme eksik: ${passed} geçti, ${failed} başarısız, ${open} belirsiz`;
-    if (value === null) return { value: "Ölçülemedi", note: null as string | null };
-    // Belirsiz kontroller geçmiş veya başarısız sayılmaz; yarıdan azı ölçülebildiyse oran gösterilmez.
-    if (list.length && (passed + failed) / list.length < 0.5) return { value: "Değerlendirme eksik", note: gap };
-    return { value: String(value), note: open ? `${gap} · puan yalnız ölçülen ${passed + failed} kontrolün oranıdır` : null };
-  };
+
+
 
   const candidates = (r?.competitorCandidates ?? []).filter((c) => isCompetitorCandidate(c.domain, view.domain));
   // Eski raporlarda site okunamadıysa (0 sayfa) kontrol maddeleri "bulunamadı" değil "ölçülemedi"dir.
   const notRead = (r?.crawl?.pages ?? 0) === 0;
   const unreadable = r?.siteUnreadable ? UNREADABLE[r.siteUnreadable.kind] ?? UNREADABLE.network! : null;
+  const display = (() => {
+    const n = (r?.displayName ?? r?.brandName ?? view.domain.split(".")[0] ?? view.domain).trim();
+    return n ? n.charAt(0).toLocaleUpperCase("tr-TR") + n.slice(1) : view.domain;
+  })();
+  const checks = r?.readiness?.checks ?? [];
+  const publishChecks = checks.filter((c) => c.status === "requires_verification");
+  const siteChecks = checks.filter((c) => c.group === "geo");
+  const adChecks = checks.filter((c) => c.group === "ads" && c.status !== "requires_verification");
+  const tally = (list: Check[]) => ({ pass: list.filter((c) => c.status === "pass").length, fail: list.filter((c) => c.status === "fail").length, review: list.filter((c) => c.status === "not_detected").length });
+  const tallyText = (t: { pass: number; fail: number; review: number }, okWord: string) =>
+    [t.pass ? `${t.pass} kontrol ${okWord}` : null, t.fail ? `${t.fail} sorun` : null, t.review ? `${t.review} kontrol öneriliyor` : null].filter(Boolean).join(" · ") || "Kontrol yapılamadı";
+  const checkView = (c: Check): { label: string; badge: string; tone: "success" | "danger" | "neutral" | "warning"; detail: string } => {
+    if (notRead && c.status !== "pass") return { label: c.label, badge: "Ölçülemedi", tone: "neutral", detail: c.detail };
+    if (c.id === "policy_pages" && c.status === "not_detected") return { label: "Politika bağlantılarını kontrol edin", badge: "Kontrol edin", tone: "warning", detail: "İade/gizlilik bağlantısı taranan sayfalarda bulunamadı; bulunamaması sayfanın olmadığını kanıtlamaz." };
+    if (c.id === "measurement" && c.status === "pass") return { label: "Ölçüm etiketi bulundu", badge: "Etiket bulundu", tone: "success", detail: `${c.detail}. Etiketin doğru çalıştığı bu taramada doğrulanmadı.` };
+    if (c.status === "fail") return { label: c.label, badge: "Sorun var", tone: "danger", detail: c.detail };
+    if (c.status === "not_detected") return { label: c.label, badge: "Kontrol edin", tone: "warning", detail: c.detail };
+    if (c.status === "requires_verification") return { label: c.label, badge: "Taramada doğrulanmaz", tone: "neutral", detail: c.detail };
+    return { label: c.label, badge: "Geçti", tone: "success", detail: c.detail };
+  };
+  const missing = r?.visibility?.missingEngines ?? [];
+  const componentIssues = [
+    missing.length ? `${(r?.crawl?.pages ?? 0) > 0 ? "Site kontrolü hazır; " : ""}${missing.map((e) => ENGINE_SHORT[e] ?? e).join(", ")} yanıtları alınamadı.` : null,
+    r?.crawl?.failed ? `${r.crawl.failed} sayfa okunamadı.` : null,
+  ].filter(Boolean) as string[];
+  const discoveryAnswers = r?.kindStats ? r.kindStats.discovery.answers + r.kindStats.need.answers : null;
+  const discoveryMentioned = r?.kindStats ? r.kindStats.discovery.mentioned + r.kindStats.need.mentioned : null;
+  // En fazla 3 kanıtlı sonraki adım: görünürlük açığı, sorunlu kontroller, önerilen kontroller.
+  const nextSteps: Array<{ title: string; evidence: string }> = [];
+  if (discoveryAnswers && discoveryMentioned !== null && discoveryMentioned < discoveryAnswers / 2) {
+    const domains = [...new Set((r?.examples ?? []).flatMap((e) => e.competitorDomains))].slice(0, 3);
+    nextSteps.push({ title: discoveryMentioned === 0 ? `AI yanıtlarında ${display} anılmadı` : `${display} yanıtların azında anıldı`, evidence: `${discoveryAnswers} keşif/ihtiyaç yanıtının ${discoveryMentioned}'inde anıldınız${domains.length ? `; kaynak gösterilenler: ${domains.join(", ")}` : ""}. Bu ürün grupları için içerik ve kaynak fırsatlarını hesabınızda inceleyin.` });
+  }
+  for (const c of checks.filter((x) => x.status === "fail")) nextSteps.push({ title: checkView(c).label, evidence: c.detail });
+  for (const c of checks.filter((x) => x.status === "not_detected")) nextSteps.push({ title: checkView(c).label, evidence: checkView(c).detail });
+  const groupsText = (r?.groups?.length ? r.groups.map((g) => g.label) : r?.business?.topics ?? []).join(", ");
+  const qCount = (r?.questions ?? r?.prompts ?? []).length;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-semibold">Ücretsiz ölçüm: {view.domain}</h1>
+        <h1 className="text-2xl font-semibold">{r?.visibility || r?.scopeUnavailable ? `${display} — AI Görünürlük Ön Analizi` : `Ücretsiz ölçüm: ${view.domain}`}</h1>
         {r?.demo ? <Badge tone="warning">Örnek veri</Badge> : null}
-        <Badge tone={view.status === "succeeded" ? "success" : view.status === "partial" ? "warning" : view.status === "failed" ? "danger" : "primary"}>
-          {view.status === "partial" ? "Kısmen tamamlandı" : r?.siteUnreadable ? "İncelenemedi" : view.status === "failed" ? "Başarısız" : (STAGES[view.stage] ?? view.stage)}
+        <Badge tone={view.status === "failed" ? "danger" : componentIssues.length && !running ? "warning" : view.status === "succeeded" || view.status === "partial" ? "success" : "primary"}>
+          {r?.siteUnreadable ? "İncelenemedi" : view.status === "failed" ? "Başarısız" : running || confirming ? (STAGES[view.stage] ?? view.stage) : componentIssues.length ? "Kısmen tamamlandı" : "Tamamlandı"}
         </Badge>
       </div>
+      {r?.visibility || r?.scopeUnavailable ? <p className="-mt-4 text-sm text-text-secondary">{view.domain}</p> : null}
 
       {running ? (
         <Card className="p-5" aria-live="polite">
-          <p className="font-medium">{STAGES[view.stage] ?? view.stage}</p>
-          <p className="tabular mt-1 text-sm text-muted">
-            Aşama {view.progress.done} / {view.progress.total}
-          </p>
-          <div className="mt-3 h-2 w-full rounded-sm bg-bg" role="progressbar" aria-valuemin={0} aria-valuemax={view.progress.total} aria-valuenow={view.progress.done} aria-label="Ölçüm ilerlemesi">
-            <div className="h-2 rounded-sm bg-primary" style={{ width: `${(view.progress.done / Math.max(1, view.progress.total)) * 100}%` }} />
-          </div>
-          {inline && step?.progress && step.progress.total > 0 && view.stage === "asking_engines" ? (
-            <p className="tabular mt-2 text-sm text-text-secondary">AI yanıtları: {step.progress.done} / {step.progress.total}</p>
-          ) : null}
+          <ol className="flex flex-col gap-2">
+            {STEPS.map((st, i) => {
+              const current = STEPS.findIndex((x) => x.stages.includes(view.stage));
+              const state = current === -1 ? "todo" : i < current ? "done" : i === current ? "now" : "todo";
+              return (
+                <li key={st.label} className="flex items-center gap-2 text-sm">
+                  <span aria-hidden className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] ${state === "done" ? "bg-success text-white" : state === "now" ? "bg-primary text-white" : "bg-bg text-muted"}`}>{state === "done" ? "✓" : i + 1}</span>
+                  <span className={state === "now" ? "font-medium" : state === "todo" ? "text-muted" : ""}>{st.label}</span>
+                  {state === "now" && view.stage === "asking_engines" && step?.progress && step.progress.total > 0 ? <span className="tabular text-text-secondary">({step.progress.done}/{step.progress.total} yanıt)</span> : null}
+                </li>
+              );
+            })}
+          </ol>
           <p className="mt-3 text-xs text-muted">
             {inline
-              ? "Hızlı analiz: sınırlı sayfa ve küçük örneklem. Analiz bu sekme açıkken adım adım ilerler; sekme kapatılırsa duraklar, bağlantıya geri döndüğünüzde kaldığı yerden devam eder."
+              ? "Analiz bu sekme açıkken ilerler; sekme kapatılırsa duraklar, bağlantıya geri döndüğünüzde kaldığı yerden devam eder."
               : "Bu sayfayı kapatabilirsiniz; analiz arka planda sürer."}{" "}
             Bağlantı {new Date(view.expiresAt).toLocaleDateString("tr-TR")} tarihine kadar geçerlidir.
           </p>
@@ -258,7 +287,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           <p className="mt-1">{unreadable.why(view.domain)}</p>
           <p className="mt-2 text-sm"><span className="font-semibold">Ne yapmalı? </span>{unreadable.todo}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button asChild variant="primary"><Link href="/audit">{["network", "incomplete", "timeout"].includes(r.siteUnreadable.kind) ? "Tekrar dene" : "Yeniden ölç"}</Link></Button>
+            <Button asChild variant="primary"><Link href="/audit">Tekrar dene</Link></Button>
           </div>
           <details className="mt-3 text-xs text-text-secondary">
             <summary className="cursor-pointer">Teknik ayrıntı</summary>
@@ -268,7 +297,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         </div>
       ) : view.status === "failed" ? (
         <Alert tone="danger" title="Ölçüm tamamlanamadı">
-          Siteniz okunamadı ve AI platformlarından yanıt alınamadı; nedenler aşağıdaki &ldquo;Nasıl ölçüldü&rdquo; bölümünde. Veri üretmeyen ölçüm ücretsiz hakkınızı tüketmez; sorun giderildikten sonra yeniden deneyebilirsiniz.
+          Siteniz okunamadı ve AI platformlarından yanıt alınamadı. Veri üretmeyen ölçüm ücretsiz hakkınızı tüketmez; biraz sonra tekrar deneyebilirsiniz.
         </Alert>
       ) : null}
 
@@ -288,122 +317,186 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         />
       ) : null}
 
+      {r?.scopeUnavailable ? (
+        <Card className="p-5">
+          <h2 className="font-semibold">Görünürlük kapsamı oluşturulamadı</h2>
+          <p className="mt-1 text-sm text-text-secondary">{r.scopeUnavailable} Güvenilir olmayan genel sorularla puan üretmedik; AI platformlarına soru sorulmadı. Aşağıda doğrulanabilen site kontrolleri var.</p>
+          <div className="mt-3"><Button asChild><Link href="/audit">Tekrar dene</Link></Button></div>
+        </Card>
+      ) : null}
+
       {r && !r.siteUnreadable && r.visibility ? (
         <>
-          {view.status === "partial" ? (
-            <Alert tone="warning" title="Kısmen tamamlandı">
-              Bazı adımlar tamamlanamadı. {r.visibility.missingEngines.length ? `Yanıt alınamayan platform: ${r.visibility.missingEngines.map((e) => ENGINE[e] ?? e).join(", ")}. ` : ""}
-              {r.crawl.failed ? `${r.crawl.failed} sayfa okunamadı. ` : ""}
-              {r.crawl.truncated ? "Site taraması hızlı analiz için sınırlı tutuldu (tüm sayfalar okunmadı)." : ""}
-            </Alert>
+          {componentIssues.length ? (
+            <Alert tone="warning" title="Kısmen tamamlandı">{componentIssues.join(" ")}</Alert>
+          ) : null}
+
+          {!r.scopeUnavailable ? (
+            <p className="text-sm text-text-secondary" data-testid="report-scope">
+              Sitenizden seçilen {r.groups?.length || r.business?.topics.length || 0} ürün grubu{groupsText ? ` (${groupsText})` : ""} ve {qCount} soru üzerinden hazırlanmıştır; tüm ürünlerinizi kapsamaz.
+            </p>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-3">
+            {!r.scopeUnavailable ? (
+              <Card className="p-4">
+                <p className="text-sm text-muted">AI görünürlük puanı</p>
+                <p className="tabular mt-2 text-3xl font-semibold">{r.visibility.sampleCount > 0 && r.visibility.score !== null ? <>{r.visibility.score}<span className="text-base font-normal text-muted"> / 100</span></> : "Ölçülemedi"}</p>
+                <p className="tabular mt-2 text-xs text-muted">{qCount} farklı soru · {r.visibility.sampleCount} geçerli yanıt</p>
+                {r.counts ? <p className="tabular mt-1 text-xs text-muted">Anılma {r.counts.mentioned} · Önerilme {r.counts.recommended} · Kendi sayfanız kaynak {r.counts.ownCitation} (yanıt sayısı)</p> : null}
+                <p className="mt-1 text-xs text-muted">Puan yüzde değildir: anılma, önerilme ve kendi sayfanızın kaynak gösterilmesinin ağırlıklı ölçüsüdür. Küçük örneklem.</p>
+              </Card>
+            ) : null}
             <Card className="p-4">
-              <p className="text-sm text-muted">AI görünürlüğü</p>
-              <p className="tabular mt-2 text-3xl font-semibold">{r.visibility.score ?? "Ölçülemedi"}</p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                <Badge tone="warning">Küçük örneklem ({r.visibility.sampleCount} yanıt)</Badge>
-                {r.visibility.partial ? <Badge tone="warning">Kısmen</Badge> : null}
-              </div>
-              <p className="tabular mt-2 text-xs text-muted">{(r.questions ?? r.prompts ?? []).length} farklı soru · {r.visibility.sampleCount} geçerli yanıt · {(r.scopeEngines ?? r.engines).length} platform · tek ölçüm</p>
-              {r.kindStats ? (
-                <p className="mt-1 text-xs text-muted">
-                  Keşif/ihtiyaç sorularında {r.kindStats.discovery.mentioned + r.kindStats.need.mentioned}/{r.kindStats.discovery.answers + r.kindStats.need.answers} yanıtta anıldınız{r.kindStats.info.answers ? ` · bilgi sorularında ${r.kindStats.info.mentioned}/${r.kindStats.info.answers} (marka önerisi beklenmez)` : ""}.
-                </p>
-              ) : null}
+              <p className="text-sm text-muted">Site kontrolleri</p>
+              <p className="mt-2 text-lg font-semibold">{tallyText(tally(siteChecks), "geçti")}</p>
+              <p className="mt-2 text-xs text-muted">Görünürlük puanından ayrıdır; genel bir “hazır” notu değildir.</p>
             </Card>
             <Card className="p-4">
-              <p className="text-sm text-muted">Site hazırlığı</p>
-              <p className="tabular mt-2 text-3xl font-semibold">{readinessView("geo", r.readiness.geoScore).value}</p>
-              {readinessView("geo", r.readiness.geoScore).note ? <p className="mt-2 text-xs font-medium text-warning">{readinessView("geo", r.readiness.geoScore).note}</p> : null}
-              <p className="mt-2 text-xs text-muted">{readinessView("geo", r.readiness.geoScore).note ? "" : `${coverage("geo")} `}Görünürlük puanından ayrıdır.</p>
-            </Card>
-            <Card className="p-4">
-              <p className="text-sm text-muted">Reklam hazırlığı</p>
-              <p className="tabular mt-2 text-3xl font-semibold">{readinessView("ads", r.readiness.adsScore).value}</p>
-              {readinessView("ads", r.readiness.adsScore).note ? <p className="mt-2 text-xs font-medium text-warning">{readinessView("ads", r.readiness.adsScore).note}</p> : null}
-              <p className="mt-2 text-xs text-muted">{readinessView("ads", r.readiness.adsScore).note ? "" : `${coverage("ads")} `}Reklam hesabı uygunluğu ve ödeme adımı ayrıca doğrulanmalıdır.</p>
+              <p className="text-sm text-muted">Reklam için site kontrolleri</p>
+              <p className="mt-2 text-lg font-semibold">{tallyText(tally(adChecks), "olumlu")}</p>
+              {publishChecks.length ? <p className="mt-2 text-xs text-muted">Yayın öncesi {publishChecks.length} kontrol (hesap uygunluğu, ödeme akışı) site taramasında doğrulanmaz.</p> : null}
             </Card>
           </div>
 
-          <Card>
-            <CardHeader title="Nasıl ölçüldü" />
-            <div className="grid gap-2 p-4 text-sm sm:grid-cols-2">
-              <p><span className="text-muted">Yöntem:</span> AI platformlarının web aramalı API yanıtları — ChatGPT/Gemini/Claude uygulamasındaki sonuçla birebir aynı değildir</p>
-              {r.business ? <p><span className="text-muted">İşletme türü:</span> {BUSINESS[r.business.type] ?? r.business.type}{r.business.topics.length ? ` · ${r.business.topics.join(", ")} için ön tarama` : ""}</p> : null}
-              {r.scopeEngines?.length ? <p><span className="text-muted">Platformlar:</span> {r.scopeEngines.map((e) => ENGINE[e] ?? e).join(", ")}</p> : null}
-              <p><span className="text-muted">Ülke / dil (istenen pazar):</span> {r.provenance.country} / {r.provenance.language}</p>
-              <p><span className="text-muted">Modeller:</span> {r.provenance.models.join(", ") || "—"}</p>
-              <p><span className="text-muted">Yanıtlar:</span> {r.provenance.sampleCount} başarılı yanıt · {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
-              <p><span className="text-muted">Site incelemesi:</span> {r.crawl.pages} sayfa okundu, {r.crawl.products} ürün bulundu, robots kuralıyla atlanan {r.crawl.skippedByRobots}{r.crawl.failed ? `, okunamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>
-              {r.crawl.siteDomain ? <p><span className="text-muted">Yönlendirme:</span> {view.domain} → {r.crawl.siteDomain} (analiz yönlendirilen alan adında yapıldı)</p> : null}
-              {r.crawl.wwwFallback ? <p><span className="text-muted">Not:</span> {view.domain} açılmadığı için www.{view.domain} incelendi. Alan adınızın www&apos;suz halini düzeltmeniz önerilir.</p> : null}
-              {r.crawl.failures?.length ? <p className="text-xs text-text-secondary">Okunamayan sayfalar: {r.crawl.failures.map((f) => `${f.url} → ${f.reason}`).join("; ")}</p> : null}
-              {r.unavailableEngines.length ? <p><span className="text-muted">Kullanılamayan platformlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
-              {r.failedCalls?.length ? <p><span className="text-muted">Yanıt alınamayan çağrılar:</span> {r.failedCalls.map((f) => { const [e, c] = f.split(":"); return `${ENGINE[e!] ?? e} (${CALL_ERROR[c ?? ""] ?? c})`; }).join("; ")} — başarısız sorgular görünürlük sıfırı sayılmaz.</p> : null}
-              {r.failedDetails && Object.keys(r.failedDetails).length ? (
-                <ul className="text-xs text-text-secondary">
-                  {Object.entries(r.failedDetails).map(([e, d]) => <li key={e} className="break-words">{ENGINE[e] ?? e}: {d}</li>)}
+          {nextSteps.length ? (
+            <Card>
+              <CardHeader title="Öne çıkan bulgular ve sonraki adımlar" />
+              <ol className="divide-y divide-border">
+                {nextSteps.slice(0, 3).map((n, i) => (
+                  <li key={i} className="px-4 py-3 text-sm sm:px-6">
+                    <p className="font-medium">{i + 1}. {n.title}</p>
+                    <p className="mt-0.5 text-text-secondary">{n.evidence}</p>
+                  </li>
+                ))}
+              </ol>
+            </Card>
+          ) : null}
+
+          {!r.scopeUnavailable ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                {r.opportunityAnalyzed === false || r.visibility.sampleCount === 0 ? (
+                  <CardHeader title="Fırsat analizi yapılamadı" description="Keşif/ihtiyaç sorularında geçerli yanıt alınamadı; bu “fırsat yok” anlamına gelmez." />
+                ) : (
+                  <>
+                    <CardHeader title={`Fırsat sinyali: ${r.opportunityCount} soru`} description="Keşif/ihtiyaç sorularında markanız anılmadı ve ticari bir site kaynak gösterildi. Kesin fırsat için kayıttan sonra kanıt incelenir." />
+                    <ul className="divide-y divide-border">
+                      {r.examples.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Bu örneklemde fırsat sinyali görülmedi.</li> : null}
+                      {r.examples.map((e, i) => (
+                        <li key={i} className="px-4 py-3 text-sm">
+                          <p className="font-medium">&ldquo;{e.prompt}&rdquo;</p>
+                          <p className="mt-1 text-muted">{(e.engines ?? [e.engine]).map((x) => ENGINE[x] ?? x).join(", ")} · Kaynak gösterilen siteler: {e.competitorDomains.join(", ") || "—"}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Card>
+              <Card>
+                <CardHeader title="Rakip adayları" description="Yanıtlarda kaynak gösterilen ticari siteler (haber, kamu, eğitim ve liste siteleri hariç); kayıttan sonra onaylamanız gerekir." />
+                <ul className="divide-y divide-border">
+                  {candidates.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Aday bulunamadı.</li> : null}
+                  {candidates.map((c) => (
+                    <li key={c.domain} className="flex justify-between px-4 py-3 text-sm">
+                      <span>{c.domain}</span>
+                      <span className="tabular text-muted">{c.observations} yanıtta</span>
+                    </li>
+                  ))}
                 </ul>
-              ) : null}
+              </Card>
             </div>
+          ) : null}
+
+          <Card>
+            <CardHeader title="Site kontrolleri" description="Sorun ve öneriler önce; geçen kontroller kapalı bölümde." />
+            <ul className="divide-y divide-border">
+              {checks.filter((c) => c.status === "fail" || c.status === "not_detected").map((c) => {
+                const v = checkView(c);
+                return (
+                  <li key={c.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium">{v.label} <span className="text-xs font-normal text-muted">({c.group === "geo" ? "Site" : "Reklam"})</span></p>
+                      <p className="text-muted">{v.detail}</p>
+                    </div>
+                    <Badge tone={v.tone}>{v.badge}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+            <details className="border-t border-border px-4 py-3 text-sm">
+              <summary className="min-h-9 cursor-pointer py-1 font-medium text-primary">Geçen kontroller ({checks.filter((c) => c.status === "pass").length})</summary>
+              <ul className="mt-2 flex flex-col gap-2">
+                {checks.filter((c) => c.status === "pass").map((c) => {
+                  const v = checkView(c);
+                  return (
+                    <li key={c.id} className="flex flex-wrap items-start justify-between gap-2">
+                      <span><span className="font-medium">{v.label}</span> <span className="text-muted">— {v.detail}</span></span>
+                      <Badge tone={v.tone}>{v.badge}</Badge>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+            {publishChecks.length ? (
+              <div className="border-t border-border px-4 py-3 text-sm">
+                <p className="font-medium">Yayın öncesi kontroller</p>
+                <p className="text-text-secondary">Reklam hesabı uygunluğu ve ödeme akışı site taramasında doğrulanmaz; reklam platformunda kontrol edin.</p>
+                <ul className="mt-1 list-disc pl-5 text-text-secondary">{publishChecks.map((c) => <li key={c.id}>{c.label}</li>)}</ul>
+              </div>
+            ) : null}
           </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              {r.opportunityAnalyzed === false || r.visibility.sampleCount === 0 ? (
-                <CardHeader title="Fırsat analizi yapılamadı" description="Keşif/ihtiyaç sorularında geçerli yanıt alınamadı; bu “fırsat yok” anlamına gelmez." />
-              ) : (
-                <>
-                  <CardHeader title={`Fırsat sinyali: ${r.opportunityCount} soru`} description="Keşif/ihtiyaç sorularında markanız anılmadı ve ticari bir site kaynak gösterildi. Kesin fırsat için kayıttan sonra kanıt incelenir." />
-                  <ul className="divide-y divide-border">
-                    {r.examples.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Bu örneklemde fırsat sinyali görülmedi.</li> : null}
-                    {r.examples.map((e, i) => (
-                      <li key={i} className="px-4 py-3 text-sm">
-                        <p className="font-medium">&ldquo;{e.prompt}&rdquo;</p>
-                        <p className="mt-1 text-muted">{(e.engines ?? [e.engine]).map((x) => ENGINE[x] ?? x).join(", ")} · Kaynak gösterilen siteler: {e.competitorDomains.join(", ") || "—"}</p>
+          <details className="rounded-[var(--radius-lg)] border border-border bg-surface px-5 py-3 text-sm">
+            <summary className="min-h-9 cursor-pointer py-1 font-medium text-primary">Sorular, ürün grupları ve yöntem</summary>
+            <div className="mt-3 flex flex-col gap-3">
+              {r.questions?.length ? (
+                <div>
+                  <p className="font-medium">Sorulan sorular</p>
+                  <ul className="mt-1 flex flex-col gap-1">
+                    {r.questions.map((q) => <li key={q.text}><span className="text-xs text-muted">[{q.kind === "info" ? "Bilgi" : q.kind === "need" ? "İhtiyaç" : "Keşif"}]</span> {q.text}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+              {r.groups?.length ? (
+                <div>
+                  <p className="font-medium">Ürün grupları (tarama kanıtı)</p>
+                  <ul className="mt-1 flex flex-col gap-1">
+                    {r.groups.map((g) => (
+                      <li key={g.label}>
+                        {[g.area, g.label, g.subtype].filter(Boolean).join(" → ")}
+                        <span className="block text-xs text-muted [overflow-wrap:anywhere]">Örnek ürünler: {g.products.slice(0, 3).join(", ")}</span>
                       </li>
                     ))}
                   </ul>
-                </>
-              )}
-            </Card>
-            <Card>
-              <CardHeader title="Rakip adayları" description="Yanıtlarda kaynak gösterilen ticari sitelerden (haber, kamu ve eğitim siteleri hariç); kayıttan sonra onaylamanız gerekir." />
-              <ul className="divide-y divide-border">
-                {candidates.length === 0 ? <li className="px-4 py-3 text-sm text-muted">Aday bulunamadı.</li> : null}
-                {candidates.map((c) => (
-                  <li key={c.domain} className="flex justify-between px-4 py-3 text-sm">
-                    <span>{c.domain}</span>
-                    <span className="tabular text-muted">{c.observations} yanıtta</span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader title="Öncelikli kontrol listesi" description="Site ve reklam hazırlığı ayrı gruplanmıştır." />
-            <ul className="divide-y divide-border">
-              {[...r.readiness.checks].sort((a, b) => (a.status === "fail" ? -1 : 1) - (b.status === "fail" ? -1 : 1)).map((c) => (
-                <li key={c.id} className="flex flex-wrap items-start justify-between gap-2 px-4 py-3 text-sm">
-                  <div className="min-w-0">
-                    <p className="font-medium">
-                      {c.label} <span className="text-xs font-normal text-muted">({c.group === "geo" ? "Site" : "Reklam"})</span>
-                    </p>
-                    <p className="text-muted">{c.detail}</p>
-                  </div>
-                  {notRead && c.status !== "pass" ? <Badge>Ölçülemedi</Badge> : <Badge tone={STATUS_BADGE[c.status].tone}>{STATUS_BADGE[c.status].label}</Badge>}
-                </li>
-              ))}
-            </ul>
-          </Card>
+                </div>
+              ) : null}
+              <div className="grid gap-1 sm:grid-cols-2">
+                <p><span className="text-muted">Yöntem:</span> web aramalı API yanıtları; ChatGPT/Gemini/Claude uygulamasındaki sonuçla birebir aynı değildir</p>
+                {r.business ? <p><span className="text-muted">İşletme türü (tahmin):</span> {BUSINESS[r.business.type] ?? r.business.type}</p> : null}
+                {r.scopeEngines?.length ? <p><span className="text-muted">Platformlar:</span> {r.scopeEngines.map((e) => ENGINE[e] ?? e).join(", ")}</p> : null}
+                <p><span className="text-muted">Ülke / dil (istenen pazar):</span> {r.provenance.country} / {r.provenance.language}</p>
+                <p><span className="text-muted">Modeller:</span> {r.provenance.models.join(", ") || "—"}</p>
+                <p><span className="text-muted">Tarih:</span> {new Date(r.provenance.sampledAt).toLocaleString("tr-TR")}</p>
+                <p><span className="text-muted">Site incelemesi:</span> {r.crawl.pages} sayfa okundu, {r.crawl.products} ürün bulundu{r.crawl.failed ? `, okunamayan ${r.crawl.failed}` : ""}{r.crawl.truncated ? " (hızlı analiz: sınırlı tarama)" : ""}</p>
+                {r.crawl.siteDomain ? <p><span className="text-muted">Yönlendirme:</span> {view.domain} → {r.crawl.siteDomain}</p> : null}
+                {r.crawl.wwwFallback ? <p><span className="text-muted">Not:</span> {view.domain} açılmadığı için www.{view.domain} incelendi.</p> : null}
+                {r.crawl.failures?.length ? <p className="text-xs text-text-secondary [overflow-wrap:anywhere]">Okunamayan sayfalar: {r.crawl.failures.map((f) => `${f.url} → ${f.reason}`).join("; ")}</p> : null}
+                {r.unavailableEngines.length ? <p><span className="text-muted">Kullanılamayan platformlar:</span> {r.unavailableEngines.map((u) => `${ENGINE[u.engine] ?? u.engine} (${u.reason})`).join("; ")}</p> : null}
+                {r.failedCalls?.length ? <p><span className="text-muted">Yanıt alınamayan çağrılar:</span> {r.failedCalls.map((f) => { const [e, c] = f.split(":"); return `${ENGINE[e!] ?? e} (${CALL_ERROR[c ?? ""] ?? c})`; }).join("; ")} — başarısız sorgular puana sıfır olarak girmez.</p> : null}
+                {r.failedDetails && Object.keys(r.failedDetails).length ? (
+                  <ul className="text-xs text-text-secondary">
+                    {Object.entries(r.failedDetails).map(([e, d]) => <li key={e} className="break-words">{ENGINE[e] ?? e}: {d}</li>)}
+                  </ul>
+                ) : null}
+              </div>
+            </div>
+          </details>
 
           <Card className="p-5">
-            <h2 className="font-semibold">Sonraki adım</h2>
+            <h2 className="font-semibold">Kategori ve ürünlerinizi ayrıntılı takip edin</h2>
             <p className="mt-1 text-sm text-muted">
-              Raporu kaydetmek için doğrulanmış hesapla giriş yapın. Kayıt sonrası 7 günlük Starter denemesi (kart gerekmez) ile kendi sorularınızı seçip haftalık ölçüm yapabilir{r.opportunityCount ? ", fırsat ayrıntılarını inceleyebilirsiniz" : "siniz"}.
+              Raporu hesabınıza kaydedin: sonuçlar yeniden üretilmeden aktarılır. 7 günlük Starter denemesiyle (kart gerekmez) kendi kategori ve sorularınızı seçip düzenli ölçüm yapabilirsiniz.
             </p>
             {claimError ? <p className="mt-2 text-sm text-danger" role="alert">{claimError}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">

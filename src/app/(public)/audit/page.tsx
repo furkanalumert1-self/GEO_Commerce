@@ -15,7 +15,7 @@ export default function AuditStartPage() {
     <div className="mx-auto flex max-w-xl flex-col gap-4">
       <h1 className="text-2xl font-semibold">Ücretsiz ölçüm</h1>
       <p className="text-sm text-muted">
-        Siteniz incelenir, ürün grubunuza göre 5 soru hazırlanır ve bu sorular AI platformlarına sorulur. Alan adı ve cihaz başına 30 günde bir ücretsiz ölçüm yapılabilir.
+        Site adresinizi girin; sitenizi inceleyip ürün gruplarınıza uygun 5 soruyu AI platformlarına sorar ve kısa bir ön analiz hazırlarız. Hesap açmanız gerekmez. Alan adı ve cihaz başına 30 günde bir ücretsizdir.
       </p>
       <p className="text-sm" data-testid="audit-scope">
         <span className="font-medium">Sorulacak platformlar:</span> {names(scope.engines)}

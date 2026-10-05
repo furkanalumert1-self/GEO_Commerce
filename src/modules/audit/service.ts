@@ -290,6 +290,8 @@ export interface AuditWork {
 }
 
 const AUDIT_CALL_ATTEMPTS = 2;
+/** Adım modunda tarama adımına adım bütçesinin üstüne tanınan ek süre. */
+const AUDIT_CRAWL_EXTRA_MS = 25_000;
 
 /**
  * Audit işi: tarama → sorular → AI yanıtları → özet. Aşamalar gerçek ilerleme olarak yazılır; kısmi sonuç korunur.
@@ -317,7 +319,10 @@ export async function runAudit(
 
   if (!work.crawl) {
     await stage("crawling", 1);
-    const crawl = await crawlSite({ domain: audit.domain, startPath: opts.startPath, maxPages: opts.crawlMaxPages ?? PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: demo ? 0 : 250, deadline: opts.deadline });
+    // Adım modunda tarama kendi adımıdır ve AI çağrısı yapmadığı için bütçesi daha geniştir (yavaş site veya ülke
+    // proxy'si): advance rotasının süre sınırı (maxDuration 120 sn) içinde kalır.
+    const crawlDeadline = opts.deadline !== undefined ? opts.deadline + AUDIT_CRAWL_EXTRA_MS : undefined;
+    const crawl = await crawlSite({ domain: audit.domain, startPath: opts.startPath, maxPages: opts.crawlMaxPages ?? PLANS.free_audit.limits.crawlUrls, fetcher, delayMs: demo ? 0 : 250, deadline: crawlDeadline });
     log.info("audit.crawl", { auditId, pages: crawl.pages.length, failed: crawl.failed.length, truncated: crawl.truncated, homeError: crawl.homeError?.kind ?? null, ...(crawl.diagnostics ?? {}) });
     // Süre bütçesi sayfa okunmadan bittiyse (yavaş sunucu/sitemap) bir kez yeni adımda tekrar denenir; site
     // "okunamadı" sayılmaz.
@@ -359,7 +364,8 @@ export async function runAudit(
         : {}),
     };
     await save();
-    if (overBudget()) return "continue";
+    // Adım modunda tarama adımı burada biter; sorular ve AI çağrıları sonraki adımlarda.
+    if (opts.deadline !== undefined) return "continue";
   }
   const { brandName, categories } = work.crawl;
   // Site okunamadıysa genel sorularla ölçüm yapılmaz: puan, fırsat ve rakip adayı anlamsız olur (ve ücretli çağrı harcanır).
@@ -389,7 +395,10 @@ export async function runAudit(
   if (!work.prompts) {
     await stage("prompts", 2);
     const scopeNow = auditEngineScope(adapters);
-    if (opts.requireConfirmation && !work.confirmed) {
+    // Siteden kanıtlı soru seti çıkmadıysa (ör. az sayfa okunabildi) rapor boş bitmez: kullanıcı kategorisini
+    // yazar, sorular oluşturulur ve onayıyla ölçüm sürer.
+    const needsTopic = Boolean(work.proposal && work.proposal.questions.length === 0);
+    if ((opts.requireConfirmation || needsTopic) && !work.confirmed) {
       // Ücretli çağrılardan önce tür, konular, sorular ve platformlar kullanıcıya gösterilir; onay gelene kadar
       // AI platformlarına soru sorulmaz. Ara durum audit kaydında saklanır (yeni iş taramayı tekrarlamaz).
       await save();

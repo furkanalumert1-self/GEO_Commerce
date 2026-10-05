@@ -95,9 +95,14 @@ export function AuditConfirm({
   };
 
   const service = ["service", "saas", "service_saas"].includes(type);
+  // Siteden soru seti çıkarılamadıysa kullanıcıdan kategori istenir (öneri yok; boş soru listesi).
+  const needsTopic = proposal.questions.length === 0;
   return (
     <Card>
-      <CardHeader title="Ölçüm öncesi onay" description={`Siteniz incelendi (${pages} sayfa${products ? `, ${products} ürün` : ""}). AI platformlarına sorular siz onaylayınca sorulur.`} />
+      <CardHeader
+        title={needsTopic ? "Ne sattığınızı yazın" : "Ölçüm öncesi onay"}
+        description={needsTopic ? `Sitenizden (${pages} sayfa) ölçülecek ürün grubunu güvenle çıkaramadık. Sattığınız 1–2 ana kategoriyi yazıp “Soruları oluştur”a basın; sorular siz onaylayınca AI platformlarına sorulur.` : `Siteniz incelendi (${pages} sayfa${products ? `, ${products} ürün` : ""}). AI platformlarına sorular siz onaylayınca sorulur.`}
+      />
       <div className="flex flex-col gap-5 px-4 pb-5 sm:px-6">
         <section aria-labelledby="ac-type">
           <h3 id="ac-type" className="text-sm font-semibold">İşletme türü</h3>
@@ -116,14 +121,15 @@ export function AuditConfirm({
             {[0, 1].map((i) => (
               <input key={i} aria-label={`${service ? "Hizmet" : "Kategori"} ${i + 1}`} value={topics[i]} maxLength={40} placeholder={service ? "ör. SEO" : "ör. Ev tekstili"} onChange={(e) => setTopics((t) => t.map((x, j) => (j === i ? e.target.value : x)))} className="min-h-11 rounded-md border border-border bg-surface px-3 text-sm sm:min-h-9" />
             ))}
-            <Button onClick={regenerate} disabled={pending !== null || !topics.some((t) => t.trim())}>{pending === "preview" ? "Oluşturuluyor…" : "Soruları yeniden oluştur"}</Button>
+            <Button onClick={regenerate} disabled={pending !== null || !topics.some((t) => t.trim())}>{pending === "preview" ? "Oluşturuluyor…" : questions.length ? "Soruları yeniden oluştur" : "Soruları oluştur"}</Button>
           </div>
           <p className="mt-1 text-xs text-text-secondary">Bu bir ön taramadır: site geneli değil, seçili {service ? "hizmetler" : "kategoriler"} için 5 soru ölçülür.</p>
         </section>
 
         <section aria-labelledby="ac-q">
           <h3 id="ac-q" className="text-sm font-semibold">Sorulacak sorular</h3>
-          {incomplete ? <Alert tone="warning" title="Soru seti eksik">{incomplete}</Alert> : null}
+          {incomplete && !(needsTopic && questions.length === 0) ? <Alert tone="warning" title="Soru seti eksik">{incomplete}</Alert> : null}
+          {questions.length === 0 ? <p className="mt-2 text-sm text-text-secondary">Kategori yazıp “Soruları oluştur”a bastığınızda sorular burada görünür.</p> : null}
           <ul className="mt-2 flex flex-col gap-2">
             {questions.map((q, i) => (
               <li key={i} className="flex items-start gap-2">

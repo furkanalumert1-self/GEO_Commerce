@@ -72,17 +72,24 @@ const storeFetcher: Fetcher = async (url) => {
 };
 
 describe("ücretsiz ölçüm kapsamı", () => {
-  it("ürün grubu/hizmet doğrulanamayan sitede genel soru uydurulmaz; AI çağrısı yapılmaz, site kontrolleri sunulur", async () => {
+  it("ürün grubu/hizmet doğrulanamayan sitede genel soru uydurulmaz; kullanıcı kategorisini yazınca ölçüm sürer", async () => {
     const audit = await makeAudit(`kapsam-${randomToken(4).toLowerCase()}.com`);
     const gpt = countingAdapter("chatgpt");
     const adapters = { chatgpt: gpt.adapter, gemini: countingAdapter("gemini").adapter } as unknown as Record<EngineKey, AiMonitorAdapter>;
     expect(await runAudit(db, audit.id, { fetcher: siteFetcher, adapters })).toBe("done");
     expect(gpt.calls()).toBe(0);
+    // Uydurma soru yok: kategori girişi beklenir (onay aşaması, boş soru listesi).
+    const waiting = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
+    expect(waiting.stage).toBe("confirm");
+    const sum = waiting.resultSummary as { proposal: { questions: unknown[] } };
+    expect(sum.proposal.questions).toHaveLength(0);
+    const preview = previewAuditQuestions(waiting, { businessType: "retailer", topics: ["Kadın giyim"] });
+    expect(preview.questions.length).toBeGreaterThan(0);
+    await confirmAudit(db, audit.id, { questions: preview.questions.map((q) => q.text), businessType: "retailer", topics: ["Kadın giyim"] });
+    expect(await runAudit(db, audit.id, { fetcher: async () => { throw new Error("tarama tekrarlanmamalı"); }, adapters })).toBe("done");
+    expect(gpt.calls()).toBe(preview.questions.length);
     const done = await db.audit.findUniqueOrThrow({ where: { id: audit.id } });
-    const sum = done.resultSummary as { scopeUnavailable?: string; readiness: { checks: unknown[] }; visibility: { score: number | null; sampleCount: number } };
-    expect(sum.scopeUnavailable).toBeTruthy();
-    expect(sum.visibility.score).toBeNull();
-    expect(sum.readiness.checks.length).toBeGreaterThan(0);
+    expect(["succeeded", "partial"]).toContain(done.status);
   });
 });
 

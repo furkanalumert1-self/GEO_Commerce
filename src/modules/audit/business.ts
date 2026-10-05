@@ -439,14 +439,56 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
     if (sub) cur.subtypes.set(sub, (cur.subtypes.get(sub) ?? 0) + 1);
     acc.set(k, cur);
   }
+  if (acc.size === 0) return listingGroups(pages, language);
   return [...acc.values()]
     .sort((a, b) => b.products.length - a.products.length || a.first - b.first)
     .map((g) => {
       const names = g.products.map((n) => lowerTr(n));
       const attributes = MATERIALS.filter((m) => names.filter((n) => n.includes(m)).length >= 2).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m)));
       const subtype = [...g.subtypes.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-      return { label: g.label, area: g.area, subtype, products: g.products.slice(0, 5), evidenceUrls: g.urls.slice(0, 3), attributes: attributes.slice(0, 2), hasSet: names.some((n) => /\bset(i)?\b/.test(n)) };
+      return { label: withAudience(g.label, g.area), area: g.area, subtype, products: g.products.slice(0, 5), evidenceUrls: g.urls.slice(0, 3), attributes: attributes.slice(0, 2), hasSet: names.some((n) => /\bset(i)?\b/.test(n)) };
     });
+}
+
+/**
+ * Soru içinde doğal kullanım için tek kelimelik çoğul menü adını tekile çevirir: "Halılar" → "halı",
+ * "Nemlendiriciler" → "nemlendirici". Çok kelimeli adlar ("Banyo havluları") olduğu gibi kalır.
+ */
+export function questionNoun(label: string): string {
+  const t = soft(label);
+  if (/\s/.test(t) || t.length < 6) return t;
+  return t.replace(/(lar|ler)$/u, "");
+}
+
+/**
+ * Ürün sayfası okunamadığında (ürün listesi JavaScript ile yüklenen siteler) kategori sayfalarının breadcrumb'ları
+ * kanıt olarak kullanılır: "Anasayfa › Kadın › Kadın Jean" → alan "Kadın", grup "Kadın Jean". Daha derin (daha
+ * özgül) yol önce gelir; vitrin etiketleri (Yeni Gelenler, Basics) ve yalnız alan adları elenir.
+ */
+/** Cinsiyet/yaş alanı ("Kadın", "Erkek", "Çocuk") grup adına eklenir: "Kadın › Jeans" → "Kadın Jeans". */
+const AUDIENCE_AREA = /^(kadın|erkek|çocuk|kız çocuk|erkek çocuk|bebek|genç|women|men|kids)$/i;
+function withAudience(label: string, area: string | null): string {
+  if (!area || !AUDIENCE_AREA.test(area.trim()) || norm(label).includes(norm(area))) return label;
+  return `${area.trim()} ${label}`;
+}
+
+function listingGroups(pages: Page[], language: string): TopicGroup[] {
+  const acc = new Map<string, { label: string; area: string | null; depth: number; first: number; urls: string[] }>();
+  let order = 0;
+  for (const p of pages) {
+    if (p.pageType === "product" || p.pageType === "home") continue;
+    const path = (p.facts.breadcrumbs ?? []).map((c) => cleanTopic(c.trim(), language) ?? "").filter(Boolean);
+    if (path.length < 2) continue;
+    const label = path[path.length - 1]!;
+    if (AREA_ONLY.test(label)) continue;
+    const k = norm(label);
+    const cur = acc.get(k) ?? { label, area: path[0]!, depth: path.length, first: order++, urls: [] as string[] };
+    if (cur.urls.length < 3) cur.urls.push(p.url);
+    acc.set(k, cur);
+  }
+  return [...acc.values()]
+    .sort((a, b) => b.depth - a.depth || a.first - b.first)
+    .map((g) => ({ label: withAudience(g.label, g.area), area: g.area, subtype: null, products: [], evidenceUrls: g.urls, attributes: [], hasSet: false }));
 }
 
 /** Sitede hediye bölümü/bağlantısı var mı (hediye sorusu yalnız bu kanıtla sorulur). */
@@ -463,8 +505,8 @@ export function groupQuestions(type: BusinessType, groups: TopicGroup[], opts: {
   const place = opts.country === "TR" ? "Türkiye'de " : "";
   const g1 = groups[0]!;
   const g2 = groups[1] ?? g1;
-  const L1 = soft(g1.label);
-  const L2 = soft(g2.label);
+  const L1 = questionNoun(g1.label);
+  const L2 = questionNoun(g2.label);
   const q = (text: string, kind: QuestionKind, topic: string): AuditQuestion => ({ text: capTr(text.replace(/\s+/g, " ").trim()), kind, topic });
   const store = type === "retailer" || type === "marketplace";
   const concrete = [g1.attributes[0], g1.subtype ? soft(g1.subtype) : null].filter(Boolean).join(" ").trim();
@@ -478,7 +520,7 @@ export function groupQuestions(type: BusinessType, groups: TopicGroup[], opts: {
     q(needText, "need", g1.label),
     q(
       giftGroup
-        ? `Hediye olarak ${soft(giftGroup.label)} seti alabileceğim mağazalar hangileri?`
+        ? `Hediye olarak ${questionNoun(giftGroup.label)} seti alabileceğim mağazalar hangileri?`
         : store
           ? `${capTr(L2)} alırken geniş seçenek sunan online mağazalar hangileri?`
           : `${capTr(L2)} için fiyat/performans açısından hangi markalar öne çıkıyor?`,

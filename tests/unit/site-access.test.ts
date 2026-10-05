@@ -70,3 +70,27 @@ describe("reklam taslağı: model adları ürün tipi sayılmaz", () => {
     expect(text).toContain("cep telefonu");
   });
 });
+
+describe("soru dili: çoğul menü adı tekil kullanılır", () => {
+  it("tek kelimelik çoğul ad tekile döner; çok kelimeli ad korunur", async () => {
+    const { questionNoun } = await import("@/modules/audit/business");
+    expect(questionNoun("Halılar")).toBe("halı");
+    expect(questionNoun("Nemlendiriciler")).toBe("nemlendirici");
+    expect(questionNoun("Banyo Havluları")).toBe("banyo havluları");
+    expect(questionNoun("Jean")).toBe("jean");
+  });
+});
+
+describe("ürün sayfası yoksa kategori breadcrumb'ları kanıt olur", () => {
+  it("JS ile ürün listeleyen sitede gruplar kategori yolundan çıkar; vitrin etiketleri elenir, cinsiyet eklenir", async () => {
+    const { productGroups } = await import("@/modules/audit/business");
+    const pg = (url: string, breadcrumbs: string[]) => ({ url, pageType: "other", facts: { title: null, h1: null, metaDescription: null, schemaTypes: ["BreadcrumbList"], products: [], ogSiteName: null, links: [], breadcrumbs, lang: "tr", anchors: [] } });
+    const groups = productGroups([
+      pg("https://k.example/yeni-gelenler", ["Anasayfa", "Kadın", "Yeni Gelenler"]),
+      pg("https://k.example/kadin-giyim", ["Anasayfa", "Kadın Giyim"]),
+      pg("https://k.example/kadin-jeans", ["Anasayfa", "Kadın", "Jeans"]),
+    ] as never, "tr");
+    expect(groups.map((g) => g.label)).toEqual(["Kadın Jeans"]);
+    expect(groups[0]!.evidenceUrls).toEqual(["https://k.example/kadin-jeans"]);
+  });
+});

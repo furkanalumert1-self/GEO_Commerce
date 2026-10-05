@@ -127,8 +127,27 @@ export async function resolveOrigin(fetcher: Fetcher, domain: string): Promise<{
   }
 }
 
+/** Sayfaların paralel çekilme sayısı (aynı site; yavaş proxy/ülke çıkışında süreyi belirleyen etken). */
+const CRAWL_CONCURRENCY = 4;
+
+/** Aynı taramada aynı adres (başlıksız GET) bir kez çekilir: ana sayfa alan adı/köken tespitinde tekrar istenmez. */
+function memoFetcher(fetcher: Fetcher): Fetcher {
+  const cache = new Map<string, ReturnType<Fetcher>>();
+  return (url, o) => {
+    if (o.headers) return fetcher(url, o);
+    const k = `${o.sameSiteAs ?? ""}|${url}`;
+    let r = cache.get(k);
+    if (!r) {
+      r = fetcher(url, o);
+      cache.set(k, r);
+      r.catch(() => cache.delete(k));
+    }
+    return r;
+  };
+}
+
 export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
-  const fetcher = opts.fetcher ?? liveFetcher;
+  const fetcher = memoFetcher(opts.fetcher ?? liveFetcher);
   const domain = await resolveSiteDomain(fetcher, opts.domain);
   const resolved = await resolveOrigin(fetcher, domain);
   const origin = resolved.origin;
@@ -205,31 +224,51 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
 
   const visited = new Set<string>();
   const canonicals = new Set<string>();
+  // Sayfalar CRAWL_CONCURRENCY'lik gruplar halinde paralel çekilir; sonuçlar sıra korunarak işlenir (öncelik ve
+  // canonical tekrar eleme davranışı sıralı taramayla aynı kalır).
   while ((queue.length || productQueue.length) && result.pages.length < opts.maxPages) {
     if (overBudget()) {
       result.truncated = true;
       break;
     }
-    const { url, depth } = nextItem()!;
-    let u: URL;
-    try {
-      u = new URL(url);
-    } catch {
-      continue;
+    const batch: Array<{ key: string; depth: number }> = [];
+    // İlk istek (ana sayfa) tek başına: menü bağlantıları kuyruğun başına eklendikten sonra paralel taramaya geçilir.
+    const room = result.pages.length === 0 && visited.size === 0 ? 1 : Math.min(CRAWL_CONCURRENCY, opts.maxPages - result.pages.length);
+    while (batch.length < room && (queue.length || productQueue.length)) {
+      const { url, depth } = nextItem()!;
+      let u: URL;
+      try {
+        u = new URL(url);
+      } catch {
+        continue;
+      }
+      const host = u.hostname.replace(/^www\./, "");
+      if (host !== domain && !host.endsWith(`.${domain}`)) continue;
+      u.hash = "";
+      const key = u.toString();
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (!isAllowedByRobots(u.pathname + u.search, disallow, allow)) {
+        result.skippedByRobots++;
+        continue;
+      }
+      batch.push({ key, depth });
     }
-    const host = u.hostname.replace(/^www\./, "");
-    if (host !== domain && !host.endsWith(`.${domain}`)) continue;
-    u.hash = "";
-    const key = u.toString();
-    if (visited.has(key)) continue;
-    visited.add(key);
-    if (!isAllowedByRobots(u.pathname + u.search, disallow, allow)) {
-      result.skippedByRobots++;
-      continue;
-    }
-    try {
+    if (!batch.length) continue;
+    const fetched = await Promise.allSettled(
+      batch.map(({ key }) => {
+        const prev = opts.previous?.get(key);
+        return fetcher(key, { sameSiteAs: domain, headers: prev?.etag ? { "if-none-match": prev.etag } : undefined });
+      }),
+    );
+    for (const [i, res] of fetched.entries()) {
+      const { key, depth } = batch[i]!;
+      if (res.status === "rejected") {
+        result.failed.push({ url: key, reason: ((res.reason as Error)?.message ?? "error").slice(0, 120) });
+        continue;
+      }
+      const r = res.value;
       const prev = opts.previous?.get(key);
-      const r = await fetcher(key, { sameSiteAs: domain, headers: prev?.etag ? { "if-none-match": prev.etag } : undefined });
       if (r.status === 304 && prev) continue; // delta: değişmemiş
       if (r.status >= 400) {
         result.failed.push({ url: key, reason: `http_${r.status}${botChallenge(r.headers) ? "_challenge" : ""}` });
@@ -237,6 +276,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       }
       const ct = r.headers["content-type"] ?? "";
       if (ct && !ct.includes("html")) continue;
+      if (result.pages.length >= opts.maxPages) break;
       const facts = extractPage(r.body, r.url);
       const canonical = facts.canonical ? safeAbs(facts.canonical, r.url) : null;
       const canonKey = canonical ?? key;
@@ -258,10 +298,8 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
         if (depth === 0) queue.unshift(...next.sort((a, b) => priority(a.url) - priority(b.url)));
         else queue.push(...next);
       }
-      if (opts.delayMs) await sleep(opts.delayMs);
-    } catch (e) {
-      result.failed.push({ url: key, reason: (e as Error).message.slice(0, 120) });
     }
+    if (opts.delayMs) await sleep(opts.delayMs);
   }
   result.truncated = queue.length > 0 || productQueue.length > 0;
   result.diagnostics = { start: `${origin}${opts.startPath ?? "/"}`, origin, sitemapsRead: seenSitemaps.size, sitemapMs, pagesMs: Date.now() - t0 - sitemapMs, budgetMs: opts.deadline !== undefined ? opts.deadline - t0 : null };

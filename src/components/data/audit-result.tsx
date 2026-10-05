@@ -249,7 +249,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         <h1 className="text-2xl font-semibold">{r?.visibility || r?.scopeUnavailable ? `${display} — AI Görünürlük Ön Analizi` : `Ücretsiz ölçüm: ${view.domain}`}</h1>
         {r?.demo ? <Badge tone="warning">Örnek veri</Badge> : null}
         <Badge tone={view.status === "failed" ? "danger" : componentIssues.length && !running ? "warning" : view.status === "succeeded" || view.status === "partial" ? "success" : "primary"}>
-          {r?.siteUnreadable ? "İncelenemedi" : view.status === "failed" ? "Başarısız" : running || confirming ? (STAGES[view.stage] ?? view.stage) : componentIssues.length ? "Kısmen tamamlandı" : "Tamamlandı"}
+          {r?.siteUnreadable ? "İncelenemedi" : r?.scopeUnavailable ? "Ölçülemedi" : view.status === "failed" ? "Başarısız" : running || confirming ? (STAGES[view.stage] ?? view.stage) : componentIssues.length ? "Kısmen tamamlandı" : "Tamamlandı"}
         </Badge>
       </div>
       {r?.visibility || r?.scopeUnavailable ? <p className="-mt-4 text-sm text-text-secondary">{view.domain}</p> : null}

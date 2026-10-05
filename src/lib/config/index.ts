@@ -52,6 +52,7 @@ export const envSchema = z.object({
   GENERATION_MODEL: optional,
   GOOGLE_AI_API_KEY: optional,
   GOOGLE_MONITOR_MODEL: optional,
+  GOOGLE_MONITOR_FALLBACK_MODEL: optional,
   ANTHROPIC_API_KEY: optional,
   ANTHROPIC_MONITOR_MODEL: optional,
   PERPLEXITY_API_KEY: optional,

@@ -7,6 +7,7 @@ import { generationStatus } from "@/modules/actions/generator";
 import { APP_NAME } from "@/lib/brand";
 import { log } from "@/lib/observability/log";
 import { requirePlatformAdmin } from "../../guard";
+import { crawlProxyFor, safeFetch } from "@/lib/http/safe-fetch";
 
 const body = z.object({ sendTestEmail: z.boolean().default(false) });
 const ENGINES: EngineKey[] = ["chatgpt", "gemini", "claude", "perplexity"];
@@ -45,5 +46,16 @@ export const POST = route(async ({ req, requestId }) => {
       email = { ...email, sent: false, error: e instanceof Error ? e.message.slice(0, 200) : "Gönderilemedi" };
     }
   }
-  return json({ engines, generation: generationStatus(), email }, { requestId });
+  // Tarama proxy'si (TR): çıkış ülkesi Cloudflare trace ile doğrulanır (proxy adresi/şifresi dönmez).
+  let crawlProxy: { configured: boolean; ok?: boolean; exitCountry?: string | null; error?: string } = { configured: Boolean(crawlProxyFor("TR")) };
+  if (crawlProxy.configured) {
+    try {
+      const r = await safeFetch("https://www.cloudflare.com/cdn-cgi/trace", { proxy: crawlProxyFor("TR"), maxBytes: 4000, timeoutMs: 15_000 });
+      const loc = /^loc=([A-Z]{2})$/m.exec(r.body)?.[1] ?? null;
+      crawlProxy = { configured: true, ok: loc === "TR", exitCountry: loc };
+    } catch (e) {
+      crawlProxy = { configured: true, ok: false, error: e instanceof Error ? e.message.slice(0, 160) : "Bağlanılamadı" };
+    }
+  }
+  return json({ engines, generation: generationStatus(), email, crawlProxy }, { requestId });
 });

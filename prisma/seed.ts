@@ -180,6 +180,8 @@ async function main() {
     const v = await db.actionVersion.create({ data: { workspaceId: ws.id, actionId: a.id, number: 1, content: content as object, contentHash: versionHash(content), generated: true, createdById: editor.id } });
     await db.action.update({ where: { id: a.id }, data: { currentVersionId: v.id } });
     if (["approved", "measuring", "completed"].includes(status)) await db.approval.create({ data: { workspaceId: ws.id, actionId: a.id, versionId: v.id, versionHash: v.contentHash, approverId: owner.id } });
+    // Örnek veride fırsat durumu aksiyonla tutarlı olur (uygulandı → ölçülüyor).
+    await db.opportunity.update({ where: { id: o.id }, data: { status: ["measuring", "completed"].includes(status) ? "measuring" : status === "rejected" ? "triaged" : "in_progress" } });
   }
 
   console.log("Commerce: 20 sipariş, 2 iade, 2 para birimi…");

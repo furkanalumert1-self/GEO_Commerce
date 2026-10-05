@@ -3,7 +3,7 @@ import { autoImportComplete } from "@/modules/catalog/candidates";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { runAudit, type AuditWork } from "@/modules/audit/service";
 import { INLINE_AUDIT_CRAWL_PAGES, INLINE_CALL_TIMEOUT_MS, INLINE_CRAWL_MAX_PAGES } from "@/lib/queue/inline";
-import { crawlSite, liveFetcher } from "@/modules/audit/crawler";
+import { crawlSite, liveFetcherFor } from "@/modules/audit/crawler";
 import { fixtureFetcher } from "@/modules/audit/fixture-site";
 import { persistCrawl } from "@/modules/catalog/service";
 import { executeRun, type RunPlan } from "@/modules/monitoring/service";
@@ -86,7 +86,7 @@ export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult
     const crawl = await crawlSite({
       domain: run.brand.domain,
       maxPages: stepMode ? Math.min(maxPages, INLINE_CRAWL_MAX_PAGES) : maxPages,
-      fetcher: demo ? fixtureFetcher : liveFetcher,
+      fetcher: demo ? fixtureFetcher : liveFetcherFor(run.brand.country),
       delayMs: demo ? 0 : 300,
       deadline: ctx.deadline,
       onProgress: (d, t) => ctx.progress(d, t),

@@ -24,9 +24,9 @@ export const POST = brandRoute(async ({ req, access, requestId }) => {
   assertCan(access, "brand.manage");
   const input = await readJson(req, body);
   if (input.action === "preview") {
-    const r = await previewProductUrl(input.url, access.brand.domain);
+    const r = await previewProductUrl(input.url, access.brand.domain, access.brand.country);
     return json({ candidate: r.candidate ? { ...r.candidate, priceMinor: r.candidate.priceMinor?.toString() ?? null } : null, reason: r.reason }, { requestId });
   }
-  const r = await importCandidates(db, { workspaceId: access.workspaceId, brandId: access.brandId }, input.urls, { brandDomain: access.brand.domain, catalogLimit: access.entitlements.catalogProducts });
+  const r = await importCandidates(db, { workspaceId: access.workspaceId, brandId: access.brandId }, input.urls, { brandDomain: access.brand.domain, catalogLimit: access.entitlements.catalogProducts, country: access.brand.country });
   return json(r, { status: 201, requestId });
 });

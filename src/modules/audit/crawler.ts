@@ -1,4 +1,4 @@
-import { safeFetch, type SafeResponse } from "@/lib/http/safe-fetch";
+import { crawlProxyFor, safeFetch, type SafeResponse } from "@/lib/http/safe-fetch";
 import { sha256 } from "@/lib/crypto";
 import { registrableLabel } from "./competitor-filter";
 import { classifyPage, extractPage, isAllowedByRobots, parseRobots, parseSitemap, type PageFacts } from "./html";
@@ -10,8 +10,12 @@ import { classifyPage, extractPage, isAllowedByRobots, parseRobots, parseSitemap
 /** `sameSiteAs` boşsa yönlendirmeler alan adı sınırı olmadan (yine SSRF korumalı) izlenir. */
 export type Fetcher = (url: string, opts: { sameSiteAs?: string; headers?: Record<string, string> }) => Promise<SafeResponse>;
 
-export const liveFetcher: Fetcher = (url, opts) =>
-  safeFetch(url, { sameSiteAs: opts.sameSiteAs, headers: opts.headers, maxBytes: 1_500_000, timeoutMs: 10_000, maxRedirects: 4 });
+/** Canlı fetcher; hedef ülke için tarama proxy'si (CRAWL_PROXY_<ÜLKE>) tanımlıysa o ülkeden çıkar. */
+export const liveFetcherFor = (country?: string | null): Fetcher => {
+  const proxy = crawlProxyFor(country);
+  return (url, opts) => safeFetch(url, { sameSiteAs: opts.sameSiteAs, headers: opts.headers, maxBytes: 1_500_000, timeoutMs: 10_000, maxRedirects: 4, proxy });
+};
+export const liveFetcher: Fetcher = liveFetcherFor(null);
 
 export interface CrawledPage {
   url: string;

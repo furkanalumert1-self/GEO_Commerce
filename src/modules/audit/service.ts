@@ -8,7 +8,8 @@ import { assertPublicUrl } from "@/lib/http/safe-fetch";
 import { getAiAdapters } from "@/adapters/ai/providers";
 import { ProviderError, type AiMonitorAdapter, type EngineKey } from "@/adapters/ai/types";
 import { purposeTemplates } from "@/modules/prompts/quality";
-import { classifySiteError, crawlSite, normalizeDomain, liveFetcher, type Fetcher } from "./crawler";
+import { crawlProxyFor } from "@/lib/http/safe-fetch";
+import { classifySiteError, crawlSite, normalizeDomain, liveFetcherFor, type Fetcher } from "./crawler";
 import { fixtureFetcher } from "./fixture-site";
 import { evaluateReadiness } from "./readiness";
 import { extract } from "@/modules/monitoring/extract";
@@ -260,6 +261,8 @@ export interface AuditWork {
     /** www'suz adres hatalı olduğu için www adresiyle incelendi. */
     wwwFallback?: boolean;
     landedHost?: string;
+    /** Tarama hedef ülke proxy'si üzerinden mi yapıldı (yönlendirme mesajı buna göre). */
+    viaCountryProxy?: boolean;
     /** Site hiç okunamadıysa nedeni; bu durumda puan/fırsat/rakip üretilmez. */
     unreadable?: { kind: string; detail: string };
     /** Yönetici tanısı (süreler, başlangıç adresi). */
@@ -303,7 +306,7 @@ export async function runAudit(
   const audit = await db.audit.findUniqueOrThrow({ where: { id: auditId } });
   if (audit.status === "succeeded" || audit.status === "partial" || audit.status === "failed") return "done";
   const demo = demoAudit(audit.domain, cfg);
-  const fetcher = deps.fetcher ?? (demo ? fixtureFetcher : liveFetcher);
+  const fetcher = deps.fetcher ?? (demo ? fixtureFetcher : liveFetcherFor(audit.locale.split("-")[1] ?? "TR"));
   const adapters = deps.adapters ?? getAiAdapters(cfg, { demo });
   const stage = (s: string, done: number) => db.audit.update({ where: { id: auditId }, data: { stage: s, progressDone: done, status: "running" } });
   const overBudget = () => opts.deadline !== undefined && Date.now() > opts.deadline;
@@ -344,7 +347,7 @@ export async function runAudit(
       failures: crawl.failed.slice(0, 3),
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
       ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
-      ...(crawl.landedHost ? { landedHost: crawl.landedHost } : {}),
+      ...(crawl.landedHost ? { landedHost: crawl.landedHost, viaCountryProxy: Boolean(!deps.fetcher && crawlProxyFor(audit.locale.split("-")[1] ?? "TR")) } : {}),
       diagnostics: crawl.diagnostics ?? null,
       // Hesaba kaydedilince kataloğa aktarılmak üzere taramada bulunan ürünler (yalnız ürün sayfaları; en çok 30).
       productFacts: crawl.pages.flatMap((p) => {
@@ -422,7 +425,7 @@ export async function runAudit(
             scopeEngines: [],
             provenance: { models: [], surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: 0 },
             readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
             competitorCandidates: [],
             opportunityCount: 0,
             opportunityAnalyzed: false,
@@ -558,7 +561,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
         competitorCandidates,
         opportunityCount,
         opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),

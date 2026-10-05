@@ -2,6 +2,8 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import { connect as tlsConnect, type TLSSocket } from "node:tls";
+import type { Socket } from "node:net";
 import { AppError } from "./errors";
 
 /**
@@ -23,6 +25,11 @@ export interface SafeFetchOptions {
   resolver?: (host: string) => Promise<string[]>;
   /** Redirect'lerin aynı site altında kalması zorunlu mu (crawler: doğrulanmış domain). */
   sameSiteAs?: string;
+  /**
+   * Hedef ülkeden çıkış için HTTP(S) proxy (ör. Türkiye IP'si). Yalnız https hedeflerde CONNECT tüneli kullanılır;
+   * hedef önce yerelde genel IP'ye çözülmüş olmalıdır (iç ağ adresleri proxy ile de reddedilir).
+   */
+  proxy?: string;
 }
 
 export interface SafeResponse {
@@ -154,6 +161,57 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
   throw new AppError("validation_error", "Çok fazla yönlendirme");
 }
 
+/**
+ * Proxy üzerinden CONNECT tüneli açar ve hedef host adıyla TLS başlatır. Tünel host adıyla açılır: proxy DNS'i hedef
+ * ülkeden çözer (coğrafi DNS kullanan CDN'ler için doğru uç) ve birçok proxy IP hedefini reddeder. Hedef yine
+ * yerelde genel IP'ye çözülmüş olmalıdır (assertPublicUrl); harici proxy bizim iç ağımıza erişemez.
+ */
+function openTunnel(proxyUrl: string, target: URL, timeoutMs: number): Promise<TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const proxy = new URL(proxyUrl);
+    const port = target.port ? Number(target.port) : 443;
+    const auth = proxy.username ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}` : null;
+    const hostPort = `${target.hostname}:${port}`;
+    const req = (proxy.protocol === "https:" ? httpsRequest : httpRequest)({
+      host: proxy.hostname,
+      port: proxy.port ? Number(proxy.port) : proxy.protocol === "https:" ? 443 : 80,
+      method: "CONNECT",
+      path: hostPort,
+      headers: { host: hostPort, ...(auth ? { "proxy-authorization": auth } : {}) },
+      timeout: timeoutMs,
+    });
+    req.on("connect", (res, socket: Socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        reject(new AppError("dependency_unavailable", `Tarama proxy'si bağlantıyı reddetti (${res.statusCode})`, { retryable: true }));
+        return;
+      }
+      const tls = tlsConnect({ socket, servername: target.hostname });
+      tls.once("secureConnect", () => resolve(tls));
+      tls.once("error", reject);
+    });
+    req.on("timeout", () => req.destroy(new AppError("dependency_unavailable", "Tarama proxy'si zaman aşımı", { retryable: true })));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
+ * Hedef ülke için tarama proxy'si: CRAWL_PROXY_<ÜLKE> (ör. CRAWL_PROXY_TR=http://kullanici:sifre@host:port).
+ * Tanımlı değilse doğrudan bağlanılır (sunucunun bulunduğu ülkeden).
+ */
+export function crawlProxyFor(country: string | null | undefined): string | undefined {
+  if (!country || !/^[A-Z]{2}$/.test(country)) return undefined;
+  const raw = process.env[`CRAWL_PROXY_${country}`]?.trim();
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const BOT_USER_AGENT = "Mozilla/5.0 (compatible; CallypsoBot/1.0; +https://geocommerce-two.vercel.app)";
 
 /**
@@ -176,9 +234,11 @@ function pinnedRequest(
   return new Promise((resolve, reject) => {
     const fn = url.protocol === "https:" ? httpsRequest : httpRequest;
     const family = isIP(address);
+    const tunnel = opts.proxy && url.protocol === "https:" ? opts.proxy : null;
     const req = fn(
       url,
       {
+        ...(tunnel ? { createConnection: ((_o: unknown, cb: (err: Error | null, s?: TLSSocket) => void) => void openTunnel(tunnel, url, opts.timeoutMs).then((s) => cb(null, s), (e) => cb(e as Error))) as never } : {}),
         method: opts.method ?? "GET",
         headers: { "user-agent": BOT_USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "tr-TR,tr;q=0.9,en;q=0.6", ...opts.headers },
         // DNS rebinding koruması: doğrulanan IP'ye bağlan.

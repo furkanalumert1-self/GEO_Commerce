@@ -112,7 +112,27 @@ export async function transitionAction(db: PrismaClient, access: BrandAccess, ac
     data.publishedAt = a.publishedAt ?? publishAt;
     data.measurement = { publishAt: publishAt.toISOString(), baselineDays: 14, followUps: [14, 28], note: "Aynı soru kümesiyle karşılaştırılır; nedensellik iddia edilmez", manualPublish: a.status === "approved", by: userId };
   }
-  return db.action.update({ where: { id: a.id }, data });
+  return db.$transaction(async (tx) => {
+    const updated = await tx.action.update({ where: { id: a.id }, data });
+    await syncOpportunityStatus(tx, a.opportunityId, to);
+    return updated;
+  });
+}
+
+/**
+ * Fırsat durumu aksiyonu izler: uygulandı/ölçülüyor → "measuring"; reddedilen/geri alınan aksiyondan sonra başka
+ * etkin aksiyon yoksa fırsat "değerlendirildi"ye döner. Kazanıldı/kapatıldı kararları elle verilir, ezilmez.
+ */
+export async function syncOpportunityStatus(tx: Pick<PrismaClient, "opportunity" | "action">, opportunityId: string | null, to: ActionStatus) {
+  if (!opportunityId) return;
+  const opp = await tx.opportunity.findUnique({ where: { id: opportunityId }, select: { status: true } });
+  if (!opp || opp.status === "won" || opp.status === "dismissed") return;
+  if ((to === "measuring" || to === "published") && opp.status !== "measuring") {
+    await tx.opportunity.update({ where: { id: opportunityId }, data: { status: "measuring" } });
+  } else if ((to === "rejected" || to === "rolled_back") && opp.status === "in_progress") {
+    const active = await tx.action.count({ where: { opportunityId, status: { notIn: ["rejected", "rolled_back", "completed", "failed"] } } });
+    if (active === 0) await tx.opportunity.update({ where: { id: opportunityId }, data: { status: "triaged" } });
+  }
 }
 
 function assertNoBlockingIssues(content: ActionContent) {

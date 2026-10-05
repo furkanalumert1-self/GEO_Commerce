@@ -137,23 +137,44 @@ export function geminiAdapter(cfg: AppConfig): AiMonitorAdapter {
     status: () => "ready",
     statusReason: () => null,
     async ask(input): Promise<AiAnswer> {
-      const { json, latencyMs } = await postJson(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-        {
-          systemInstruction: { parts: [{ text: systemInstruction(input) }] },
-          contents: [{ role: "user", parts: [{ text: input.prompt }] }],
-          tools: [{ google_search: {} }],
-        },
-        { "x-goog-api-key": cfg.GOOGLE_AI_API_KEY! },
-        input.signal,
-      );
+      const call = (m: string) =>
+        postJson(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`,
+          {
+            systemInstruction: { parts: [{ text: systemInstruction(input) }] },
+            contents: [{ role: "user", parts: [{ text: input.prompt }] }],
+            tools: [{ google_search: {} }],
+          },
+          { "x-goog-api-key": cfg.GOOGLE_AI_API_KEY! },
+          input.signal,
+        );
+      let used = model;
+      let res: Awaited<ReturnType<typeof call>>;
+      try {
+        res = await call(model);
+      } catch (e) {
+        // Ana model kaldırılmış/erişilemiyor veya aşırı yüklüyse yapılandırılmış yedek modelle bir kez denenir.
+        const fallback = cfg.GOOGLE_MONITOR_FALLBACK_MODEL;
+        const code = e instanceof ProviderError ? e.code : "";
+        if (!fallback || fallback === model || !["http_404", "http_400", "http_500", "http_503"].includes(code ?? "")) throw e;
+        used = fallback;
+        res = await call(fallback);
+      }
+      const { json, latencyMs } = res;
       const cand = ((json.candidates as Array<Record<string, unknown>>) ?? [])[0];
       const parts = ((cand?.content as Record<string, unknown>)?.parts as Array<Record<string, unknown>>) ?? [];
-      const text = parts.map((p) => String(p.text ?? "")).join("");
+      // Düşünme (thought) bölümleri yanıt metnine katılmaz.
+      const text = parts.filter((p) => !p.thought).map((p) => String(p.text ?? "")).join("");
       const chunks = ((cand?.groundingMetadata as Record<string, unknown>)?.groundingChunks as Array<Record<string, unknown>>) ?? [];
       const urls = chunks.map((c) => (c.web as Record<string, unknown>)?.uri).filter((u): u is string => typeof u === "string");
-      if (!text) throw new ProviderError("Yanıt ayrıştırılamadı", false, undefined, "parse_failed");
-      return { provider: "google", engine: "gemini", model: String(json.modelVersion ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
+      if (!text) {
+        const block = String((json.promptFeedback as Record<string, unknown> | undefined)?.blockReason ?? "");
+        const finish = String(cand?.finishReason ?? "");
+        if (block || ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"].includes(finish)) throw new ProviderError(`Yanıt sağlayıcı tarafından engellendi (${block || finish})`, false, undefined, "blocked_by_provider");
+        if (finish === "MAX_TOKENS") throw new ProviderError("Yanıt token sınırında kesildi", true, undefined, "truncated");
+        throw new ProviderError(`Yanıt ayrıştırılamadı${finish ? ` (${finish})` : ""}`, false, undefined, "parse_failed");
+      }
+      return { provider: "google", engine: "gemini", model: String(json.modelVersion ?? used), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
     },
   };
 }

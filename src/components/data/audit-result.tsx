@@ -29,7 +29,7 @@ interface Summary {
   failedDetails?: Record<string, string>;
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
   readiness: { geoScore: number | null; adsScore: number | null; checks: Check[] };
-  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null; wwwFallback?: boolean; landedHost?: string | null };
+  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null; wwwFallback?: boolean; landedHost?: string | null; viaCountryProxy?: boolean };
   /** Site hiç okunamadı: puan/fırsat/rakip üretilmedi. */
   siteUnreadable?: { kind: string; detail: string; wwwTried?: boolean };
   competitorCandidates: Array<{ domain: string; observations: number }>;
@@ -352,7 +352,11 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           ) : null}
           {r.crawl.landedHost ? (
             <p className="rounded-md bg-warning-soft px-3 py-2 text-sm" data-testid="report-landed">
-              {view.domain} bizi <span className="font-semibold">{r.crawl.landedHost}</span> adresine yönlendirdi (muhtemelen ülkeye göre yönlendirme). İncelenen sayfalar bu adrestendir; {r.provenance?.country ?? "hedef"} pazarındaki sitenizden farklı olabilir. Ülkeye göre yönlendirme yapıyorsanız tarayıcımızın hedef ülke sitenize erişebildiğinden emin olun veya ülke sitenizin tam adresini girin.
+              {r.crawl.viaCountryProxy ? (
+                <>{view.domain}, {r.provenance?.country ?? "hedef ülke"} bağlantısından bile <span className="font-semibold">{r.crawl.landedHost}</span> adresine yönlendiriyor; incelenen sayfalar bu adrestendir. Yönlendirmenin doğru olduğunu kontrol edin.</>
+              ) : (
+                <>Tarama sunucumuz yurt dışından bağlandığı için {view.domain} bizi <span className="font-semibold">{r.crawl.landedHost}</span> adresine yönlendirdi (ülkeye göre yönlendirme). İncelenen sayfalar bu adrestendir ve {r.provenance?.country ?? "hedef"} pazarındaki sitenizden farklı olabilir; AI soruları yine {r.provenance?.country ?? "hedef"} pazarı için soruldu.</>
+              )}
             </p>
           ) : null}
 

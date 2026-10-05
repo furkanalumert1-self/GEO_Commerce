@@ -60,7 +60,7 @@ export function ProviderCheck() {
           <p>Fix with AI üretimi: <Badge tone={data.generation === "ready" ? "success" : "neutral"}>{data.generation === "ready" ? "Yapılandırılmış" : data.generation === "demo" ? "Demo" : "Yapılandırılmamış (OPENAI_API_KEY + GENERATION_MODEL)"}</Badge></p>
           {data.crawlProxy ? (
             <p>
-              Türkiye tarama proxyTürkiye tarama proxy'si (CRAWL_PROXY_TR):apos;si (CRAWL_PROXY_TR):{" "}
+              Türkiye tarama proxy&apos;si (CRAWL_PROXY_TR):{" "}
               <Badge tone={!data.crawlProxy.configured ? "neutral" : data.crawlProxy.ok ? "success" : "danger"}>{!data.crawlProxy.configured ? "Tanımlı değil" : data.crawlProxy.ok ? "Çalışıyor · çıkış TR" : "Hata"}</Badge>{" "}
               {data.crawlProxy.configured && !data.crawlProxy.ok ? <span className="text-danger">{data.crawlProxy.error ?? `Çıkış ülkesi ${data.crawlProxy.exitCountry ?? "belirlenemedi"} (TR bekleniyor)`}</span> : null}
               {!data.crawlProxy.configured ? <span className="text-xs text-text-secondary">Ülkeye göre yönlendiren siteler (ör. mavi.com) yurt dışı sürümüyle taranır.</span> : null}

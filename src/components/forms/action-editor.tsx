@@ -9,7 +9,7 @@ import { ContentPreview } from "@/components/data/content-preview";
 const STAGE_TITLE: Record<string, string> = {
   draft: "Taslak · sonraki adım",
   review: "İnceleme bekliyor",
-  approved: "Uygulama: yayın kapsamını kontrol edin",
+  approved: "Sitenize uygulayın",
   publishing: "Yayınlanıyor",
   published: "Yayınlandı · sonucu izlemeye hazır",
   measuring: "Sonuç izleniyor",
@@ -61,6 +61,7 @@ export function ActionEditor({
   const [pending, setPending] = useState(false);
   const [pane, setPane] = useState<"preview" | "edit" | "tech">("preview");
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string; conflict?: boolean } | null>(null);
+  const [copied, setCopied] = useState(false);
   const editable = permissions.edit && ["draft", "review", "approved", "rejected", "failed", "rolled_back"].includes(action.status);
 
   useEffect(() => {
@@ -125,6 +126,16 @@ export function ActionEditor({
     setPane("edit");
     requestAnimationFrame(() => document.getElementById(fieldId)?.focus());
   };
+  const copyHtml = async () => {
+    try {
+      const res = await fetch(`${api}/export?format=html&versionId=${current.id}`);
+      if (!res.ok) throw new Error();
+      await navigator.clipboard.writeText(await res.text());
+      setCopied(true);
+    } catch {
+      setMsg({ tone: "err", text: "Kopyalanamadı; “HTML indir” ile dosyayı indirip içeriğini yapıştırabilirsiniz." });
+    }
+  };
   const exportLinks = permissions.export && !blocked ? (
     <span className="flex flex-wrap gap-2">
       {(["html", "md", "json"] as const).map((f) => (
@@ -187,6 +198,25 @@ export function ActionEditor({
               </div>
             </dl>
           ) : null}
+          {action.status === "approved" && canPublishReason && !blocked && permissions.export ? (
+            <ol className="flex flex-col gap-3 rounded-[var(--radius-md)] border border-border bg-surface-subtle p-4 text-sm">
+              <li>
+                <span className="font-medium">1. İçeriği alın.</span> Kopyalayın veya HTML dosyası olarak indirin.
+                <span className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" variant="primary" disabled={pending} onClick={copyHtml}>{copied ? "Kopyalandı ✓" : "İçeriği kopyala"}</Button>
+                  <a className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-subtle sm:min-h-9" href={`${api}/export?format=html&versionId=${current.id}`}>HTML indir</a>
+                </span>
+              </li>
+              <li>
+                <span className="font-medium">2. Sitenize ekleyin.</span> Mağaza panelinizde{" "}
+                {action.targetUrl ? <a className="break-all text-primary underline" href={action.targetUrl} target="_blank" rel="noopener noreferrer nofollow">hedef sayfanın</a> : "hedef sayfanın"}{" "}
+                açıklama/içerik alanına yapıştırıp kaydedin (HTML veya kaynak kodu görünümünde).
+              </li>
+              <li>
+                <span className="font-medium">3. Bize bildirin.</span> Yayınladıktan sonra “Sitenizde uyguladım → sonucu izle”ye basın; etkisini aynı sorularla ölçeriz.
+              </li>
+            </ol>
+          ) : null}
           <div className="flex flex-wrap items-start gap-2" role="toolbar" aria-label="Aksiyon işlemleri">
             {permissions.approve && (action.status === "draft" || action.status === "review") ? (
               <Button variant="primary" disabled={pending || dirty || blocked} title={blocked ? "Eksik bilgiler tamamlanmadan onaylanamaz" : undefined} onClick={() => call(`${api}/approve`, { versionId: current.id, expectedHash: current.contentHash }, "Onaylandı")}>Değişiklikleri onayla</Button>
@@ -196,7 +226,7 @@ export function ActionEditor({
             {action.status === "approved" && permissions.publish ? (
               <Button variant={canPublishReason || blocked ? "secondary" : "primary"} disabled={pending || blocked || Boolean(canPublishReason)} onClick={() => call(`${api}/publish`, {}, "Yayın kuyruğa alındı")}>Mağazada yayımla</Button>
             ) : null}
-            {action.status === "approved" && permissions.approve ? <Button disabled={pending || blocked} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Uygulama bildiriminiz kaydedildi; sonuç izleniyor")}>Sitenizde uyguladım → sonucu izle</Button> : null}
+            {action.status === "approved" && permissions.approve ? <Button variant={canPublishReason && !blocked ? "primary" : "secondary"} disabled={pending || blocked} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Uygulama bildiriminiz kaydedildi; sonuç izleniyor")}>Sitenizde uyguladım → sonucu izle</Button> : null}
             {action.status === "published" && permissions.approve ? <Button variant="primary" disabled={pending} onClick={() => call(`${api}/transition`, { to: "measuring" }, "Sonuç izlemeye alındı")}>Sonucu izlemeye başla</Button> : null}
             {action.status === "publishing" ? <Button disabled={pending} onClick={() => router.refresh()}>Durumu yenile</Button> : null}
             {action.status === "measuring" && permissions.approve ? <Button disabled={pending} onClick={() => call(`${api}/transition`, { to: "completed" }, "Tamamlandı")}>İzlemeyi tamamla</Button> : null}

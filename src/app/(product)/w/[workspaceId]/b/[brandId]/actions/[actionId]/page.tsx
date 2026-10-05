@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Alert, Badge, Card, PageHeader } from "@/components/ui";
 import { ActionEditor } from "@/components/forms/action-editor";
+import { ApiButton } from "@/components/forms/api-button";
 import { ActionStatusBadge, WorkflowStepper } from "@/components/data/growth";
 import { MeasurementPanel } from "@/components/data/measurement-panel";
 import { db } from "@/lib/db";
@@ -53,6 +54,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
 
   // Ölçüm: fırsatın soru kümesi (yoksa markanın tüm soruları), yayın anı etrafında eş uzunlukta dönemler.
   let panel: ReactNode = null;
+  let remeasure: ReactNode = null;
   if (measurement?.publishAt) {
     const windows = measurementWindows(new Date(measurement.publishAt), measurement.baselineDays ?? 14);
     const promptIds = a.opportunity ? (await db.prompt.findMany({ where: { workspaceId, brandId, clusterId: a.opportunity.clusterId }, select: { id: true } })).map((p) => p.id) : undefined;
@@ -65,6 +67,23 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
     const outcome = measurementOutcome(windows.partial, before.sampleCount, after.sampleCount);
     if (outcome.kind === "not_computable" && (a.status === "measuring" || a.status === "completed")) {
       flow = { ...flow, label: a.status === "completed" ? "Ölçüm tamamlandı · etki hesaplanamadı" : flow.label, tone: a.status === "completed" ? "neutral" : flow.tone, next: outcome.message };
+    }
+    // Sonuç yalnız yeni ölçümle oluşur: aynı soru kümesini tek tıkla yeniden ölçme.
+    if (a.status === "measuring" && can(ctx, "runs.start")) {
+      remeasure = (
+        <div className="mt-3">
+          <ApiButton
+            url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/runs`}
+            body={{ engines: ["chatgpt", "gemini", "claude", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1, ...(promptIds?.length ? { promptIds } : {}) }}
+            idempotent
+            variant="primary"
+            label={a.opportunity ? "Bu soruları şimdi yeniden ölç" : "Soruları şimdi yeniden ölç"}
+            pendingLabel="Başlatılıyor…"
+            redirectTo={`${base}/runs/{runId}`}
+          />
+          <p className="mt-1 text-xs text-text-secondary">Değişikliğin AI yanıtlarına yansıması birkaç gün sürebilir; en anlamlı sonuç için birkaç gün arayla tekrar ölçün.</p>
+        </div>
+      );
     }
     panel = (
       <MeasurementPanel
@@ -99,6 +118,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
             {manual ? "Sitenizde uygulandı bildirimi (sizin)" : "Yayın"}: {fmtDate(measurement.publishAt, tz, "tr-TR", true)} · Karşılaştırma dönemi {measurement.baselineDays ?? 14} gün · Sonuç için aynı soruları yeniden ölçün
           </p>
         ) : null}
+        {remeasure}
       </Card>
       {needsFix && ["measuring", "completed", "published"].includes(a.status) ? (
         <div className="mb-6">

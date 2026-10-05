@@ -116,9 +116,14 @@ describe("ölçüm yeterliliği", () => {
     expect(soon).toMatchObject({ kind: "early", title: "Değerlendirmek için henüz erken" });
     expect(soon.message).toContain("1 günden az");
     expect(soon.message).toContain("3 gün sonra");
-    const few = measurementOutcome(true, 6, 6, { elapsedDays: 5 });
+    const few = measurementOutcome(true, 30, 6, { elapsedDays: 5 });
     expect(few.kind).toBe("early");
-    expect(few.message).toContain("en az 10 yanıt gerekir (önce 6, sonra 6)");
+    expect(few.message).toContain("en az 10 yanıt gerekir (şu an 6)");
+    // Önceki dönem geçmiştir, büyümez: süre ve sonraki veri yeterliyse fark düşük güven notuyla gösterilir (sonsuza dek "erken" kalmaz).
+    const thinBase = measurementOutcome(true, 6, 12, { elapsedDays: 4 });
+    expect(thinBase).toMatchObject({ kind: "computable", title: "Değişiklik sonrası gözlenen fark (düşük güven)" });
+    expect(thinBase.message).toContain("yalnız 6 yanıt");
+    expect(measurementOutcome(true, 6, 12, { elapsedDays: 0 }).message).toContain("yalnız 6 yanıt");
     // Dönem tamamlanmışsa süre şartı aranmaz; örneklem yeterliyse fark gösterilir.
     expect(measurementOutcome(false, 20, 20, { elapsedDays: 14 }).kind).toBe("computable");
   });

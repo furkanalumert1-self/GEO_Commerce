@@ -202,16 +202,19 @@ export function measurementOutcome(partial: boolean, beforeSamples: number, afte
       : { kind: "not_computable", title: "Etki hesaplanamadı", message: "Dönem tamamlandı; yayından sonra gözlem olmadığı için etki hesaplanamadı." };
   }
   // Erken veya küçük örneklemli fark gürültüdür (uygulamadan dakikalar sonra +13 puan gibi): sayı gösterilmez.
+  // Önceki dönem geçmiştir, büyümez: onun azlığı yalnız güven notu olur; beklenen şey süre ve sonraki dönem verisidir.
   const tooSoon = partial && opts.elapsedDays !== undefined && opts.elapsedDays < MIN_EFFECT_DAYS;
-  const tooFew = beforeSamples < MIN_EFFECT_SAMPLES || afterSamples < MIN_EFFECT_SAMPLES;
-  if (tooSoon || tooFew) {
+  const afterFew = afterSamples < MIN_EFFECT_SAMPLES;
+  const beforeNote = beforeSamples < MIN_EFFECT_SAMPLES ? `Önceki dönemde yalnız ${beforeSamples} yanıt var; fark gösterildiğinde kesin değil, yön gösterici olarak yorumlanmalı.` : null;
+  if (tooSoon || afterFew) {
     const reasons = [
       tooSoon ? `Uygulamanın üzerinden ${opts.elapsedDays === 0 ? "1 günden az" : `${opts.elapsedDays} gün`} geçti; AI yanıtlarının değişikliği yansıtması birkaç gün sürer.` : null,
-      tooFew ? `Güvenilir karşılaştırma için her dönemde en az ${MIN_EFFECT_SAMPLES} yanıt gerekir (önce ${beforeSamples}, sonra ${afterSamples}).` : null,
+      afterFew ? `Karşılaştırma için uygulamadan sonra en az ${MIN_EFFECT_SAMPLES} yanıt gerekir (şu an ${afterSamples}).` : null,
     ].filter(Boolean);
-    const when = tooSoon ? `${MIN_EFFECT_DAYS - (opts.elapsedDays ?? 0)} gün sonra` : "birkaç ölçüm daha yapıldığında";
-    return { kind: "early", title: "Değerlendirmek için henüz erken", message: `${reasons.join(" ")} Fark, ${when} aynı sorular yeniden ölçüldüğünde gösterilir.` };
+    const when = tooSoon ? `${MIN_EFFECT_DAYS - (opts.elapsedDays ?? 0)} gün sonra` : "yeterli yanıt toplandığında";
+    return { kind: "early", title: "Değerlendirmek için henüz erken", message: `${reasons.join(" ")} Fark, ${when} aynı sorular yeniden ölçüldüğünde gösterilir.${beforeNote ? ` ${beforeNote}` : ""}` };
   }
+  if (beforeNote) return { kind: "computable", title: "Değişiklik sonrası gözlenen fark (düşük güven)", message: `${beforeNote}${partial ? " Kısmi dönem: fark değişebilir." : ""}` };
   return { kind: "computable", title: "Değişiklik sonrası gözlenen fark", message: partial ? "Kısmi dönem: sonraki pencere henüz dolmadı; fark değişebilir." : null };
 }
 

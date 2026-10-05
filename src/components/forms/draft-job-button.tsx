@@ -40,13 +40,17 @@ export function DraftJobButton({
   useEffect(() => {
     if (!jobId) return;
     const started = Date.now();
+    // Sayfa yenilendiğinde süre sıfırdan başlamasın: işin sunucudaki başlangıcı esas alınır.
+    let since = started;
     let stop = false;
     const tick = async () => {
       if (stop) return;
-      setElapsed(Math.round((Date.now() - started) / 1000));
       try {
         const res = await fetch(`/api/v1/jobs/${jobId}`, { cache: "no-store" });
-        const job = (await res.json().catch(() => null))?.data as { status?: string; resultId?: string | null; error?: string | null } | undefined;
+        const job = (await res.json().catch(() => null))?.data as { status?: string; resultId?: string | null; error?: string | null; startedAt?: string | null } | undefined;
+        const serverStart = job?.startedAt ? Date.parse(job.startedAt) : NaN;
+        if (Number.isFinite(serverStart) && serverStart < since) since = serverStart;
+        setElapsed(Math.max(0, Math.round((Date.now() - since) / 1000)));
         if (job?.status === "succeeded" && job.resultId) {
           stop = true;
           router.push(`${actionBase}${job.resultId}`);

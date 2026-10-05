@@ -131,7 +131,8 @@ export function claudeAdapter(cfg: AppConfig, client?: ClaudeClient): AiMonitorA
         const retryable = parsed.searchErrors.some((c) => c === "too_many_requests" || c === "unavailable");
         throw new ProviderError(`Web araması başarısız: ${[...new Set(parsed.searchErrors)].join(", ")}`, retryable, undefined, "search_failed");
       }
-      if (!parsed.text) throw new ProviderError("Yanıt ayrıştırılamadı", false, undefined, "parse_failed");
+      // Metinsiz yanıt çoğunlukla geçicidir (arama sonrası boş tur, token sınırı): bir kez daha denenir; neden kayda geçer.
+      if (!parsed.text) throw new ProviderError(`Yanıt metni boş geldi (durma nedeni: ${last.stop_reason ?? "bilinmiyor"})`, true, undefined, last.stop_reason === "max_tokens" ? "truncated" : "parse_failed");
       return {
         provider: "anthropic",
         engine: "claude",

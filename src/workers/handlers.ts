@@ -88,7 +88,8 @@ export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult
       maxPages: stepMode ? Math.min(maxPages, INLINE_CRAWL_MAX_PAGES) : maxPages,
       fetcher: demo ? fixtureFetcher : liveFetcherFor(run.brand.country),
       delayMs: demo ? 0 : 300,
-      deadline: ctx.deadline,
+      // Adım modunda tarama AI çağrısı yapmaz; yavaş site/ülke proxy'si için adım bütçesine ek süre (route sınırı 120 sn).
+      deadline: ctx.deadline !== undefined ? ctx.deadline + 25_000 : undefined,
       onProgress: (d, t) => ctx.progress(d, t),
       previous: new Map(prev.map((p) => [p.url, { etag: p.etag, contentHash: p.contentHash ?? "" }])),
     });

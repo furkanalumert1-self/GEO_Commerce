@@ -67,6 +67,13 @@ describe("claude adapter", () => {
     await expect(claudeAdapter(ready, client).ask({ prompt: "x", country: "TR", language: "tr" })).rejects.toMatchObject({ code: "search_failed", retryable: true });
   });
 
+  it("metinsiz yanıt geçici sayılır (yeniden denenir) ve durma nedeni mesajda görünür", async () => {
+    const { client } = mockClient(async () => message([searchResult], { stop_reason: "end_turn" }));
+    await expect(claudeAdapter(ready, client).ask({ prompt: "x", country: "TR", language: "tr" })).rejects.toMatchObject({ code: "parse_failed", retryable: true, message: expect.stringContaining("end_turn") });
+    const { client: c2 } = mockClient(async () => message([searchResult], { stop_reason: "max_tokens" }));
+    await expect(claudeAdapter(ready, c2).ask({ prompt: "x", country: "TR", language: "tr" })).rejects.toMatchObject({ code: "truncated", retryable: true });
+  });
+
   it("arama yapmadan yanıtlarsa (araç mevcut, model aramadı) geçerli yanıttır", async () => {
     const { client } = mockClient(async () => message([{ type: "text", text: "Kısa yanıt." }], { usage: { input_tokens: 1, output_tokens: 1 } }));
     const r = await claudeAdapter(ready, client).ask({ prompt: "x", country: "TR", language: "tr" });

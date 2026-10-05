@@ -4,6 +4,7 @@ import { hasFeature } from "@/modules/billing/plans";
 import { commit, ensureBucket, periodKey, release, reserve } from "@/modules/billing/quota";
 import type { BrandAccess } from "@/modules/tenancy/access";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
+import { crawlProxyFor, safeFetch } from "@/lib/http/safe-fetch";
 import { generateDraft, generationStatus, inStockFirst, type GenerationInput } from "./generator";
 import { executionMode } from "@/lib/queue";
 import { blockingIssues, canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
@@ -41,7 +42,23 @@ export async function suggestTargetUrl(db: PrismaClient, brandId: string, label:
   const bySlug = pages.filter((p) => { try { return new URL(p.url).pathname.replace(/\/+$/, "").split("/").pop() === slug; } catch { return false; } });
   if (bySlug[0]) return bySlug[0].url;
   const low = name.toLocaleLowerCase("tr-TR");
-  return pages.find((p) => (p.title ?? "").toLocaleLowerCase("tr-TR").startsWith(low))?.url ?? null;
+  const byTitle = pages.find((p) => (p.title ?? "").toLocaleLowerCase("tr-TR").startsWith(low))?.url;
+  if (byTitle) return byTitle;
+  // Taranmamışsa yaygın kategori adresi (/tek-kisilik-nevresim-takimi/) sitede canlı doğrulanır: 200 dönen ve ana
+  // sayfaya yönlenmeyen sayfa önerilir; doğrulanamazsa öneri yok (uydurma adres yok).
+  const brand = await db.brand.findUnique({ where: { id: brandId }, select: { domain: true, country: true } });
+  if (!brand || !slug) return null;
+  const host = brand.domain.replace(/^www\./, "");
+  for (const base of [`https://www.${host}`, `https://${host}`]) {
+    try {
+      const r = await safeFetch(`${base}/${slug}/`, { sameSiteAs: host, maxBytes: 300_000, timeoutMs: 8_000, maxRedirects: 3, proxy: crawlProxyFor(brand.country) });
+      const path = new URL(r.url).pathname.replace(/\/+$/, "");
+      if (r.status === 200 && path.endsWith(`/${slug}`)) return r.url;
+    } catch {
+      /* bu köken açılmadı */
+    }
+  }
+  return null;
 }
 
 export async function createActionDraft(db: PrismaClient, access: BrandAccess, input: { opportunityId: string; type: ActionType; targetUrl?: string | null; operationId: string; userId: string | null }) {

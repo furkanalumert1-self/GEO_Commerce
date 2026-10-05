@@ -55,6 +55,23 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     const productNames = matched.slice(0, 10).map((p) => p.name);
     return { clusterId: g.clusterId, label: g.label, answers: g.answers, brandMentioned: g.brandMentioned, lostTo: g.lostTo, prompts: g.prompts, promptStats: g.promptStats, products: productNames, drafts: adDrafts({ brand: brandRow.name, label: g.label, products: productNames }), targets };
   });
+  // Henüz ölçülmüş soru yoksa (ör. site taranamadı, ürünler dosyayla yüklendi) gruplar katalog kategorilerinden kurulur.
+  if (groups.length === 0 && products.length) {
+    const byCat = new Map<string, typeof products>();
+    for (const p of products) for (const c of p.categories.length ? p.categories.map((x) => x.category.name) : []) byCat.set(c, [...(byCat.get(c) ?? []), p]);
+    for (const [label, list] of [...byCat].sort((a, b) => b[1].length - a[1].length).slice(0, 8)) {
+      const catPage = categories.find((c) => norm(c.name) === norm(label));
+      const names = list.slice(0, 10).map((p) => p.name);
+      groups.push({
+        clusterId: `catalog:${label}`, label, answers: 0, brandMentioned: 0, lostTo: [], prompts: [], promptStats: [], products: names, drafts: adDrafts({ brand: brandRow.name, label, products: names }),
+        targets: [
+          ...(catPage?.url ? [{ url: catPage.url, label: `Kategori sayfası · ${catPage.url.replace(/^https?:\/\//, "")}`, kind: "category" as const }] : []),
+          ...list.slice(0, 3).map((p) => ({ url: p.url!, label: `Ürün · ${p.name}`, kind: "product" as const })),
+          { url: home, label: `Ana sayfa · ${home.replace(/^https?:\/\//, "")}`, kind: "home" as const },
+        ],
+      });
+    }
+  }
   const activeAccount = accounts.find((a) => a.accessStatus === "active");
   // Nötr durum: bu ekran taslak hazırlar; hesap bağlantısı ayrıntıda.
   const status = "Taslak hazırlama — taslağı dışa aktararak reklam platformunda kullanabilirsiniz.";

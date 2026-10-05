@@ -119,7 +119,7 @@ export default async function IntegrationsPage({ params, searchParams }: { param
                 <p className="text-xs text-text-secondary">{a.capabilities().includes("ordersRead") ? "Ürün ve sipariş bilgileri aktarılır." : "Ürün bilgileri aktarılır."}</p>
               )}
               {fix ? <p className="rounded-md bg-surface-subtle px-3 py-2 text-sm"><span className="font-medium">Çözüm: </span>{fix}</p> : null}
-              {av.reason && !conn ? <p className="text-sm text-text-secondary">{av.reason}</p> : null}
+              {av.reason && !conn ? <p className="text-sm text-text-secondary">{av.state === "not_configured" ? "Doğrudan bağlantı henüz etkin değil." : av.reason}</p> : null}
               <div className="mt-auto flex flex-col gap-2">
                 {a.provider === "csv_feed" ? (
                   <Link className="inline-flex min-h-11 items-center self-start rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`/w/${workspaceId}/b/${brandId}/catalog?import=1#urun-aktar`}>Dosya yükle</Link>

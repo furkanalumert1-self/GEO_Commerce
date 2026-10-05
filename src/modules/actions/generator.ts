@@ -43,9 +43,15 @@ function formatPrice(minor: bigint | null, currency: string | null): string | nu
   return new Intl.NumberFormat("tr-TR", { style: "currency", currency }).format(Number(minor) / 100);
 }
 
+/** Stokta olmayan ürünleri eler (hepsi stok dışıysa listeyi korur); stok bilgisi olmayanlar kalır. */
+export function inStockFirst<T extends { available: boolean | null }>(catalog: T[]): T[] {
+  const inStock = catalog.filter((p) => p.available !== false);
+  return inStock.length ? inStock : catalog;
+}
+
 /** Deterministik şablon taslak (demo/test). Yalnız verilen katalog verisini kullanır. */
 export function templateDraft(input: GenerationInput): ActionContent {
-  const products = input.catalog.slice(0, 5);
+  const products = inStockFirst(input.catalog).slice(0, 5);
   const placeholders: string[] = [];
   const rows = products.map((p) => {
     const price = formatPrice(p.priceMinor, p.currency);
@@ -67,7 +73,8 @@ export function templateDraft(input: GenerationInput): ActionContent {
     title: `${input.opportunity.clusterLabel} — ${input.brand.name} rehberi`,
     metaDescription: `${input.opportunity.clusterLabel} arayanlar için ${input.brand.name} ürünleri, seçim kriterleri ve sık sorulan sorular.`.slice(0, 300),
     bodyBlocks: [
-      { heading: "Kimler için?", markdown: `Bu sayfa "${input.opportunity.clusterLabel}" sorusuna yanıt arayanlar için hazırlandı. ${input.opportunity.recommendedAction ?? ""}`.trim() },
+      // Fırsatın iç önerisi ("… içerik bloğu ekleyin") ekip içindir; sitede yayınlanacak metne girmez.
+      { heading: "Kimler için?", markdown: `Bu sayfa "${input.opportunity.clusterLabel}" sorusuna yanıt arayanlar için hazırlandı.` },
       { heading: "Öne çıkan ürünler", markdown: rows.length ? rows.join("\n") : "[KATALOGDAN ÜRÜN SEÇİN]" },
       { heading: "Nasıl seçilir?", markdown: "Cilt tipinizi, içerik listesini ve kullanım sıklığını karşılaştırın. İçerik listesi ürün sayfalarında yer alır." },
     ],

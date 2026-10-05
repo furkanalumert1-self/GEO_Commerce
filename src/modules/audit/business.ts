@@ -321,12 +321,14 @@ export function representativeTopics(terms: string[], pages: Page[], max = 2): s
 
 const GENERIC_SEGMENT = new Set(["products", "product", "urun", "urunler", "p", "collections", "kategori", "category", "c", "tr", "en"]);
 const JUNK_TOPIC = /^(products?|all|tümü|tüm ürünler|ürünler|koleksiyon|collection|anasayfa|ana sayfa|kampanya.*|indirim.*|outlet|yeni.*|çok satan.*|.*rehberi?|.*guide|blog|ilham.*|trend.*|fırsat.*|hediye( fikirleri)?|marka(lar)?|mağaza(lar)?|stores?)$/i;
+/** Vitrin/satış etiketleri ve beden/ölçü filtreleri: ürün grubu değildir (ör. "Basics", "Best Sellers", "28-30 inch Inseam"). */
+const MERCH_TOPIC = /^(basics?|essentials?|new( arrivals?| in)?|best ?sellers?|top sellers?|sale|clearance|last chance|en yeniler|yeni gelenler|sezon.*|temel( parçalar| ürünler)?|online('?a)? özel.*|sadece online.*|.*\bsale)$|\b\d+([-–/]\d+)?\s?(inch|inç|cm|beden)\b|\binseam\b|\bbeden\b/i;
 const ENGLISH_HINT = /\b(and|for|the|with|treatments?|serums?|shampoos?|hair|loss|acids?|products?|collection|care|face|skin|body|men|women|kids|home|kitchen)\b/i;
 
 /** "Collection: Saç Bakımı" → "Saç Bakımı"; gürültü ve (Türkçe sitede) İngilizce ürün tipi etiketleri elenir. */
 export function cleanTopic(raw: string, language: string): string | null {
   const t = raw.replace(/^(collection|koleksiyon|kategori)\s*:\s*/i, "").split(/\s[|–—]\s/)[0]!.trim();
-  if (t.length < 3 || t.length > 40 || JUNK_TOPIC.test(t)) return null;
+  if (t.length < 3 || t.length > 40 || JUNK_TOPIC.test(t) || MERCH_TOPIC.test(t)) return null;
   if (language === "tr" && /^[\x00-\x7F]+$/.test(t) && ENGLISH_HINT.test(t)) return null;
   return t;
 }

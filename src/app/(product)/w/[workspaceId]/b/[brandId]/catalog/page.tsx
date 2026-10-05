@@ -86,13 +86,13 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
           </Alert>
         </div>
       ) : null}
-      {discovery.candidates.length > 0 || activeProducts === 0 ? (
+      {discovery.candidates.length > 0 || activeProducts === 0 || (discovery.lastCrawlAt && discovery.pagesRead === 0) ? (
         <Card className="mb-6" id="adaylar">
           <CardHeader
             title="Bulunan ürün adayları"
             description={
               discovery.lastCrawlAt
-                ? `Son inceleme: ${fmtNumber(discovery.pagesRead)} sayfa okundu${discovery.pagesFailed ? `, ${fmtNumber(discovery.pagesFailed)} sayfa erişilemedi` : ""}; ${fmtNumber(discovery.candidates.length)} ürün adayı bulundu, ${fmtNumber(importedCount)} aktarıldı, ${fmtNumber(reviewCount)} inceleme bekliyor.${discovery.truncated ? " Tüm mağaza taranmadı (sayfa/süre sınırı); incelemeyi tekrar başlatarak devam edebilirsiniz." : ""} Bilgisi tam ürünler otomatik eklenir, eksikler onayınızı bekler; sitenize hiçbir şey yazılmaz.`
+                ? `Son inceleme: ${fmtNumber(discovery.pagesRead)} sayfa okundu${discovery.pagesFailed ? `, ${fmtNumber(discovery.pagesFailed)} sayfa erişilemedi` : ""}; ${fmtNumber(discovery.candidates.length)} ürün adayı bulundu, ${fmtNumber(importedCount)} aktarıldı, ${fmtNumber(reviewCount)} inceleme bekliyor.${discovery.pagesRead === 0 && discovery.pagesFailed > 0 ? " Hiç sayfa okunamadı: siteniz otomatik ziyaretleri (bot koruması/WAF, ör. Cloudflare) engelliyor olabilir. Güvenlik duvarınızda CallypsoBot'a izin verin veya aşağıdan ürün dosyası (CSV) yükleyin." : ""}${discovery.truncated ? " Tüm mağaza taranmadı (sayfa/süre sınırı); incelemeyi tekrar başlatarak devam edebilirsiniz." : ""} Bilgisi tam ürünler otomatik eklenir, eksikler onayınızı bekler; sitenize hiçbir şey yazılmaz.`
                 : "Siteyi incelediğimizde adı, fiyatı ve stok bilgisi tam olan ürünler kataloğa otomatik eklenir; bilgisi eksik olanlar burada onayınızı bekler."
             }
           />

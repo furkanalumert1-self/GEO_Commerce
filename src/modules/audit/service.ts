@@ -259,6 +259,7 @@ export interface AuditWork {
     siteDomain?: string;
     /** www'suz adres hatalı olduğu için www adresiyle incelendi. */
     wwwFallback?: boolean;
+    landedHost?: string;
     /** Site hiç okunamadıysa nedeni; bu durumda puan/fırsat/rakip üretilmez. */
     unreadable?: { kind: string; detail: string };
     /** Yönetici tanısı (süreler, başlangıç adresi). */
@@ -277,8 +278,12 @@ export interface AuditWork {
   /** Bu audit'te sorulan platformlar (soru adımında sabitlenir). Eski işlerde yok → AUDIT_ENGINES. */
   engines?: EngineKey[];
   answers: AuditAnswer[];
-  /** Sıradaki (soru × motor) çiftinin deneme sayısı (zaman aşımı/geçici hata). */
+  /** Eski işlerle uyum için (artık çift bazında `attempts` kullanılır). */
   pendingAttempts?: number;
+  /** (soru × motor) çift sırasına göre deneme sayısı (zaman aşımı/geçici hata). */
+  attempts?: Record<number, number>;
+  /** Aynı sorunun platformları paralel sorulur; sırası gelmeden biten yanıtlar burada bekler. */
+  ready?: Record<number, AuditAnswer>;
 }
 
 const AUDIT_CALL_ATTEMPTS = 2;
@@ -339,6 +344,7 @@ export async function runAudit(
       failures: crawl.failed.slice(0, 3),
       ...(crawl.redirectedFrom ? { siteDomain: crawl.domain } : {}),
       ...(crawl.wwwFallback ? { wwwFallback: true } : {}),
+      ...(crawl.landedHost ? { landedHost: crawl.landedHost } : {}),
       diagnostics: crawl.diagnostics ?? null,
       // Hesaba kaydedilince kataloğa aktarılmak üzere taramada bulunan ürünler (yalnız ürün sayfaları; en çok 30).
       productFacts: crawl.pages.flatMap((p) => {
@@ -416,7 +422,7 @@ export async function runAudit(
             scopeEngines: [],
             provenance: { models: [], surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: 0 },
             readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
             competitorCandidates: [],
             opportunityCount: 0,
             opportunityAnalyzed: false,
@@ -444,39 +450,55 @@ export async function runAudit(
   const siteDomain = work.crawl.siteDomain ?? audit.domain;
   const entity = { id: "self", type: "brand" as const, name: brandName, aliases: [], domain: siteDomain };
   const pairs = prompts.flatMap((prompt) => available.map((a) => ({ prompt, a })));
-  while (work.answers.length < pairs.length) {
-    if (overBudget()) {
-      await save();
-      return "continue";
-    }
-    const { prompt, a } = pairs[work.answers.length]!;
+  // Aynı sorunun platformları paralel sorulur (adım süresi ≈ en yavaş platform); sonuçlar çift sırasıyla eklenir.
+  const ready = (work.ready ??= {});
+  const attempts = (work.attempts ??= {});
+  const failRow = (i: number, errorCode: string, errorDetail?: string): AuditAnswer => {
+    const { prompt, a } = pairs[i]!;
+    return { engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode, ...(errorDetail ? { errorDetail } : {}) };
+  };
+  const callOne = async (i: number): Promise<AuditAnswer | null> => {
+    const { prompt, a } = pairs[i]!;
     // Aynı platformda kalıcı hata (anahtar/model) alındıysa tekrar çağrılmaz.
     const permanent = work.answers.find((x) => x.engine === a.engine && !x.ok && ["auth", "not_configured", "http_400", "http_404", "insufficient_quota", "search_unavailable"].includes(x.errorCode ?? ""));
-    if (permanent) {
-      work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: permanent.errorCode });
-      continue;
-    }
+    if (permanent) return failRow(i, permanent.errorCode!);
     try {
       const ans = await a.ask({ prompt, country, language, signal: opts.callTimeoutMs ? AbortSignal.timeout(opts.callTimeoutMs) : undefined });
       await db.costLedger.create({ data: { workspaceId: null, provider: ans.provider, model: ans.model, operation: "audit", attemptId: `audit:${auditId}:${a.engine}:${sha256(prompt).slice(0, 8)}:${Date.now()}`, costMicros: ans.costMicros ?? 0n, succeeded: true } });
       const ex = extract(ans.text, ans.urls, [entity]);
       const m = ex.mentions.find((x) => x.entityId === "self" && x.kind !== "negative" && !x.needsReview);
-      work.answers.push({
+      return {
         engine: a.engine, model: ans.model, surface: ans.surface, prompt, ok: true, mentioned: Boolean(m), recommended: m?.kind === "recommendation",
         ownCitation: ex.citations.some((c) => c.association === "own"), citedDomains: ex.citations.filter((c) => c.association !== "own").map((c) => c.domain), sampledAt: new Date().toISOString(),
-      });
-      work.pendingAttempts = 0;
+      };
     } catch (e) {
       const pe = e instanceof ProviderError ? e : null;
-      const attempts = (work.pendingAttempts ?? 0) + 1;
-      if (pe?.retryable && attempts < AUDIT_CALL_ATTEMPTS) {
+      const n = (attempts[i] ?? 0) + 1;
+      if (pe?.retryable && n < AUDIT_CALL_ATTEMPTS) {
         // Geçici hata/zaman aşımı: aynı çift bir kez daha denenir (bir sonraki döngü veya adım).
-        work.pendingAttempts = attempts;
-        await save();
-        continue;
+        attempts[i] = n;
+        return null;
       }
-      work.pendingAttempts = 0;
-      work.answers.push({ engine: a.engine, model: "", surface: a.surface, prompt, ok: false, mentioned: false, recommended: false, ownCitation: false, citedDomains: [], sampledAt: new Date().toISOString(), errorCode: pe?.code ?? "error", errorDetail: ((e as Error).message ?? "").slice(0, 240) });
+      return failRow(i, pe?.code ?? "error", ((e as Error).message ?? "").slice(0, 240));
+    }
+  };
+  const perPrompt = Math.max(1, available.length);
+  while (work.answers.length < pairs.length) {
+    if (overBudget()) {
+      await save();
+      return "continue";
+    }
+    const first = Math.floor(work.answers.length / perPrompt) * perPrompt;
+    const batch = Array.from({ length: Math.min(perPrompt, pairs.length - first) }, (_, k) => first + k).filter((i) => i >= work.answers.length && !ready[i]);
+    const results = await Promise.all(batch.map(callOne));
+    batch.forEach((i, k) => {
+      if (results[k]) ready[i] = results[k]!;
+    });
+    while (ready[work.answers.length]) {
+      const i = work.answers.length;
+      work.answers.push(ready[i]!);
+      delete ready[i];
+      delete attempts[i];
     }
     await save();
   }
@@ -536,7 +558,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
         competitorCandidates,
         opportunityCount,
         opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),

@@ -195,7 +195,7 @@ const DRAFT_MATERIALS = ["%100 pamuk", "pamuk", "bambu", "keten", "porselen", "s
 
 /** "Solıd Bambu Yüz Havlusu 50X90 Cm Ekru" → "yüz havlusu" (ölçü/renk ve ürün adı öncesi atılır; son iki kelime). */
 export function productTypePhrase(name: string): string | null {
-  const base = name.split(/\s[-–]\s/)[0]!.replace(/\b\d[\d.,x×*/ ]*\s*(cm|mm|ml|lt|gr|g|kg|cc|adet|li|lü|lu|lık|lik)?\b/gi, " ").replace(COLOR_WORDS, " ").replace(/[%()/]+/g, " ").replace(/\s+/g, " ").trim();
+  const base = name.split(/\s[-–]\s/)[0]!.replace(/\b\d[\d.,x×*/ ]*\s*(cm|mm|ml|lt|gr|g|kg|cc|gb|tb|mb|mah|hz|w|inç|inch|adet|li|lü|lu|lık|lik)?\b/gi, " ").replace(/\S*\d\S*/g, " ").replace(COLOR_WORDS, " ").replace(/[%()/]+/g, " ").replace(/\s+/g, " ").trim();
   const words = base.split(" ").filter((w) => w.length > 1);
   if (words.length < 2) return null;
   return words.slice(-2).join(" ").toLocaleLowerCase("tr-TR");
@@ -217,7 +217,8 @@ export function adDrafts(input: { brand: string; label: string; products: string
     const t = productTypePhrase(n);
     if (t) typeCount.set(t, (typeCount.get(t) ?? 0) + 1);
   }
-  const types = [...typeCount.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 2);
+  // Birden çok üründe tekrar eden ifade ürün tipidir; tek seferlik ifade çoğu zaman marka/model adıdır (ör. "apple iphone").
+  const types = [...typeCount.entries()].filter(([, c]) => names.length < 2 || c >= 2).sort((a, b) => b[1] - a[1]).map(([t]) => t).slice(0, 2);
   const materials = DRAFT_MATERIALS.filter((m) => lowNames.filter((n) => n.includes(m)).length >= 2).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m))).slice(0, 2);
   const sized = lowNames.filter((n) => /\d+\s*[x×]\s*\d+|\d+\s*cm\b/.test(n)).length >= 2;
   const sets = lowNames.filter((n) => /\bset(i|leri)?\b/.test(n));

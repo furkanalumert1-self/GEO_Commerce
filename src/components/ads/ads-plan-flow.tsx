@@ -134,7 +134,7 @@ export function AdsPlanFlow({ groups, brandName, domain, days, initialGroup, cat
   };
 
   if (!groups.length) {
-    return <p className="text-sm text-text-secondary">Reklam taslağı için önce ürün gruplarınızı oluşturun: Ürünlerim sayfasında siteyi inceleyin veya takip edeceğiniz soruları seçin.</p>;
+    return <p className="text-sm text-text-secondary">Reklam taslağı için önce ürün gruplarınızı oluşturun: Ürünlerim sayfasında siteyi inceleyin, kategori sütunu olan bir ürün dosyası (CSV) yükleyin veya takip edeceğiniz soruları seçin.</p>;
   }
 
   const draft = group?.drafts.find((d) => d.key === draftKey) ?? null;

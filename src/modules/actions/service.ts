@@ -4,7 +4,7 @@ import { hasFeature } from "@/modules/billing/plans";
 import { commit, ensureBucket, periodKey, release, reserve } from "@/modules/billing/quota";
 import type { BrandAccess } from "@/modules/tenancy/access";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
-import { generateDraft, generationStatus, type GenerationInput } from "./generator";
+import { generateDraft, generationStatus, inStockFirst, type GenerationInput } from "./generator";
 import { executionMode } from "@/lib/queue";
 import { blockingIssues, canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
 import { minimumPlanFor } from "@/modules/billing/plans";
@@ -58,7 +58,8 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       opportunity: { title: opp.title, recommendedAction: opp.recommendedAction, clusterLabel: opp.cluster.label, gapType: opp.gapType },
       evidence: opp.evidence.map((e) => ({ quote: e.quote, url: e.pageUrl })),
       targetUrl: input.targetUrl ?? opp.targetUrl,
-      catalog: catalog.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null })),
+      // Stokta olmayan ürünler öne çıkarılmaz; yalnız stokta ürün yoksa listede kalır.
+      catalog: inStockFirst(catalog.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null }))),
       allowedClaims: [],
     };
     // Redis'siz (inline) dağıtımda istek süresi sınırına (60 sn) sığmak için daha kısa zaman aşımı.

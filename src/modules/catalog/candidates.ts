@@ -3,6 +3,7 @@ import { parseMoneyMinor } from "@/adapters/commerce/csv";
 import type { NormalizedProduct } from "@/adapters/commerce/types";
 import { availabilityFlag, extractPage, type ProductFacts } from "@/modules/audit/html";
 import { safeFetch } from "@/lib/http/safe-fetch";
+import { botChallenge } from "@/modules/audit/crawler";
 import { AppError } from "@/lib/http/errors";
 
 /**
@@ -136,7 +137,8 @@ export async function previewProductUrl(url: string, brandDomain: string): Promi
   if (u.protocol !== "https:" || (host !== d && !host.endsWith(`.${d}`))) throw new AppError("validation_error", `Bağlantı ${d} alan adınızda ve https olmalı`, { fieldErrors: { url: [`${d} alan adında bir https bağlantısı girin`] } });
   if (u.pathname.replace(/\/+$/, "") === "") return { candidate: null, reason: "Bu adres ana sayfa. Bir ürünün kendi sayfa adresini girin ya da “Siteyi incele ve ürünleri bul” ile ürünleri otomatik bulun." };
   const r = await safeFetch(u.toString(), { sameSiteAs: d, maxBytes: 1_500_000, timeoutMs: 10_000, maxRedirects: 4 });
-  if (r.status >= 400) return { candidate: null, reason: `Sayfa açılamadı (HTTP ${r.status})` };
+  if ([401, 403, 429].includes(r.status) || botChallenge(r.headers)) return { candidate: null, reason: `Siteniz bot koruması (Cloudflare/WAF) ile otomatik ziyareti engelledi (HTTP ${r.status}). Güvenlik duvarınızda CallypsoBot'a izin verin veya aşağıdan ürün dosyası (CSV) yükleyin.` };
+  if (r.status >= 400) return { candidate: null, reason: `Sayfa açılamadı (HTTP ${r.status})${r.status === 404 ? "; adresi tarayıcıda açıp kopyalayın" : ""}` };
   const facts = extractPage(r.body, r.url);
   // Aynı ürünün şemada iki kez yer alması (tema + uygulama) liste sayfası sayılmaz.
   const distinct = [...new Map(facts.products.filter((x) => x.name).map((x) => [(x.sku ?? x.name!).trim().toLocaleLowerCase("tr-TR"), x])).values()];

@@ -38,11 +38,13 @@ export interface CrawlResult {
   wwwFallback?: boolean;
   /** Ana sayfaya hiç erişilemediyse nedeni (ssl | dns | timeout | refused | http | network). */
   homeError?: { kind: SiteErrorKind; detail: string };
+  /** Ana sayfa başka bir alt alan adına yönlendirdi (ör. us.mavi.com); kullanıcıya gösterilir. */
+  landedHost?: string;
   /** Yönetici tanısı (gizli veri yok): başlangıç adresi, süreler ve aşama sayıları. */
   diagnostics?: { start: string; origin: string; sitemapsRead: number; sitemapMs: number; pagesMs: number; budgetMs: number | null };
 }
 
-export type SiteErrorKind = "ssl" | "dns" | "timeout" | "refused" | "http" | "network";
+export type SiteErrorKind = "ssl" | "dns" | "timeout" | "refused" | "blocked" | "http" | "network";
 
 /** Bağlantı hatasını kullanıcıya anlatılabilir türe çevirir (ham mesaj yalnız teknik ayrıntıda). */
 export function classifySiteError(message: string): SiteErrorKind {
@@ -50,8 +52,15 @@ export function classifySiteError(message: string): SiteErrorKind {
   if (/ENOTFOUND|EAI_AGAIN|getaddrinfo|çözümlen/i.test(message)) return "dns";
   if (/timeout|zaman aşımı|ETIMEDOUT/i.test(message)) return "timeout";
   if (/ECONNREFUSED|ECONNRESET/i.test(message)) return "refused";
+  // 401/403/429 ve bot doğrulama sayfası: site açık ama otomatik ziyareti (WAF/bot koruması) engelliyor.
+  if (/^http_(401|403|429)\b|challenge/.test(message)) return "blocked";
   if (/^http_\d+/.test(message)) return "http";
   return "network";
+}
+
+/** Cloudflare vb. bot doğrulaması: yanıt başlığında işaret bırakır (ör. cf-mitigated: challenge). */
+export function botChallenge(headers: Record<string, string>): boolean {
+  return /challenge/i.test(headers["cf-mitigated"] ?? "") || Boolean(headers["x-datadome"]) || /captcha/i.test(headers["x-amzn-waf-action"] ?? "");
 }
 
 export interface CrawlOptions {
@@ -97,10 +106,12 @@ export async function resolveSiteDomain(fetcher: Fetcher, domain: string): Promi
  * www'suz adres bağlantı/SSL hatası verirse www adresi denenir (yaygın yanlış yapılandırma).
  * Dönen origin taramanın başlangıç adresidir; alan adı sınırı yine kayıtlı alan adıdır.
  */
-export async function resolveOrigin(fetcher: Fetcher, domain: string): Promise<{ origin: string; wwwFallback: boolean; homeError?: { kind: SiteErrorKind; detail: string } }> {
+export async function resolveOrigin(fetcher: Fetcher, domain: string): Promise<{ origin: string; wwwFallback: boolean; landedHost?: string; homeError?: { kind: SiteErrorKind; detail: string } }> {
   try {
-    await fetcher(`https://${domain}/`, { sameSiteAs: domain });
-    return { origin: `https://${domain}`, wwwFallback: false };
+    const r = await fetcher(`https://${domain}/`, { sameSiteAs: domain });
+    // Ülke/dil yönlendirmesi (ör. mavi.com → us.mavi.com): taranan içerik istenen pazarınki olmayabilir.
+    const landed = new URL(r.url).hostname.toLowerCase();
+    return { origin: `https://${domain}`, wwwFallback: false, ...(landed.replace(/^www\./, "") !== domain ? { landedHost: landed } : {}) };
   } catch (e) {
     const detail = (e as Error).message.slice(0, 200);
     try {
@@ -118,7 +129,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
   const resolved = await resolveOrigin(fetcher, domain);
   const origin = resolved.origin;
   const maxDepth = opts.maxDepth ?? 3;
-  const result: CrawlResult = { ...(resolved.wwwFallback ? { wwwFallback: true } : {}), ...(resolved.homeError ? { homeError: resolved.homeError } : {}), domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false, ...(domain !== opts.domain ? { redirectedFrom: opts.domain } : {}) };
+  const result: CrawlResult = { ...(resolved.wwwFallback ? { wwwFallback: true } : {}), ...(resolved.landedHost ? { landedHost: resolved.landedHost } : {}), ...(resolved.homeError ? { homeError: resolved.homeError } : {}), domain, robotsFound: false, robotsDisallowAll: false, sitemapFound: false, pages: [], failed: [], skippedByRobots: 0, truncated: false, ...(domain !== opts.domain ? { redirectedFrom: opts.domain } : {}) };
 
   if (resolved.homeError) {
     // Ana sayfaya ne www'suz ne www adresiyle erişilebildi: diğer istekler de başarısız olur, boşuna denenmez.
@@ -217,7 +228,7 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       const r = await fetcher(key, { sameSiteAs: domain, headers: prev?.etag ? { "if-none-match": prev.etag } : undefined });
       if (r.status === 304 && prev) continue; // delta: değişmemiş
       if (r.status >= 400) {
-        result.failed.push({ url: key, reason: `http_${r.status}` });
+        result.failed.push({ url: key, reason: `http_${r.status}${botChallenge(r.headers) ? "_challenge" : ""}` });
         continue;
       }
       const ct = r.headers["content-type"] ?? "";

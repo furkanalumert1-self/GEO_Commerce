@@ -29,7 +29,7 @@ interface Summary {
   failedDetails?: Record<string, string>;
   provenance: { models: string[]; surface: string; country: string; language: string; sampledAt: string; sampleCount: number };
   readiness: { geoScore: number | null; adsScore: number | null; checks: Check[] };
-  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null; wwwFallback?: boolean };
+  crawl: { pages: number; failed: number; skippedByRobots: number; products: number; categories: string[]; truncated?: boolean; failures?: Array<{ url: string; reason: string }>; siteDomain?: string | null; wwwFallback?: boolean; landedHost?: string | null };
   /** Site hiç okunamadı: puan/fırsat/rakip üretilmedi. */
   siteUnreadable?: { kind: string; detail: string; wwwTried?: boolean };
   competitorCandidates: Array<{ domain: string; observations: number }>;
@@ -102,6 +102,7 @@ const UNREADABLE: Record<string, { why: (d: string) => string; todo: string }> =
   dns: { why: (d) => `${d} alan adı bulunamadı (DNS kaydı yok veya yanlış).`, todo: "Alan adını doğru yazdığınızdan ve DNS kayıtlarının siteyi gösterdiğinden emin olun." },
   timeout: { why: (d) => `${d} zamanında yanıt vermedi.`, todo: "Siteniz yavaş veya geçici olarak kapalı olabilir; biraz sonra tekrar deneyin." },
   refused: { why: (d) => `${d} sunucusu bağlantıyı reddetti.`, todo: "Sunucunun ziyaretçilere açık olduğunu ve bir güvenlik duvarının otomatik ziyaretleri engellemediğini kontrol edin." },
+  blocked: { why: (d) => `${d} açık, ancak bot koruması (Cloudflare/WAF) otomatik ziyaretimizi engelledi.`, todo: "Güvenlik duvarınızda (Cloudflare, Akamai vb.) CallypsoBot'a izin verin. Aynı koruma ChatGPT, Claude ve Perplexity tarayıcılarını (GPTBot, ClaudeBot, PerplexityBot) da engelliyorsa AI yanıtlarında sitenizin kaynak gösterilmesi zorlaşır; bunu da kontrol edin. Hesabınızda ürün dosyası (CSV) yükleyerek de devam edebilirsiniz." },
   http: { why: (d) => `${d} sayfalarını açarken hata kodu döndü.`, todo: "Ana sayfanızın tarayıcıda açıldığını kontrol edin; sorun sürerse barındırma sağlayıcınızla görüşün." },
   robots: { why: (d) => `${d} robots.txt dosyası tüm sitenin incelenmesini engelliyor.`, todo: "AI ve arama tarayıcılarının sitenizi okuyabilmesi için robots.txt'deki genel engeli kaldırın." },
   network: { why: () => "Tarama tamamlanamadı; nedeni kesin belirlenemedi.", todo: "Biraz sonra tekrar deneyin. Sorun sürerse sitenizin otomatik ziyaretleri (bot) engelleyip engellemediğini kontrol edin." },
@@ -130,6 +131,8 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
   const [claiming, setClaiming] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const delay = useRef(2000);
+  // Geçici sunucu/bağlantı hatasında (zaman aşımı, 5xx, JSON olmayan yanıt) otomatik yeniden deneme sayacı.
+  const [retries, setRetries] = useState(0);
   const router = useRouter();
   const confirming = view.stage === "confirm";
   const running = (view.status === "queued" || view.status === "running") && !confirming;
@@ -143,9 +146,11 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         const res = inline
           ? await fetch(`/api/v1/audits/${encodeURIComponent(token)}/advance`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", cache: "no-store" })
           : await fetch(`/api/v1/audits/${encodeURIComponent(token)}`, { cache: "no-store" });
-        const body = await res.json();
+        const body = await res.json().catch(() => null);
+        if (!body || res.status >= 500 || res.status === 429) throw Object.assign(new Error("Sunucu yanıtı gecikti"), { transient: true });
         if (!res.ok) throw new Error(body?.error?.message ?? "Durum alınamadı");
         if (!cancelled) {
+          setRetries(0);
           const { step: st, ...v } = body.data as View & { step?: StepInfo };
           setView(v);
           setPollError(null);
@@ -156,7 +161,15 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
         }
       } catch (e) {
         if (!cancelled) {
-          setPollError((e as Error).message);
+          // Ağ hatası veya geçici sunucu hatası: tamamlanan adımlar korunur; 3 kez artan aralıkla kendiliğinden yeniden denenir.
+          const transient = (e as { transient?: boolean }).transient || e instanceof TypeError;
+          if (transient && retries < 3) {
+            setPollError("Bağlantı yavaşladı; kaldığı yerden otomatik devam ediliyor…");
+            delay.current = 5000 * (retries + 1);
+            setRetries((n) => n + 1);
+            return;
+          }
+          setPollError(transient ? "Sunucu şu anda yanıt vermiyor. Tamamlanan adımlar kayıtlı; “Devam et” ile kaldığı yerden sürdürebilirsiniz." : (e as Error).message);
           if (inline) setPaused(true);
         }
       }
@@ -167,7 +180,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [running, token, view, inline, paused, step?.outcome]);
+  }, [running, token, view, inline, paused, step?.outcome, retries]);
 
   const claim = async () => {
     setClaiming(true);
@@ -271,6 +284,7 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
                     setPaused(false);
                     setPollError(null);
                     setStep(null);
+                    setRetries(0);
                   }}
                 >
                   Devam et
@@ -334,6 +348,11 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
           {!r.scopeUnavailable ? (
             <p className="text-sm text-text-secondary" data-testid="report-scope">
               Sitenizden seçilen {r.groups?.length || r.business?.topics.length || 0} ürün grubu{groupsText ? ` (${groupsText})` : ""} ve {qCount} soru üzerinden hazırlanmıştır; tüm ürünlerinizi kapsamaz.
+            </p>
+          ) : null}
+          {r.crawl.landedHost ? (
+            <p className="rounded-md bg-warning-soft px-3 py-2 text-sm" data-testid="report-landed">
+              {view.domain} bizi <span className="font-semibold">{r.crawl.landedHost}</span> adresine yönlendirdi (muhtemelen ülkeye göre yönlendirme). İncelenen sayfalar bu adrestendir; {r.provenance?.country ?? "hedef"} pazarındaki sitenizden farklı olabilir. Ülkeye göre yönlendirme yapıyorsanız tarayıcımızın hedef ülke sitenize erişebildiğinden emin olun veya ülke sitenizin tam adresini girin.
             </p>
           ) : null}
 

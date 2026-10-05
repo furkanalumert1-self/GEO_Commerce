@@ -142,6 +142,8 @@ export async function jobStatus(db: PrismaClient, jobId: string, workspaceId: st
     resumable: job.status === "queued" || job.status === "failed" || (job.status === "running" && (!job.lockedUntil || job.lockedUntil < new Date())),
     attempts: job.attempts,
     error: job.status === "failed" || job.status === "dead" ? (job.lastError ?? "Bilinmeyen hata") : null,
+    // Sonuç kaydı oluşturan işler (ör. generate_action) kimliği adım durumuna yazar.
+    resultId: ((job.cursor as { step?: { actionId?: string } } | null)?.step?.actionId) ?? null,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
   };

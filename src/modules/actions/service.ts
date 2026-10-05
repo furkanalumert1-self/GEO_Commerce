@@ -2,11 +2,11 @@ import type { PrismaClient } from "@/generated/prisma/client";
 import { AppError, notFound } from "@/lib/http/errors";
 import { hasFeature } from "@/modules/billing/plans";
 import { commit, ensureBucket, periodKey, release, reserve } from "@/modules/billing/quota";
-import type { BrandAccess } from "@/modules/tenancy/access";
+import type { BrandAccess, Principal } from "@/modules/tenancy/access";
 import { assertCan, assertCanRunPaidJob } from "@/modules/tenancy/access";
 import { crawlProxyFor, safeFetch } from "@/lib/http/safe-fetch";
 import { generateDraft, generationStatus, inStockFirst, type GenerationInput } from "./generator";
-import { executionMode } from "@/lib/queue";
+import { enqueue, executionMode } from "@/lib/queue";
 import { blockingIssues, canTransitionAction, checkApprovalHash, versionHash, type ActionContent, type ActionStatus, type ActionType } from "./workflow";
 import { minimumPlanFor } from "@/modules/billing/plans";
 import { fixturesAllowed } from "@/lib/demo";
@@ -61,11 +61,12 @@ export async function suggestTargetUrl(db: PrismaClient, brandId: string, label:
   return null;
 }
 
-export async function createActionDraft(db: PrismaClient, access: BrandAccess, input: { opportunityId: string; type: ActionType; targetUrl?: string | null; operationId: string; userId: string | null }) {
+/** Taslak üretiminden önceki hızlı kontroller (yetki, paket, fırsat, üretim yapılandırması, ürün verisi). */
+async function assertDraftAllowed(db: PrismaClient, access: BrandAccess, opportunityId: string) {
   assertCan(access, "actions.draft");
   assertFixEnabled(access);
   assertCanRunPaidJob(access);
-  const opp = await db.opportunity.findFirst({ where: { id: input.opportunityId, brandId: access.brandId, workspaceId: access.workspaceId }, include: { cluster: true, evidence: true } });
+  const opp = await db.opportunity.findFirst({ where: { id: opportunityId, brandId: access.brandId, workspaceId: access.workspaceId }, include: { cluster: true, evidence: true } });
   if (!opp) throw notFound("Fırsat");
   // Üretim yapılandırılmamışsa kota ayırmadan önce açık hata (gerçek workspace'te şablon/mock yok).
   if (generationStatus({ demo: fixturesAllowed(access) }) === "not_configured") {
@@ -76,6 +77,39 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
   if (productCount === 0 && !fixturesAllowed(access)) {
     throw new AppError("conflict", "Katalogda ürün yok: önce Katalog › Ürün dosyası içe aktarma ile ürünlerinizi yükleyin veya mağazanızı bağlayın; ürün verisi olmadan taslak hazırlanmaz");
   }
+  return opp;
+}
+
+export interface DraftJobPayload {
+  opportunityId: string;
+  type: ActionType;
+  targetUrl: string | null;
+  principal: Principal;
+}
+
+/**
+ * Fix with AI arka planda: kontroller istek içinde yapılır (hatalar anında görünür), üretim 30–90 sn sürdüğü
+ * için "generate_action" işi olarak kuyruğa alınır. İstemci işi izler; sayfadan ayrılsa da taslak oluşur.
+ * Kota ve fırsat güncellemesi işin içinde (createActionDraft) yapılır; aynı operationId ikinci iş açmaz.
+ */
+export async function startActionDraft(db: PrismaClient, access: BrandAccess, input: { opportunityId: string; type: ActionType; targetUrl?: string | null; operationId: string }) {
+  await assertDraftAllowed(db, access, input.opportunityId);
+  const payload: DraftJobPayload = { opportunityId: input.opportunityId, type: input.type, targetUrl: input.targetUrl ?? null, principal: access.principal };
+  // Tek deneme: başarısız üretim kotayı serbest bırakır, kullanıcı yeniden başlatır (sessiz tekrar maliyeti yok).
+  return enqueue(db, { type: "generate_action", operationId: input.operationId, workspaceId: access.workspaceId, brandId: access.brandId, payload: payload as unknown as Record<string, unknown>, maxAttempts: 1 });
+}
+
+/** Fırsat için sürmekte olan taslak işi (sayfaya geri dönüldüğünde izlemeye devam etmek için). */
+export async function pendingDraftJob(db: PrismaClient, brandId: string, opportunityId: string) {
+  return db.jobRecord.findFirst({
+    where: { brandId, type: "generate_action", status: { in: ["queued", "running"] }, payloadRef: { path: ["opportunityId"], equals: opportunityId }, createdAt: { gt: new Date(Date.now() - 15 * 60_000) } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+}
+
+export async function createActionDraft(db: PrismaClient, access: BrandAccess, input: { opportunityId: string; type: ActionType; targetUrl?: string | null; operationId: string; userId: string | null }) {
+  const opp = await assertDraftAllowed(db, access, input.opportunityId);
   const period = await currentPeriod(db, access.workspaceId);
   await ensureBucket(db, access.workspaceId, "fix_units", period, access.entitlements.fixUnits);
   await reserve(db, { workspaceId: access.workspaceId, metric: "fix_units", period, limit: access.entitlements.fixUnits, amount: 1, operationId: input.operationId });

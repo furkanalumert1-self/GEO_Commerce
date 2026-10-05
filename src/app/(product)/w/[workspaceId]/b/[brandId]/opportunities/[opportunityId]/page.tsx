@@ -5,7 +5,8 @@ import { Alert, Badge, Card, CardHeader, PageHeader } from "@/components/ui";
 import { ActionStatusBadge, ImpactBadge, WorkflowStepper } from "@/components/data/growth";
 import { impactLevel, plainTr, workflowView } from "@/lib/view-models";
 import { actionsNeedingFix } from "@/modules/actions/readiness";
-import { ApiButton } from "@/components/forms/api-button";
+import { DraftJobButton } from "@/components/forms/draft-job-button";
+import { pendingDraftJob } from "@/modules/actions/service";
 import { OpportunityControls } from "@/components/forms/opportunity-controls";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
@@ -47,17 +48,17 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
   const needsFix = await actionsNeedingFix(db, o.actions);
+  const pendingJob = fixAllowed ? await pendingDraftJob(db, brandId, o.id) : null;
   const flow = workflowView(latest?.status, { manualPublish: Boolean((latest?.measurement as { manualPublish?: boolean } | null)?.manualPublish), needsFix: latest ? needsFix.has(latest.id) : false });
   const activeAction = latest && !["completed", "rejected", "rolled_back"].includes(latest.status) ? latest : null;
   const fixButton = fixAllowed ? (
-    <ApiButton
+    <DraftJobButton
       url={`${api}/actions`}
       body={{ opportunityId: o.id, type: o.gapType === "structured_data" ? "schema" : o.gapType === "citation_gap" ? "citation_task" : o.gapType === "missing_comparison" ? "comparison" : "content", targetURL: o.targetUrl }}
-      idempotent
       variant={activeAction || productCount === 0 ? "secondary" : "primary"}
       label={activeAction ? "AI ile iyileştir: yeni taslak" : "AI ile iyileştir: taslak hazırla"}
-      pendingLabel="Taslak hazırlanıyor… (genelde 30–90 sn)"
-      redirectTo={`${base}/actions/{id}`}
+      actionBase={`${base}/actions/`}
+      pendingJobId={pendingJob?.id ?? null}
       disabled={productCount === 0}
       disabledReason="Önce ürün bilgilerinizi tamamlayın; ürün verisi olmadan taslak hazırlanmaz"
     />

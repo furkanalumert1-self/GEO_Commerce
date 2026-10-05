@@ -17,6 +17,8 @@ import { runRetention } from "./retention";
 import { syncIntegration } from "@/modules/commerce/connect";
 import { ShopifyAuthError } from "@/adapters/commerce/shopify";
 import { fixturesAllowed, isDemoDomain } from "@/lib/demo";
+import { createActionDraft, type DraftJobPayload } from "@/modules/actions/service";
+import { resolveBrandAccess } from "@/modules/tenancy/access";
 
 /**
  * Job handler'ları. Yürütmeden önce tenant, abonelik ve (varsa) onay yeniden kontrol edilir:
@@ -131,6 +133,16 @@ export const handlers: Record<string, (ctx: JobContext) => Promise<HandlerResult
       if (ctx.deadline !== undefined && Date.now() > ctx.deadline) return "continue";
     }
     if (ctx.job.workspaceId && ctx.job.brandId) await generateOpportunities(ctx.db, ctx.job.workspaceId, ctx.job.brandId);
+  },
+
+  /** Fix with AI taslağı: erişim işi başlatan kişi adına yeniden çözülür; sonuç (actionId) iş kaydına yazılır. */
+  async generate_action(ctx) {
+    if ((ctx.step as { actionId?: string } | undefined)?.actionId) return "done";
+    await assertTenantActive(ctx, true);
+    const p = ctx.job.payloadRef as DraftJobPayload;
+    const access = await resolveBrandAccess(ctx.db, p.principal, ctx.job.workspaceId!, ctx.job.brandId!);
+    const action = await createActionDraft(ctx.db, access, { opportunityId: p.opportunityId, type: p.type, targetUrl: p.targetUrl, operationId: ctx.job.operationId, userId: p.principal.userId });
+    await ctx.saveStep?.({ actionId: action.id });
   },
 
   async generate_opportunities(ctx) {

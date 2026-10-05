@@ -43,8 +43,10 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
   const groups: FlowGroup[] = plan.adGroups.map((g) => {
     const cat = norm(g.category ?? g.label);
     const catPage = categories.find((c) => norm(c.name) === cat);
-    const word = cat.split(/\s+/).filter((w) => w.length > 3).pop();
-    const matched = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (word ? norm(p.name).includes(word.slice(0, Math.max(4, word.length - 2))) : false));
+    // Ad eşleşmesi grup adının tüm kelimelerini ister ("tek kişilik nevresim" grubuna "çift kişilik" ürün girmez);
+    // kelime kökü için son iki harf esnek ("takımı" ~ "takım").
+    const words = cat.split(/\s+/).filter((w) => w.length >= 3).map((w) => w.slice(0, Math.max(3, w.length - 2)));
+    const matched = products.filter((p) => p.categories.some((c) => norm(c.category.name) === cat) || (words.length > 0 && words.every((w) => norm(p.name).includes(w))));
     const prods = matched.slice(0, 3);
     // Hedef sayfalar yalnız gerçek kayıtlardan (kategori/ürün); uydurma URL yok. Ana sayfa varsayılan seçili değil.
     const targets: FlowGroup["targets"] = [

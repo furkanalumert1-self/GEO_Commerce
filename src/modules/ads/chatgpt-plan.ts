@@ -32,6 +32,8 @@ export interface PlanStep { key: string; title: string; status: "done" | "todo" 
 
 const lower = (s: string) => s.toLocaleLowerCase("tr-TR");
 const fit = (s: string, max: number) => ([...s].length <= max ? s : `${[...s].slice(0, max - 1).join("").replace(/\s+\S*$/, "")}…`);
+/** Sınıra sığan ilk aday (kesik "…" metin reklamda kötü görünür); hiçbiri sığmazsa son aday kısaltılır. */
+const firstFit = (cands: string[], max: number) => cands.find((c) => [...c].length <= max) ?? fit(cands[cands.length - 1]!, max);
 
 /** Kural tabanlı metin önerileri (sınırlar içinde, kanıtsız iddia içermez). Kullanıcı düzenler. */
 export function copySuggestions(brand: string, category: string, usps: string[] = []): Array<{ title: string; body: string }> {
@@ -231,29 +233,35 @@ export function adDrafts(input: { brand: string; label: string; products: string
   if (sets.length) facts.push(`Set ürünü: ${sets.length} ürün`);
   if (names.length) facts.push(`Örnek ürünler: ${names.slice(0, 3).join("; ")}`);
   const capFirst = (s: string) => s.charAt(0).toLocaleUpperCase("tr-TR") + s.slice(1);
-  const f = (d: Omit<AdDraft, "title" | "body"> & { title: string; body: string }): AdDraft => ({ ...d, title: fit(d.title, CHATGPT_ADS_SPEC.title.max), body: fit(d.body, CHATGPT_ADS_SPEC.body.max) });
+  // Uzun grup adında kısa ad: son iki kelime ("Tek Kişilik Nevresim Takımı" → "Nevresim Takımı").
+  const shortL = [...L].length > 20 ? L.split(/\s+/).slice(-2).join(" ") : L;
+  const capShort = capFirst(shortL);
+  const lowerShort = lower(shortL);
+  const T = CHATGPT_ADS_SPEC.title.max;
+  const Bm = CHATGPT_ADS_SPEC.body.max;
+  const f = (d: Omit<AdDraft, "title" | "body"> & { title: string[]; body: string[] }): AdDraft => ({ ...d, title: firstFit(d.title, T), body: firstFit(d.body, Bm) });
   const drafts: AdDraft[] = [
     f({
       key: "discover",
       angle: "Ürün keşfi",
-      title: `${input.brand} ${capL}`,
-      body: `${capFirst(typePair ?? lowerL)} seçeneklerini keşfedin; size uygun modeli seçin.`,
+      title: [`${input.brand} ${capL}`, capL, `${input.brand} ${capShort}`],
+      body: [`${capFirst(typePair ?? lowerL)} seçeneklerini keşfedin; size uygun modeli seçin.`, `${capFirst(typePair ?? lowerShort)} seçeneklerini keşfedin.`],
       cta: "Ürünleri incele",
       facts,
     }),
     f({
       key: "need",
       angle: "Kullanım ihtiyacı",
-      title: `${capL}: ihtiyacınıza göre seçin`,
+      title: [`${capL}: ihtiyacınıza göre seçin`, `${capL}: size uygun model`, `${capShort}: ihtiyacınıza göre seçin`, `${capShort}: size uygun model`],
       body: materials.length
-        ? `${capFirst(materials.join(" ve "))} seçenekleri arasından kullanımınıza uygun ${lowerL} modelini bulun${sized ? "; ölçüleri karşılaştırın" : ""}.`
-        : `Kullanım alanınıza${sized ? " ve ölçüye" : ""} göre ${lowerL} modellerini inceleyin; size uygun olanı seçin.`,
+        ? [`${capFirst(materials.join(" ve "))} seçenekleri arasından kullanımınıza uygun ${lowerL} modelini bulun${sized ? "; ölçüleri karşılaştırın" : ""}.`, `${capFirst(materials.join(" ve "))} seçenekleri arasından size uygun ${lowerShort} modelini bulun.`]
+        : [`Kullanım alanınıza${sized ? " ve ölçüye" : ""} göre ${lowerL} modellerini inceleyin; size uygun olanı seçin.`, `Kullanımınıza göre ${lowerShort} modellerini inceleyin; size uygun olanı seçin.`],
       cta: "Modelleri karşılaştır",
       facts,
     }),
     sets.length
-      ? f({ key: "gift", angle: "Hediye", title: `Hediyelik ${lowerL} setleri`, body: `${input.brand} ${lowerL} setlerini inceleyin; sevdiklerinize uygun seti seçin.`, cta: "Setleri gör", facts })
-      : f({ key: "compare", angle: "Karşılaştırma", title: `${capL} modellerini karşılaştırın`, body: `${input.brand} ${lowerL} modellerini yan yana görün; özelliklere göre size uygun olanı seçin.`, cta: "Karşılaştır", facts }),
+      ? f({ key: "gift", angle: "Hediye", title: [`Hediyelik ${lowerL} setleri`, `Hediyelik ${lowerShort} setleri`], body: [`${input.brand} ${lowerL} setlerini inceleyin; sevdiklerinize uygun seti seçin.`, `${capFirst(lowerShort)} setlerini inceleyin; sevdiklerinize uygun seti seçin.`], cta: "Setleri gör", facts })
+      : f({ key: "compare", angle: "Karşılaştırma", title: [`${capL} modellerini karşılaştırın`, `${capShort} modellerini karşılaştırın`, `${capShort}: karşılaştırın`], body: [`${input.brand} ${lowerL} modellerini yan yana görün; özelliklere göre size uygun olanı seçin.`, `${capFirst(lowerL)} modellerini yan yana görün; size uygun olanı seçin.`, `${capFirst(lowerShort)} modellerini yan yana görün; size uygun olanı seçin.`], cta: "Karşılaştır", facts }),
   ];
   return drafts;
 }

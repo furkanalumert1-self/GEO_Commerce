@@ -54,7 +54,9 @@ export function ApiButton({
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(`${json?.error?.message ?? "İşlem başarısız"}${json?.requestId ? ` · istek no: ${json.requestId}` : ""}`);
+        // Sunucu/ağ zaman aşımında gövde JSON olmaz: teknik kod yerine ne yapılacağı söylenir.
+        const fallback = !json || res.status >= 500 ? "Sunucu zamanında yanıt vermedi. Biraz sonra tekrar deneyin; işlem tamamlandıysa sayfayı yenileyince görünür." : "İşlem tamamlanamadı";
+        setError(`${json?.error?.message ?? fallback}${json?.requestId ? ` · istek no: ${json.requestId}` : ""}`);
         return;
       }
       if (redirectTo) {

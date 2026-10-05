@@ -52,7 +52,25 @@ export function LoginForm({ providers, next }: { providers: { email: boolean; go
           Gerçek hesap girişi henüz yapılandırılmadı (e-posta bağlantısı için RESEND_API_KEY veya SMTP_URL, ya da Google OAuth gerekli). Aşağıdaki demo hesapları yalnız örnek veri içerir.
         </div>
       ) : null}
-      {providers.demo ? (
+      {providers.demo && (providers.email || providers.google) ? (
+        // Gerçek giriş varken örnek hesaplar tek bir ikincil seçenektir (rol listesi açılır bölümde).
+        <div className="border-t border-border pt-4">
+          <Button className="w-full" onClick={() => signIn("demo", { email: DEMO_USERS[0]![0], callbackUrl: next })}>Hesap açmadan örnek hesapla gezin</Button>
+          <p className="mt-1 text-xs text-text-secondary">Örnek veri içerir; gerçek mağazanız bağlanmaz.</p>
+          <details className="mt-2 text-xs">
+            <summary className="cursor-pointer text-text-secondary">Diğer örnek roller</summary>
+            <ul className="mt-2 flex flex-col gap-2">
+              {DEMO_USERS.slice(1).map(([e, label]) => (
+                <li key={e}>
+                  <Button size="sm" className="w-full justify-between" onClick={() => signIn("demo", { email: e, callbackUrl: next })}>
+                    <span>{label}</span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : providers.demo ? (
         <div className="border-t border-border pt-4">
           <p className="text-sm font-medium">Demo hesapları — yalnız örnek veri</p>
           <p className="mt-0.5 text-xs text-text-secondary">Ayrı, “Örnek veri” etiketli demo çalışma alanlarını açar. Gerçek mağaza bağlanamaz, gerçek alan adı kaydedilemez ve gerçek hesap kimliği sağlamaz.</p>

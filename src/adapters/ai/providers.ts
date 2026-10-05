@@ -191,18 +191,29 @@ export function perplexityAdapter(cfg: AppConfig): AiMonitorAdapter {
     status: () => "ready",
     statusReason: () => null,
     async ask(input): Promise<AiAnswer> {
+      // Perplexity Agent API (Sonar /chat/completions kapatıldı). Eski "sonar*" model adı hazır ayara (preset) çevrilir;
+      // "fast|low|medium|high|xhigh" hazır ayar, diğer değerler model kimliği olarak gönderilir.
+      const preset = /^sonar/i.test(model) ? "low" : /^(fast|low|medium|high|xhigh)$/i.test(model) ? model.toLowerCase() : null;
       const { json, latencyMs } = await postJson(
-        "https://api.perplexity.ai/chat/completions",
-        { model, messages: [{ role: "system", content: systemInstruction(input) }, { role: "user", content: input.prompt }] },
+        "https://api.perplexity.ai/v1/agent",
+        { ...(preset ? { preset } : { model }), input: `${systemInstruction(input)}\n\n${input.prompt}` },
         { authorization: `Bearer ${cfg.PERPLEXITY_API_KEY}` },
         input.signal,
       );
-      const choice = ((json.choices as Array<Record<string, unknown>>) ?? [])[0];
-      const text = String((choice?.message as Record<string, unknown>)?.content ?? "");
+      const output = (json.output as Array<Record<string, unknown>>) ?? [];
+      const text = output
+        .filter((o) => o.type === "message")
+        .flatMap((o) => (o.content as Array<Record<string, unknown>>) ?? [])
+        .filter((c) => c.type === "output_text")
+        .map((c) => String(c.text ?? ""))
+        .join("");
       const urls = [
-        ...(((json.citations as unknown[]) ?? []).filter((u): u is string => typeof u === "string")),
-        ...(((json.search_results as Array<Record<string, unknown>>) ?? []).map((r) => r.url).filter((u): u is string => typeof u === "string")),
-      ];
+        ...output.filter((o) => o.type === "search_results").flatMap((o) => ((o.results as Array<Record<string, unknown>>) ?? []).map((r) => r.url)),
+        ...output
+          .filter((o) => o.type === "message")
+          .flatMap((o) => (o.content as Array<Record<string, unknown>>) ?? [])
+          .flatMap((c) => ((c.annotations as Array<Record<string, unknown>>) ?? []).map((a) => a.url)),
+      ].filter((u, i, all): u is string => typeof u === "string" && all.indexOf(u) === i);
       if (!text) throw new ProviderError("Yanıt ayrıştırılamadı", false, undefined, "parse_failed");
       return { provider: "perplexity", engine: "perplexity", model: String(json.model ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
     },

@@ -6,7 +6,8 @@ import { assertOpportunityUnlocked } from "@/modules/opportunities/access";
 import { ACTION_TYPES } from "@/modules/actions/workflow";
 
 /** Fix with AI taslak üretimi istek içinde çalışır; üretim zaman aşımı (inline: 50 sn) bu sınırın altında. */
-export const maxDuration = 60;
+// AI taslak üretimi 30–90 sn sürebilir; üretim zaman aşımı (150 sn) bu sınırın altında kalır.
+export const maxDuration = 180;
 
 const body = z.object({ opportunityId: z.string().uuid(), type: z.enum(ACTION_TYPES), targetURL: z.string().url().max(500).nullable().optional() });
 

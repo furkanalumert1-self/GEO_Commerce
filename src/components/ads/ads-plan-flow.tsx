@@ -52,7 +52,9 @@ export function AdsPlanFlow({ groups, brandName, domain, days, initialGroup, cat
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [edited, setEdited] = useState(false);
-  const [target, setTarget] = useState("");
+  // Hedef sayfa varsayılanı: kategori sayfası, yoksa ilk ürün (ana sayfa varsayılan değildir).
+  const defaultTarget = (g: FlowGroup | null) => (g?.targets.find((t) => t.kind === "category") ?? g?.targets.find((t) => t.kind === "product"))?.url ?? "";
+  const [target, setTarget] = useState(() => defaultTarget(initial));
   const [custom, setCustom] = useState("");
   const [copied, setCopied] = useState<"copy" | "csv" | null>(null);
   const url = target === "__custom" ? custom.trim() : target;
@@ -78,7 +80,7 @@ export function AdsPlanFlow({ groups, brandName, domain, days, initialGroup, cat
   const chooseGroup = (k: string) => {
     const g = groups.find((x) => x.clusterId === k) ?? null;
     setKey(k);
-    setTarget("");
+    setTarget(defaultTarget(g));
     setCustom("");
     reset(g, modeFor(g));
   };
@@ -183,7 +185,7 @@ export function AdsPlanFlow({ groups, brandName, domain, days, initialGroup, cat
                           <input type="checkbox" className="mt-1 h-4 w-4 flex-none accent-[var(--color-primary)]" checked={chosen.has(p.text)} onChange={() => { setChosen((c) => { const n = new Set(c); if (n.has(p.text)) n.delete(p.text); else n.add(p.text); return n; }); setCopied(null); }} />
                           <span className="min-w-0 flex-1">
                             <span className="[overflow-wrap:anywhere]">{p.text}</span>
-                            <span className="block text-xs text-text-secondary">{p.answers} yanıt · markanız {p.brand}&apos;inde anıldı{p.lost ? ` · rakipler ${p.lost} yanıtta öne çıktı` : ""}{info ? " · bilgi sorusu" : ""}</span>
+                            <span className="block text-xs text-text-secondary">{p.answers} yanıt · {p.brand ? `markanız ${p.brand} yanıtta anıldı` : "markanız anılmadı"}{p.lost ? ` · rakipler ${p.lost} yanıtta öne çıktı` : ""}{info ? " · bilgi sorusu" : ""}</span>
                           </span>
                         </label>
                       );

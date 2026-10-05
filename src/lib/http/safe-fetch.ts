@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
+import { gunzipSync } from "node:zlib";
 import type { Socket } from "node:net";
 import { AppError } from "./errors";
 
@@ -212,6 +213,21 @@ export function crawlProxyFor(country: string | null | undefined): string | unde
   }
 }
 
+/**
+ * Gövde metni. Sıkıştırılmış dosya (ör. sitemap.xml.gz; content-encoding olmadan gzip baytları) açılır; açılmış
+ * boyut 15 MB ile sınırlıdır. Kesilmiş gzip açılamaz, olduğu gibi döner.
+ */
+export function decodeBody(buf: Buffer, truncated: boolean): string {
+  if (!truncated && buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    try {
+      return gunzipSync(buf, { maxOutputLength: 15_000_000 }).toString("utf8");
+    } catch {
+      /* geçersiz/çok büyük gzip */
+    }
+  }
+  return buf.toString("utf8");
+}
+
 export const BOT_USER_AGENT = "Mozilla/5.0 (compatible; CallypsoBot/1.0; +https://geocommerce-two.vercel.app)";
 
 /**
@@ -263,7 +279,7 @@ function pinnedRequest(
           resolve({
             status: res.statusCode ?? 0,
             headers: Object.fromEntries(Object.entries(res.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")])),
-            body: Buffer.concat(chunks).toString("utf8"),
+            body: decodeBody(Buffer.concat(chunks), truncated),
             truncated,
           });
         res.on("end", done);

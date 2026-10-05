@@ -16,6 +16,8 @@ export interface ProductFacts {
   source?: "schema" | "meta";
   /** Ürünün markası (schema `brand` veya `product:brand`); yoksa null. */
   brand?: string | null;
+  /** ProductGroup/isVariantOf varyant grubu anahtarı (aynı ürünün renk/beden varyantları). */
+  group?: string | null;
 }
 
 export interface PageFacts {
@@ -86,12 +88,17 @@ export function visibleText(html: string): string {
 
 const HOME_CRUMB = /^(ana ?sayfa|home|homepage|başlangıç)$/i;
 
-function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[], baseUrl: string, crumbs: string[] = []) {
-  if (Array.isArray(node)) return node.forEach((n) => collectTypes(n, out, products, baseUrl, crumbs));
+function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[], baseUrl: string, crumbs: string[] = [], group: string | null = null) {
+  if (Array.isArray(node)) return node.forEach((n) => collectTypes(n, out, products, baseUrl, crumbs, group));
   if (!node || typeof node !== "object") return;
   const o = node as Record<string, unknown>;
   const t = o["@type"];
   const types = Array.isArray(t) ? t : t ? [t] : [];
+  // Varyantlı ürün (ProductGroup → hasVariant, veya Product.isVariantOf): varyantlar aynı ürünün renk/beden
+  // seçenekleridir; sayfa liste sayılmaz.
+  const variantOf = o.isVariantOf as Record<string, unknown> | undefined;
+  const groupKey = (v: Record<string, unknown>) => String(v.productGroupID ?? v["@id"] ?? v.name ?? "grup");
+  const groupHere = types.includes("ProductGroup") ? groupKey(o) : variantOf && typeof variantOf === "object" ? groupKey(variantOf) : group;
   for (const x of types) if (typeof x === "string") out.add(x);
   if (types.includes("BreadcrumbList") && Array.isArray(o.itemListElement) && crumbs.length === 0) {
     const items = (o.itemListElement as Array<Record<string, unknown>>)
@@ -121,6 +128,7 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
       image: typeof img === "string" ? img : str((img as Record<string, unknown> | undefined)?.url),
       url: str(o.url) ?? baseUrl,
       source: "schema",
+      ...(groupHere ? { group: groupHere } : {}),
       brand: (() => {
         const b = Array.isArray(o.brand) ? o.brand[0] : o.brand;
         const name = typeof b === "string" ? b : str((b as Record<string, unknown> | undefined)?.name);
@@ -128,7 +136,38 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
       })(),
     });
   }
-  for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl, crumbs);
+  for (const v of Object.values(o)) if (v && typeof v === "object") collectTypes(v, out, products, baseUrl, crumbs, groupHere);
+}
+
+/**
+ * Aynı varyant grubundaki ürünleri tek ürüne indirir: sayfanın kendi varyantı (adresi veya adı sayfa başlığıyla
+ * eşleşen) seçilir. "… - Gri - Gri" gibi tekrar eden varyant eki temizlenir.
+ */
+export function collapseVariants(products: ProductFacts[], pageUrl: string, h1: string | null): ProductFacts[] {
+  const norm = (u: string | null) => (u ?? "").replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+  const low = (s: string | null) => (s ?? "").toLocaleLowerCase("tr-TR").replace(/\s+/g, " ").trim();
+  const byGroup = new Map<string, ProductFacts[]>();
+  for (const p of products) if (p.group) byGroup.set(p.group, [...(byGroup.get(p.group) ?? []), p]);
+  if (!byGroup.size) return products;
+  const chosen = new Map<string, ProductFacts>();
+  for (const [g, list] of byGroup) {
+    // Önce başlıkla eşleşen varyant (tüm varyantlar aynı sayfa adresini taşıyabilir), sonra adres, sonra fiyatlı ilk.
+    const byName = h1 ? list.filter((p) => { const n = low(p.name?.replace(/( - [^-]+?)\1$/u, "$1") ?? ""); return n === low(h1) || n.startsWith(low(h1)) || low(h1).startsWith(n); }) : [];
+    const byUrl = list.filter((p) => norm(p.url) === norm(pageUrl));
+    const pick = (byName.length === 1 ? byName[0] : undefined) ?? (byUrl.length === 1 ? byUrl[0] : undefined) ?? byName[0] ?? list.find((p) => p.price) ?? list[0]!;
+    const name = pick.name?.replace(/( - [^-]+?)\1$/u, "$1") ?? pick.name;
+    chosen.set(g, { ...pick, name: h1 && low(name).startsWith(low(h1)) ? h1 : name, url: pageUrl });
+  }
+  const out: ProductFacts[] = [];
+  const seen = new Set<string>();
+  for (const p of products) {
+    if (!p.group) out.push(p);
+    else if (!seen.has(p.group)) {
+      seen.add(p.group);
+      out.push(chosen.get(p.group)!);
+    }
+  }
+  return out;
 }
 
 const TRACKER_PATTERNS: Array<[RegExp, string]> = [
@@ -239,9 +278,20 @@ export function extractPage(html: string, url: string): PageFacts {
   const products: ProductFacts[] = [];
   const breadcrumbs: string[] = [];
   collectTypes(jsonLd, types, products, url, breadcrumbs);
+  const grouped = collapseVariants(products, url, h1M ? visibleText(h1M[1]!) || null : null);
+  products.splice(0, products.length, ...grouped);
   // Microdata (itemtype="https://schema.org/X"): tip listesi ve JSON-LD yoksa breadcrumb adları.
   for (const m of html.matchAll(/itemtype\s*=\s*["']https?:\/\/schema\.org\/([A-Za-z]+)["']/gi)) types.add(m[1]!);
   if (!breadcrumbs.length) breadcrumbs.push(...microdataBreadcrumbs(html));
+  // Tek ürünlü sayfada şema kategorisi yoksa breadcrumb'daki son kategori (ürün adının kendisi hariç) kullanılır;
+  // gruplama ve reklam taslakları için doğrulanmış kategori kaynağıdır.
+  if (products.length === 1 && !products[0]!.category && breadcrumbs.length) {
+    const nm = (products[0]!.name ?? "").toLocaleLowerCase("tr-TR");
+    // Ürünün kendi adı olan kırıntı (yazım farkıyla da) ve kategori olamayacak kadar uzun adlar elenir.
+    const key = (x: string) => x.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]/g, "").slice(0, 14);
+    const crumbs = breadcrumbs.filter((c) => c.length <= 40 && !(nm && key(c) === key(nm)));
+    if (crumbs.length) products[0] = { ...products[0]!, category: crumbs[crumbs.length - 1]! };
+  }
   if (!products.length) {
     const meta = metaProduct(html, url, h1M ? visibleText(h1M[1]!) || null : null);
     if (meta) products.push(meta);

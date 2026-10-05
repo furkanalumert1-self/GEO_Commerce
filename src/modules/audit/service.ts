@@ -22,7 +22,7 @@ import { isCompetitorCandidate } from "./competitor-filter";
 import { seedPrompts } from "@/modules/prompts/seed";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
-import { buildQuestionSet, detectBusiness, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
+import { buildQuestionSet, detectBusiness, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -336,7 +336,7 @@ export async function runAudit(
     const brandForQuestions = siteBrandName(crawl.pages, crawl.domain);
     const lang = (audit.locale.split("-")[0] ?? "tr").toLowerCase();
     // Kanıtlı ürün grupları (alan → grup → alt tür); yoksa doğrulanmış konu adları.
-    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : productGroups(crawl.pages, lang).slice(0, 2);
+    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(productGroups(crawl.pages, lang), 2);
     const topics = groups.length ? groups.map((g) => g.label) : topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), lang);
     const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions, groups, gift: hasGiftSection(crawl.pages) });
     work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };

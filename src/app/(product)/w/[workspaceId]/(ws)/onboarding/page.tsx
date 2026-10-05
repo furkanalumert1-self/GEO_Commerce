@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Badge, Card, CardHeader, PageHeader, cn } from "@/components/ui";
+import { Alert, Badge, Card, CardHeader, PageHeader, cn } from "@/components/ui";
 import { BrandCreateForm } from "@/components/forms/brand-create";
 import { BrandSettingsStep } from "@/components/forms/brand-settings-step";
 import { DomainVerification } from "@/components/forms/domain-verification";
@@ -59,6 +59,12 @@ export default async function OnboardingPage({ params, searchParams }: { params:
   return (
     <>
       <PageHeader title={`Kurulum · ${access.brand.name}`} description={`Adım ${step} / 7 — ${STEPS[step - 1]}. İlerlemeniz otomatik kaydedilir; kaldığınız yerden devam edebilirsiniz.`} badges={saved.completed ? <Badge tone="success">Tamamlandı</Badge> : null} />
+      {!access.entitlements.canRunPaidJobs ? (
+        <Alert tone="warning" title="Bu çalışma alanında paket veya deneme yok">
+          Raporunuz kaydedildi ve görüntülenebilir. Site incelemesi, yeni ölçüm ve AI ile iyileştir için bir paket seçin (deneme hakkı hesap başına bir kez verilir).{" "}
+          <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/billing`}>Paketleri gör</Link>
+        </Alert>
+      ) : null}
       <ol className="mb-6 flex flex-wrap gap-1 text-xs" aria-label="Kurulum adımları">
         {STEPS.map((s, i) => (
           <li key={s}>

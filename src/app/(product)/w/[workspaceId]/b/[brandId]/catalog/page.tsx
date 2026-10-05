@@ -56,7 +56,7 @@ export default async function CatalogPage({ params, searchParams }: { params: Pr
     activeProducts > 0 || pageTotal === 0 || discovery.candidates.length > 0
       ? null
       : productPageCount === 0
-        ? `${fmtNumber(pageTotal)} sayfa incelendi ancak hiçbiri ürün sayfası olarak tanınmadı. Ürün sayfalarınızda ürün bilgisi işaretlemesi (ad, fiyat, stok) olmayabilir veya ürün sayfaları ilk incelenen sayfalar arasına girmemiş olabilir. Yeni incelemede ürün sayfaları önceliklidir.`
+        ? `Şimdiye kadar incelenen ${fmtNumber(pageTotal)} sayfanın hiçbiri ürün sayfası olarak tanınmadı. Ürün sayfalarınızda ürün bilgisi işaretlemesi (ad, fiyat, stok) olmayabilir veya ürün sayfaları ilk incelenen sayfalar arasına girmemiş olabilir. Yeni incelemede ürün sayfaları önceliklidir.`
         : `${fmtNumber(productPageCount)} ürün sayfası bulundu ancak ürün adı/fiyatı okunamadı (sayfalarda ürün bilgisi işaretlemesi eksik).`;
 
   const tabLink = (t: string, label: string) => (

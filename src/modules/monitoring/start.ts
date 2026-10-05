@@ -30,11 +30,31 @@ export function engineAvailability(access: BrandAccess) {
   };
 }
 
+/** Kalıcı sağlayıcı hataları (anahtar/kota/model): bu kodlarla düşen platform yeniden denense de yanıt vermez. */
+const PERMANENT_ENGINE_ERRORS = ["auth", "insufficient_quota", "http_404", "not_configured", "search_unavailable"];
+
+/**
+ * Son 6 saatte en son yanıtlarının hepsi (en az 3) kalıcı hatayla düşen platformlar (ör. kredisi biten Gemini).
+ * Bu platformlar yeni ölçüme eklenmez; boşa başarısız yanıt ve "kısmen tamamlandı" üretmez. Sağlayıcı düzelince
+ * (yeni başarılı yanıt veya 6 saat) yeniden eklenir. Yalnız durum kodu okunur, içerik okunmaz.
+ */
+export async function recentlyBrokenEngines(db: PrismaClient, engines: EngineKey[], now = Date.now()): Promise<EngineKey[]> {
+  const out: EngineKey[] = [];
+  for (const engine of engines) {
+    const last = await db.observation.findMany({ where: { engine, status: { not: "pending" }, updatedAt: { gte: new Date(now - 6 * 3600_000) } }, orderBy: { updatedAt: "desc" }, take: 3, select: { status: true, errorCode: true } });
+    if (last.length >= 3 && last.every((o) => o.status === "failed" && PERMANENT_ENGINE_ERRORS.includes(o.errorCode ?? ""))) out.push(engine);
+  }
+  return out;
+}
+
 export async function startMonitoringRun(db: PrismaClient, access: BrandAccess, input: StartRunInput) {
   assertCan(access, "runs.start");
   const { allowed } = engineAvailability(access);
-  const engines = input.engines.filter((e) => allowed.includes(e));
-  const rejected = input.engines.filter((e) => !allowed.includes(e));
+  const broken = await recentlyBrokenEngines(db, input.engines.filter((e) => allowed.includes(e)));
+  // Hepsi bozuksa engellenmez (kullanıcı en azından hatayı görür); yoksa bozuk platformlar çıkarılır.
+  const usable = input.engines.filter((e) => allowed.includes(e) && (!broken.includes(e) || input.engines.filter((x) => allowed.includes(x)).every((x) => broken.includes(x))));
+  const engines = usable;
+  const rejected = input.engines.filter((e) => !usable.includes(e));
   if (engines.length === 0) throw new AppError("unsupported", "Seçilen motorlar bağlı değil veya pakete dahil değil", { rejected });
   const prompts = await db.prompt.findMany({
     where: { brandId: access.brandId, workspaceId: access.workspaceId, active: true, archivedAt: null, ...(input.promptIds?.length ? { id: { in: input.promptIds } } : {}) },
@@ -49,7 +69,7 @@ export async function startMonitoringRun(db: PrismaClient, access: BrandAccess, 
   const est = estimate({ promptIds: withVersion.map((p) => p.id), engines, locales: input.locales, repetitions: input.repetitions, runsPerPeriod: 1, availableUnits: available });
   const selected = withVersion.filter((p) => est.selectedPromptIds.includes(p.id));
   const plan: RunPlan = { promptVersionIds: selected.map((p) => p.currentVersionId!), engines, locales: input.locales, repetitions: input.repetitions };
-  const preview = { unitsRequested: est.unitsPerRun, unitsPlanned: unitsFor(plan), available, fits: est.fits, sampledFraction: est.sampledFraction, rejectedEngines: rejected, promptCount: selected.length };
+  const preview = { unitsRequested: est.unitsPerRun, unitsPlanned: unitsFor(plan), available, fits: est.fits, sampledFraction: est.sampledFraction, rejectedEngines: rejected, unavailableEngines: broken.filter((e) => rejected.includes(e)), promptCount: selected.length };
   if (input.previewOnly) return { preview, run: null, jobId: null };
   assertCanRunPaidJob(access);
   assertJobsRunnable();

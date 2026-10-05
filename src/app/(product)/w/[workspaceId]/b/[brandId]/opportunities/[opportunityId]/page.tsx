@@ -56,7 +56,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
       idempotent
       variant={activeAction || productCount === 0 ? "secondary" : "primary"}
       label={activeAction ? "AI ile iyileştir: yeni taslak" : "AI ile iyileştir: taslak hazırla"}
-      pendingLabel="Taslak hazırlanıyor…"
+      pendingLabel="Taslak hazırlanıyor… (genelde 30–90 sn)"
       redirectTo={`${base}/actions/{id}`}
       disabled={productCount === 0}
       disabledReason="Önce ürün bilgilerinizi tamamlayın; ürün verisi olmadan taslak hazırlanmaz"

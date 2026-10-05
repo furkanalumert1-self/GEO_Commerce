@@ -20,7 +20,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
   const usable = engines.filter((e) => (e.status === "ready" || e.status === "demo") && e.inPlan).map((e) => e.engine);
   const [selected, setSelected] = useState<string[]>(usable);
   const [repeats, setRepeats] = useState(1);
-  const [preview, setPreview] = useState<null | { unitsRequested: number; unitsPlanned: number; available: number; fits: boolean; sampledFraction: number; promptCount: number }>(null);
+  const [preview, setPreview] = useState<null | { unitsRequested: number; unitsPlanned: number; available: number; fits: boolean; sampledFraction: number; promptCount: number; unavailableEngines?: string[] }>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [queued, setQueued] = useState<string | null>(null);
@@ -79,7 +79,8 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
           <p className="tabular">
             Planlanan: {preview.unitsPlanned} yanıt (istenen {preview.unitsRequested}) · Kalan ölçüm hakkı: {preview.available}
           </p>
-          <p className="tabular mt-1 text-text-secondary">{preview.promptCount} soru × {selected.length} platform × {repeats} tekrar · her yanıt 1 ölçüm hakkı kullanır</p>
+          <p className="tabular mt-1 text-text-secondary">{preview.promptCount} soru × {selected.length - (preview.unavailableEngines?.length ?? 0)} platform × {repeats} tekrar · her yanıt 1 ölçüm hakkı kullanır</p>
+          {preview.unavailableEngines?.length ? <p className="mt-1 text-text-secondary">Bu ölçümde atlanacak (son saatlerde yanıt vermedi; hakkınız kullanılmaz): {preview.unavailableEngines.map((e) => ({ chatgpt: "ChatGPT", gemini: "Gemini", claude: "Claude", perplexity: "Perplexity" })[e] ?? e).join(", ")}</p> : null}
           {!preview.fits ? <p className="mt-1 text-warning">Kota yetmediği için {preview.promptCount} soru ölçülecek (%{Math.round(preview.sampledFraction * 100)}); kalanlar sonraki turlarda döndürülür.</p> : null}
         </div>
       ) : null}

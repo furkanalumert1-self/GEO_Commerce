@@ -165,16 +165,42 @@ export function toMarkdown(c: ActionContent): string {
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
+/** Satır içi markdown → HTML (önce kaçış): **kalın**, *italik*, [metin](https://adres). Yalnız http(s) bağlantı. */
+function inlineMd(s: string): string {
+  return escapeHtml(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*(?!\s)(.+?)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, t: string, u: string) => `<a href="${u}">${t}</a>`);
+}
+
+/** Blok markdown → HTML: paragraflar, "- " / "1. " listeleri ve ### alt başlıklar. */
+function blockMd(md: string): string[] {
+  const out: string[] = [];
+  for (const para of md.split(/\n{2,}/)) {
+    const lines = para.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.every((l) => /^[-*]\s+/.test(l))) out.push(`<ul>${lines.map((l) => `<li>${inlineMd(l.replace(/^[-*]\s+/, ""))}</li>`).join("")}</ul>`);
+    else if (lines.every((l) => /^\d+[.)]\s+/.test(l))) out.push(`<ol>${lines.map((l) => `<li>${inlineMd(l.replace(/^\d+[.)]\s+/, ""))}</li>`).join("")}</ol>`);
+    else if (/^#{1,6}\s+/.test(lines[0]!) && lines.length === 1) out.push(`<h4>${inlineMd(lines[0]!.replace(/^#{1,6}\s+/, ""))}</h4>`);
+    else out.push(`<p>${lines.map(inlineMd).join("<br>")}</p>`);
+  }
+  return out;
+}
+
+/**
+ * Sitenize yapıştırılacak içerik bloğu. Mevcut sayfanın ana başlığıyla (h1) çakışmaması için başlık h2'dir;
+ * markdown biçimleri HTML'e çevrilir (ham ** veya # görünmez).
+ */
 export function toHtml(c: ActionContent): string {
   const parts: string[] = [];
-  if (c.title) parts.push(`<h1>${escapeHtml(c.title)}</h1>`);
+  if (c.title) parts.push(`<h2>${escapeHtml(c.title)}</h2>`);
   for (const b of c.bodyBlocks) {
-    if (b.heading) parts.push(`<h2>${escapeHtml(b.heading)}</h2>`);
-    for (const para of b.markdown.split(/\n{2,}/)) parts.push(`<p>${escapeHtml(para)}</p>`);
+    if (b.heading) parts.push(`<h3>${escapeHtml(b.heading)}</h3>`);
+    parts.push(...blockMd(b.markdown));
   }
   if (c.faq.length) {
-    parts.push("<h2>SSS</h2>");
-    for (const f of c.faq) parts.push(`<h3>${escapeHtml(f.q)}</h3><p>${escapeHtml(f.a)}</p>`);
+    parts.push("<h3>Sık sorulan sorular</h3>");
+    for (const f of c.faq) parts.push(`<h4>${escapeHtml(f.q)}</h4><p>${inlineMd(f.a)}</p>`);
   }
   if (c.jsonLd) {
     // "</" kaçışı script injection'ı önler.

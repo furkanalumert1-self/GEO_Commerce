@@ -25,6 +25,25 @@ async function currentPeriod(db: PrismaClient, workspaceId: string) {
   return periodKey(sub?.currentPeriodStart ?? new Date(new Date().toISOString().slice(0, 7) + "-01T00:00:00Z"));
 }
 
+const slugTr = (s: string) => s.toLocaleLowerCase("tr-TR").replace(/ç/g, "c").replace(/ğ/g, "g").replace(/ı/g, "i").replace(/ö/g, "o").replace(/ş/g, "s").replace(/ü/g, "u").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+/**
+ * Soru kümesi için hedef sayfa önerisi (yalnız gerçek kayıtlardan): adı eşleşen kategori kaydı, sonra taranmış
+ * liste sayfalarından adresi veya başlığı konuyla eşleşen sayfa. Bulunamazsa null (uydurma adres yok).
+ */
+export async function suggestTargetUrl(db: PrismaClient, brandId: string, label: string): Promise<string | null> {
+  const name = label.trim();
+  if (name.length < 3) return null;
+  const cat = await db.category.findFirst({ where: { brandId, url: { not: null }, name: { equals: name, mode: "insensitive" } }, select: { url: true } });
+  if (cat?.url) return cat.url;
+  const slug = slugTr(name);
+  const pages = await db.pageSnapshot.findMany({ where: { brandId, pageType: { in: ["category", "other"] }, excluded: false }, orderBy: { sampledAt: "desc" }, select: { url: true, title: true }, take: 500 });
+  const bySlug = pages.filter((p) => { try { return new URL(p.url).pathname.replace(/\/+$/, "").split("/").pop() === slug; } catch { return false; } });
+  if (bySlug[0]) return bySlug[0].url;
+  const low = name.toLocaleLowerCase("tr-TR");
+  return pages.find((p) => (p.title ?? "").toLocaleLowerCase("tr-TR").startsWith(low))?.url ?? null;
+}
+
 export async function createActionDraft(db: PrismaClient, access: BrandAccess, input: { opportunityId: string; type: ActionType; targetUrl?: string | null; operationId: string; userId: string | null }) {
   assertCan(access, "actions.draft");
   assertFixEnabled(access);
@@ -57,13 +76,14 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       brand: { name: access.brand.name, domain: access.brand.domain },
       opportunity: { title: opp.title, recommendedAction: opp.recommendedAction, clusterLabel: opp.cluster.label, gapType: opp.gapType },
       evidence: opp.evidence.map((e) => ({ quote: e.quote, url: e.pageUrl })),
-      targetUrl: input.targetUrl ?? opp.targetUrl,
+      // Hedef sayfa yoksa taramada bulunan, soru kümesine uyan kategori sayfası önerilir (yer tutucu yerine).
+      targetUrl: input.targetUrl ?? opp.targetUrl ?? (await suggestTargetUrl(db, access.brandId, opp.cluster.category ?? opp.cluster.label)),
       // Stokta olmayan ürünler öne çıkarılmaz; yalnız stokta ürün yoksa listede kalır.
       catalog: inStockFirst(catalog.map((p) => ({ name: p.name, url: p.url, priceMinor: p.variants[0]?.priceMinor ?? null, currency: p.variants[0]?.currency ?? null, available: p.variants[0]?.available ?? null }))),
       allowedClaims: [],
     };
-    // Redis'siz (inline) dağıtımda istek süresi sınırına (60 sn) sığmak için daha kısa zaman aşımı.
-    const content = await generateDraft(genInput, { demo: fixturesAllowed(access), timeoutMs: executionMode() === "inline" ? 50_000 : undefined });
+    // Redis'siz (inline) dağıtımda istek süresi sınırına (actions rotası maxDuration 180 sn) sığacak zaman aşımı.
+    const content = await generateDraft(genInput, { demo: fixturesAllowed(access), timeoutMs: executionMode() === "inline" ? 150_000 : undefined });
     const action = await db.$transaction(async (tx) => {
       const a = await tx.action.create({
         data: { workspaceId: access.workspaceId, brandId: access.brandId, opportunityId: opp.id, type: input.type, title: content.title ?? opp.title, targetUrl: genInput.targetUrl, status: "draft", version: 1 },

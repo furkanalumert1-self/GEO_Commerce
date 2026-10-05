@@ -74,3 +74,16 @@ describe("Action workflow", () => {
     expect(lineDiff("a\nb", "a\nc").map((l) => l.type)).toEqual(["same", "removed", "added"]);
   });
 });
+
+describe("HTML dışa aktarma: markdown biçimi", () => {
+  it("kalın/liste/bağlantı HTML olur; ham ** kalmaz; kaçış korunur", () => {
+    const html = toHtml({ title: "Başlık", metaDescription: null, bodyBlocks: [{ heading: "Seçenekler", markdown: "**Alida** ve *Absolon* modelleri.\n\n- Pamuk\n- Ranforce\n\n[İncele](https://m.example/a) <b>x</b>" }], internalLinks: [], faq: [{ q: "Soru?", a: "**Evet**." }], jsonLd: null, sources: [], changeSummary: "", placeholders: [] } as never);
+    expect(html).toContain("<h2>Başlık</h2>");
+    expect(html).toContain("<strong>Alida</strong>");
+    expect(html).toContain("<em>Absolon</em>");
+    expect(html).toContain("<ul><li>Pamuk</li><li>Ranforce</li></ul>");
+    expect(html).toContain('<a href="https://m.example/a">İncele</a>');
+    expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
+    expect(html).not.toContain("**");
+  });
+});

@@ -13,7 +13,8 @@ export const INLINE_NOTE = "Analiz bu sekme açıkken adım adım ilerler. Sekme
 
 /**
  * Redis'siz (inline) modda bir işi sınırlı adımlarla ilerletir: her adım açık bir POST'tur. Aynı anda tek
- * istek; başka sekme ilerletiyorsa ("busy") bekler. Hata sonrası otomatik sonsuz deneme yok: "Yeniden dene".
+ * istek; başka sekme ilerletiyorsa ("busy") bekler. Geçici sunucu/bağlantı hatası (5xx, JSON olmayan yanıt, ağ)
+ * 3 kez artan aralıkla kendiliğinden yeniden denenir; sonra "Yeniden dene" gösterilir (sonsuz deneme yok).
  */
 export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "Analiz" }: { advanceUrl: string; initialStatus: string; onDone?: () => void; label?: string }) {
   const router = useRouter();
@@ -22,6 +23,8 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
   const [error, setError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const inFlight = useRef(false);
+  const retries = useRef(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const terminal = ["succeeded", "partial", "dead", "canceled"].includes(status);
 
@@ -31,11 +34,19 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
     try {
       const res = await fetch(advanceUrl, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       const body = await res.json().catch(() => null);
+      if ((!body || res.status >= 500 || res.status === 429) && retries.current < 3) {
+        retries.current++;
+        setNotice("Bağlantı yavaşladı; kaldığı yerden otomatik devam ediliyor…");
+        await new Promise((r) => setTimeout(r, 5000 * retries.current));
+        return;
+      }
       if (!res.ok) {
         setError(`${body?.error?.message ?? "Adım çalıştırılamadı"}${body?.requestId ? ` · istek no: ${body.requestId}` : ""}`);
         setPaused(true);
         return;
       }
+      retries.current = 0;
+      setNotice(null);
       const data = body.data as StepResponse;
       const job = data.job;
       if (job) {
@@ -53,6 +64,12 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
         onDone?.();
       }
     } catch {
+      if (retries.current < 3) {
+        retries.current++;
+        setNotice("Bağlantı yavaşladı; kaldığı yerden otomatik devam ediliyor…");
+        await new Promise((r) => setTimeout(r, 5000 * retries.current));
+        return;
+      }
       setError("Bağlantı kesildi; ilerleme kaydedildi. Devam etmek için yeniden deneyin.");
       setPaused(true);
     } finally {
@@ -85,6 +102,7 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
         </p>
       ) : null}
       {!terminal ? <p className="text-xs text-text-secondary">{INLINE_NOTE}</p> : null}
+      {notice && !error ? <p className="text-xs text-text-secondary" role="status">{notice}</p> : null}
       {error ? (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-danger">
           <span>{error}</span>
@@ -93,6 +111,7 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
               size="sm"
               onClick={() => {
                 setError(null);
+                retries.current = 0;
                 setPaused(false);
                 setTick((t) => t + 1);
               }}

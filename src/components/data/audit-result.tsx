@@ -236,10 +236,25 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
   const nextSteps: Array<{ title: string; evidence: string }> = [];
   if (discoveryAnswers && discoveryMentioned !== null && discoveryMentioned < discoveryAnswers / 2) {
     const domains = [...new Set((r?.examples ?? []).flatMap((e) => e.competitorDomains))].slice(0, 3);
-    nextSteps.push({ title: discoveryMentioned === 0 ? `AI yanıtlarında ${display} anılmadı` : `${display} yanıtların azında anıldı`, evidence: `${discoveryAnswers} keşif/ihtiyaç yanıtının ${discoveryMentioned}'inde anıldınız${domains.length ? `; kaynak gösterilenler: ${domains.join(", ")}` : ""}. Bu ürün grupları için içerik ve kaynak fırsatlarını hesabınızda inceleyin.` });
+    nextSteps.push({ title: discoveryMentioned === 0 ? `AI yanıtlarında ${display} anılmadı` : `${display} yanıtların azında anıldı`, evidence: `Alışveriş sorularına verilen ${discoveryAnswers} yanıtın ${discoveryMentioned === 0 ? "hiçbirinde" : `yalnız ${discoveryMentioned} tanesinde`} anıldınız${domains.length ? `; bunun yerine gösterilen siteler: ${domains.join(", ")}` : ""}. Hesabınızda bu sorular için içerik önerisi hazırlayabilirsiniz.` });
+  } else if (discoveryAnswers && discoveryMentioned) {
+    // İyi haber de bulgudur: kullanıcı yalnız teknik eksikler görmesin.
+    nextSteps.push({ title: `${display} AI yanıtlarında görünüyor`, evidence: `Alışveriş sorularına verilen ${discoveryAnswers} yanıtın ${discoveryMentioned} tanesinde anıldınız. Bu konumu korumak ve diğer ürün gruplarına yaymak için hesabınızda düzenli ölçüm yapın.` });
   }
-  for (const c of checks.filter((x) => x.status === "fail")) nextSteps.push({ title: checkView(c).label, evidence: c.detail });
-  for (const c of checks.filter((x) => x.status === "not_detected")) nextSteps.push({ title: checkView(c).label, evidence: checkView(c).detail });
+  // Teknik kontroller sade dille ve ne yapılacağıyla; aynı kökten gelen tekrarlar (ürün şeması + fiyat/stok) tek madde.
+  const PLAIN: Record<string, { title: string; evidence: string }> = {
+    product_structured_data: { title: "Ürün sayfalarınızdaki fiyat/stok bilgisi AI'ın okuyacağı biçimde değil", evidence: "AI asistanları ve Google ürün bilgisini sayfadaki ürün işaretlemesinden okur. Mağaza altyapınızda (veya ajansınızdan) ürün sayfaları için “ürün şeması / Product schema” ayarını açtırın." },
+    sitemap: { title: "Site haritası bulunamadı", evidence: "Site haritası, AI ve arama tarayıcılarının tüm sayfalarınızı bulmasını kolaylaştırır. Mağaza altyapınızın ayarlarından site haritasını (sitemap) açın." },
+    policy_pages: { title: "İade/gizlilik sayfası bağlantısı bulunamadı", evidence: "Bu sayfaların bağlantısını sitenizin alt kısmına ekleyin; AI asistanları ve reklam platformları güven için bunlara bakar." },
+    contact_page: { title: "İletişim sayfası bulunamadı", evidence: "Adres/telefon içeren bir iletişim sayfası güven sinyalidir; sitenizin alt kısmına bağlantısını ekleyin." },
+  };
+  const seenPlain = new Set<string>();
+  for (const c of [...checks.filter((x) => x.status === "fail"), ...checks.filter((x) => x.status === "not_detected")]) {
+    const id = c.id === "ads_price_clarity" ? "product_structured_data" : c.id === "ads_policies" ? "policy_pages" : c.id;
+    if (seenPlain.has(id)) continue;
+    seenPlain.add(id);
+    nextSteps.push(PLAIN[id] ?? (c.status === "fail" ? { title: checkView(c).label, evidence: c.detail } : { title: checkView(c).label, evidence: checkView(c).detail }));
+  }
   const groupsText = (r?.groups?.length ? r.groups.map((g) => g.label) : r?.business?.topics ?? []).join(", ");
   const qCount = (r?.questions ?? r?.prompts ?? []).length;
 

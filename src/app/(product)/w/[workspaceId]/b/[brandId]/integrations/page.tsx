@@ -105,7 +105,7 @@ export default async function IntegrationsPage({ params, searchParams }: { param
               {conn && conn.status !== "not_configured" ? (
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                   <dt className="text-text-secondary">Mağaza</dt>
-                  <dd className="min-w-0 break-all">{conn.storeId}</dd>
+                  <dd className="min-w-0 break-all">{conn.provider === "csv_feed" || conn.storeId === "manual" ? "Ürün/sipariş dosyası (elle yükleme)" : conn.storeId}</dd>
                   <dt className="text-text-secondary">Son başarılı senkronizasyon</dt>
                   <dd>{conn.lastSyncAt ? fmtDate(conn.lastSyncAt, tz, "tr-TR", true) : "Henüz yok"}</dd>
                   {conn.scopes.length ? (

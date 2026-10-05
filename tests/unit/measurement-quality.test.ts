@@ -164,7 +164,8 @@ describe("ürün grubu hiyerarşisi ve somut sorular", () => {
       "Havlu seçerken malzeme ve kullanım açısından nelere dikkat etmeliyim?",
     ]);
     const noGift = groupQuestions("retailer", groups, { country: "TR", gift: false });
-    expect(noGift[3]!.text).toBe("Aydınlatma alırken geniş seçenek sunan online mağazalar hangileri?");
+    // Fiyatı bilinen grup için bütçe sorusu (ürün fiyatlarından yuvarlak sınır; uydurma fiyat yok).
+    expect(noGift[3]!.text).toMatch(/^[\d.]+ TL altı iyi bir (havlu|aydınlatma) önerir misin\?$/);
     expect(noGift[1]!.text).toMatch(/online mağazaları karşılaştırabilirim/);
     expect([...qs, ...noGift].some((q) => /^banyo|kaliteli ve güvenilir banyo/i.test(q.text))).toBe(false);
   });

@@ -201,7 +201,7 @@ export function buildQuestionSet(profile: Pick<BusinessProfile, "type" | "offeri
   const place = opts.country === "TR" ? "Türkiye'de " : "";
   const brandKeyG = norm(opts.brandName);
   // Kanıtlı ürün grupları varsa (mağaza/üretici/karma) somut soru seti; menü/oda adıyla genel soru üretilmez.
-  const groups = (opts.groups ?? []).filter((g) => !(brandKeyG.length >= 3 && norm(g.label).includes(brandKeyG))).slice(0, 2);
+  const groups = diverseGroups((opts.groups ?? []).filter((g) => !(brandKeyG.length >= 3 && norm(g.label).includes(brandKeyG))), 2);
   if (groups.length && !["service", "saas", "service_saas"].includes(profile.type)) {
     const seenG = new Set<string>();
     const outG = groupQuestions(profile.type, groups, { country: opts.country, gift: Boolean(opts.gift) }).filter((x) => {
@@ -399,11 +399,13 @@ export interface TopicGroup {
   attributes: string[];
   /** Grup ürünlerinden en az biri set (ör. "Aile Seti"). */
   hasSet: boolean;
+  /** Grup ürünlerinin TL fiyatları (yalnız sayfada TRY fiyatı olanlar); bütçe sorusu için. */
+  prices?: number[];
 }
 
 /** Oda/alan adları tek başına ölçüm grubu olamaz ("Banyo" vitrifiye mi tekstil mi belirsiz). */
 const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım)$/i;
-const MATERIALS = ["%100 pamuk", "pamuk", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "saten", "deri", "yün", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
+const MATERIALS = ["%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
 
 /**
  * Ürün sayfalarının breadcrumb'larından (yoksa ürün kategori yolundan) gruplar: alan = 1. düzey, grup = 2. düzey,
@@ -411,7 +413,7 @@ const MATERIALS = ["%100 pamuk", "pamuk", "bambu", "keten", "porselen", "seramik
  * sayısı (taranan örneklemde), eşitlikte ilk görülme. Hiçbiri yoksa boş döner (uydurma yok).
  */
 export function productGroups(pages: Page[], language: string): TopicGroup[] {
-  const acc = new Map<string, { label: string; area: string | null; first: number; products: string[]; urls: string[]; subtypes: Map<string, number> }>();
+  const acc = new Map<string, { label: string; area: string | null; first: number; products: string[]; urls: string[]; subtypes: Map<string, number>; prices: number[] }>();
   let order = 0;
   for (const p of pages) {
     if (p.pageType !== "product") continue;
@@ -426,14 +428,17 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
     path = path.map((c) => cleanTopic(c, language) ?? "").filter(Boolean);
     if (!path.length) continue;
     let gi = path.length >= 2 ? 1 : 0;
-    while (gi < path.length - 1 && AREA_ONLY.test(path[gi]!)) gi++;
+    while (gi < path.length - 1 && (AREA_ONLY.test(path[gi]!) || AUDIENCE_LABEL.test(path[gi]!))) gi++;
     const label = path[gi]!;
-    if (AREA_ONLY.test(label)) continue;
+    if (AREA_ONLY.test(label) || AUDIENCE_LABEL.test(label)) continue;
     const k = norm(label);
-    const cur = acc.get(k) ?? { label, area: gi > 0 ? path[0]! : null, first: order++, products: [] as string[], urls: [] as string[], subtypes: new Map<string, number>() };
+    const cur = acc.get(k) ?? { label, area: gi > 0 ? path[0]! : null, first: order++, products: [] as string[], urls: [] as string[], subtypes: new Map<string, number>(), prices: [] as number[] };
     if (!cur.products.includes(name)) {
       cur.products.push(name);
       cur.urls.push(p.url);
+      const pf = p.facts.products.find((x) => x.price);
+      const price = Number(pf?.price);
+      if (pf && (pf.currency ?? "TRY").toUpperCase() === "TRY" && Number.isFinite(price) && price > 0) cur.prices.push(price);
     }
     const sub = path[gi + 1];
     if (sub) cur.subtypes.set(sub, (cur.subtypes.get(sub) ?? 0) + 1);
@@ -444,9 +449,10 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
     .sort((a, b) => b.products.length - a.products.length || a.first - b.first)
     .map((g) => {
       const names = g.products.map((n) => lowerTr(n));
-      const attributes = MATERIALS.filter((m) => names.filter((n) => n.includes(m)).length >= 2).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m)));
+      // Ürün adında geçen malzeme/özellik doğrulanmış bilgidir; çok ürünlü grupta en az iki üründe aranır.
+      const attributes = MATERIALS.filter((m) => names.filter((n) => n.includes(m)).length >= Math.min(2, names.length)).filter((m, i, all) => !all.some((o, j) => j < i && o.includes(m)));
       const subtype = [...g.subtypes.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-      return { label: withAudience(g.label, g.area), area: g.area, subtype, products: g.products.slice(0, 5), evidenceUrls: g.urls.slice(0, 3), attributes: attributes.slice(0, 2), hasSet: names.some((n) => /\bset(i)?\b/.test(n)) };
+      return { prices: g.prices, label: withAudience(g.label, g.area), area: g.area, subtype, products: g.products.slice(0, 5), evidenceUrls: g.urls.slice(0, 3), attributes: attributes.slice(0, 2), hasSet: names.some((n) => /\bset(i)?\b/.test(n)) };
     });
 }
 
@@ -456,7 +462,19 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
  */
 export function questionNoun(label: string): string {
   const t = soft(label);
-  if (/\s/.test(t) || t.length < 6) return t;
+  if (/\s/.test(t)) {
+    // Çok kelimeli çoğul tamlama tekile: "yemek takımları" → "yemek takımı", "banyo havluları" → "banyo havlusu".
+    const words = t.split(" ");
+    const last = words[words.length - 1]!;
+    const m = last.match(/^(.{2,}?)l[ae]r[ıiuü]$/u);
+    if (!m) return t;
+    const stem = m[1]!;
+    const v = (stem.match(/[aeıioöuü](?=[^aeıioöuü]*$)/u) ?? ["a"])[0];
+    const poss = v === "a" || v === "ı" ? "ı" : v === "e" || v === "i" ? "i" : v === "o" || v === "u" ? "u" : "ü";
+    words[words.length - 1] = `${stem}${/[aeıioöuü]$/u.test(stem) ? "s" : ""}${poss}`;
+    return words.join(" ");
+  }
+  if (t.length < 6) return t;
   return t.replace(/(lar|ler)$/u, "");
 }
 
@@ -465,6 +483,9 @@ export function questionNoun(label: string): string {
  * kanıt olarak kullanılır: "Anasayfa › Kadın › Kadın Jean" → alan "Kadın", grup "Kadın Jean". Daha derin (daha
  * özgül) yol önce gelir; vitrin etiketleri (Yeni Gelenler, Basics) ve yalnız alan adları elenir.
  */
+/** Yaş/cinsiyet segmenti ürün türü değildir ("Erkek Çocuk (5-14 Yaş)", "Kız Bebek"); bir alt seviyeye inilir. */
+const AUDIENCE_LABEL = /\(\s*\d+\s*[-–]\s*\d+\s*(yaş|ay)\s*\)|^(kız|erkek) (çocuk|bebek)$|^(genç|teen)$/i;
+
 /** Cinsiyet/yaş alanı ("Kadın", "Erkek", "Çocuk") grup adına eklenir: "Kadın › Jeans" → "Kadın Jeans". */
 const AUDIENCE_AREA = /^(kadın|erkek|çocuk|kız çocuk|erkek çocuk|bebek|genç|women|men|kids)$/i;
 function withAudience(label: string, area: string | null): string {
@@ -501,6 +522,43 @@ export function hasGiftSection(pages: Page[]): boolean {
  * 1 somut ihtiyaç (doğrulanmış alt tür/malzeme) + 1 hediye (yalnız hediye bölümü ve set ürünü varsa) veya seçenek
  * sorusu + 1 bilgi. İki grup varsa sorular gruplara dağıtılır.
  */
+/** Soru eki ünlü uyumu: "ranforce mu", "saten mi", "pamuk mu", "gofre mi". */
+function questionParticle(word: string): string {
+  const v = (lowerTr(word).match(/[aeıioöuü](?=[^aeıioöuü]*$)/u) ?? ["e"])[0];
+  return v === "a" || v === "ı" ? "mı" : v === "e" || v === "i" ? "mi" : v === "o" || v === "u" ? "mu" : "mü";
+}
+
+/** Grup fiyatlarından yuvarlak bütçe sınırı (TL): medyanın biraz üstündeki ilk eşik; "1.500 TL altı". */
+export function budgetCap(prices: number[] | undefined): number | null {
+  const ps = (prices ?? []).filter((p) => p > 0).sort((a, b) => a - b);
+  if (ps.length < 2) return null;
+  // Alt medyan: az örnekte en pahalı ürün sınırı belirlemez.
+  const median = ps[Math.floor((ps.length - 1) / 2)]!;
+  const steps = [250, 500, 750, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000, 15000, 20000, 30000, 50000, 75000, 100000];
+  return steps.find((s) => s >= median * 1.05) ?? null;
+}
+
+/**
+ * İki grup aynı ürün ailesindeyse ("Tek Kişilik Nevresim Takımı" / "Çift Kişilik Nevresim Takımı") ikinci grup
+ * farklı bir aileden seçilir; yoksa tek grup kalır (5 soru aynı ürünü iki kez ölçmez).
+ */
+export function diverseGroups(groups: TopicGroup[], n = 2): TopicGroup[] {
+  const head = (g: TopicGroup) => new Set(lowerTr(g.label).split(/\s+/).filter((w) => w.length > 3).slice(-2));
+  const similar = (a: TopicGroup, b: TopicGroup) => {
+    const A = head(a);
+    const B = head(b);
+    const common = [...A].filter((w) => B.has(w)).length;
+    return common > 0 && common >= Math.min(A.size, B.size) / 2;
+  };
+  const out: TopicGroup[] = [];
+  for (const g of groups) {
+    if (out.length >= n) break;
+    if (out.some((o) => similar(o, g))) continue;
+    out.push(g);
+  }
+  return out.length ? out : groups.slice(0, 1);
+}
+
 export function groupQuestions(type: BusinessType, groups: TopicGroup[], opts: { country: string; gift: boolean }): AuditQuestion[] {
   const place = opts.country === "TR" ? "Türkiye'de " : "";
   const g1 = groups[0]!;
@@ -509,25 +567,32 @@ export function groupQuestions(type: BusinessType, groups: TopicGroup[], opts: {
   const L2 = questionNoun(g2.label);
   const q = (text: string, kind: QuestionKind, topic: string): AuditQuestion => ({ text: capTr(text.replace(/\s+/g, " ").trim()), kind, topic });
   const store = type === "retailer" || type === "marketplace";
-  const concrete = [g1.attributes[0], g1.subtype ? soft(g1.subtype) : null].filter(Boolean).join(" ").trim();
-  const needText = concrete ? `${capTr(concrete)} arıyorum; hangi seçenekleri önerirsin?` : `${capTr(L1)} alacağım; hangi seçenekleri değerlendirmeliyim?`;
+  // Somut ihtiyaç: doğrulanmış malzeme/özellik + ürün türü ("%100 pamuk tek kişilik nevresim takımı").
+  // Malzemesi doğrulanmış grup somut ihtiyaç sorusunda kullanılır (ilk grupta yoksa ikinci gruptan).
+  const ga = [g1, g2].find((g) => g.attributes.length) ?? g1;
+  const attr = ga.attributes[0];
+  const kindA = ga.subtype ? soft(ga.subtype) : questionNoun(ga.label);
+  const needText = attr ? `${capTr(attr)} ${kindA} arıyorum; hangi seçenekleri önerirsin?` : `${capTr(L1)} alacağım; hangi seçenekleri değerlendirmeliyim?`;
   // Hediye sorusu yalnız sitede hediye bölümü varsa ve set ürünü olan grup için sorulur.
   const giftGroup = opts.gift ? ([g2, g1].find((g) => g.hasSet) ?? null) : null;
-  const list: AuditQuestion[] = [
+  // Bütçe sorusu: ürün fiyatlarından (TL) yuvarlak sınır; uydurma fiyat yok, fiyat yoksa sorulmaz.
+  const budgetGroup = [g2, g1].find((g) => budgetCap(g.prices)) ?? null;
+  const cap = budgetGroup ? budgetCap(budgetGroup.prices) : null;
+  const fourth = giftGroup
+    ? q(`Hediye olarak ${questionNoun(giftGroup.label)} seti alabileceğim mağazalar hangileri?`, "need", giftGroup.label)
+    : cap && budgetGroup && opts.country === "TR"
+      ? q(`${cap.toLocaleString("tr-TR")} TL altı iyi bir ${questionNoun(budgetGroup.label)} önerir misin?`, "need", budgetGroup.label)
+      : q(store ? `${capTr(L2)} alırken geniş seçenek sunan online mağazalar hangileri?` : `${capTr(L2)} için fiyat/performans açısından hangi markalar öne çıkıyor?`, "need", g2.label);
+  // Bilgi sorusu: iki doğrulanmış malzeme varsa karşılaştırma (satın alma kararına yakın), yoksa seçim kriteri.
+  const [m1, m2] = ga.attributes.filter((a) => !/^%/.test(a));
+  const LA = questionNoun(ga.label);
+  const info = m1 && m2 ? `${capTr(LA)} için ${m1} ${questionParticle(m1)} ${m2} ${questionParticle(m2)} daha iyi?` : `${capTr(LA)} seçerken ${ga.attributes.length ? "malzeme ve kullanım açısından " : ""}nelere dikkat etmeliyim?`;
+  return [
     // Ürün sayfası olan (online satış yapan) sitede ilk soru mağaza keşfidir; üreticide marka karşılaştırması ikinci soruda.
     q(`${place}${L1} satın alabileceğim online mağazalar hangileri?`, "discovery", g1.label),
     q(store ? `${capTr(L2)} için hangi online mağazaları karşılaştırabilirim?` : `${capTr(L2)} için hangi markaları karşılaştırabilirim?`, "discovery", g2.label),
-    q(needText, "need", g1.label),
-    q(
-      giftGroup
-        ? `Hediye olarak ${questionNoun(giftGroup.label)} seti alabileceğim mağazalar hangileri?`
-        : store
-          ? `${capTr(L2)} alırken geniş seçenek sunan online mağazalar hangileri?`
-          : `${capTr(L2)} için fiyat/performans açısından hangi markalar öne çıkıyor?`,
-      "need",
-      giftGroup?.label ?? g2.label,
-    ),
-    q(`${capTr(L1)} seçerken ${g1.attributes.length ? "malzeme ve kullanım açısından " : ""}nelere dikkat etmeliyim?`, "info", g1.label),
+    q(needText, "need", attr ? ga.label : g1.label),
+    fourth,
+    q(info, "info", ga.label),
   ];
-  return list;
 }

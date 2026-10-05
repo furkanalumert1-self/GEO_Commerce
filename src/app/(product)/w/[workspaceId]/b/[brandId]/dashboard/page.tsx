@@ -171,6 +171,12 @@ export default async function DashboardPage({ params, searchParams }: { params: 
           />
         }
       />
+      {lastRun && ["queued", "running"].includes(lastRun.status) ? (
+        <Alert tone="warning" title="Ölçümünüz yarım kaldı">
+          Ölçüm sayfası açıkken ilerler; sayfa kapandığı için durakladı. Kaldığı yerden sürdürmek için{" "}
+          <Link className="font-medium text-primary underline" href={`${base}/runs/${lastRun.id}`}>ölçümü açın</Link>.
+        </Alert>
+      ) : null}
       <section aria-labelledby="next-step" className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius-lg)] border border-primary/30 bg-surface px-5 py-4 shadow-[var(--shadow-card)] sm:px-6">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-primary">Sıradaki adımınız</p>

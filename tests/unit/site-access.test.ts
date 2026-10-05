@@ -72,11 +72,12 @@ describe("reklam taslağı: model adları ürün tipi sayılmaz", () => {
 });
 
 describe("soru dili: çoğul menü adı tekil kullanılır", () => {
-  it("tek kelimelik çoğul ad tekile döner; çok kelimeli ad korunur", async () => {
+  it("çoğul menü adı tekile döner (tamlama dahil)", async () => {
     const { questionNoun } = await import("@/modules/audit/business");
     expect(questionNoun("Halılar")).toBe("halı");
     expect(questionNoun("Nemlendiriciler")).toBe("nemlendirici");
-    expect(questionNoun("Banyo Havluları")).toBe("banyo havluları");
+    expect(questionNoun("Banyo Havluları")).toBe("banyo havlusu");
+    expect(questionNoun("Yemek Takımları")).toBe("yemek takımı");
     expect(questionNoun("Jean")).toBe("jean");
   });
 });
@@ -92,5 +93,42 @@ describe("ürün sayfası yoksa kategori breadcrumb'ları kanıt olur", () => {
     ] as never, "tr");
     expect(groups.map((g) => g.label)).toEqual(["Kadın Jeans"]);
     expect(groups[0]!.evidenceUrls).toEqual(["https://k.example/kadin-jeans"]);
+  });
+});
+
+describe("soru kalitesi: çeşitlilik, bütçe, karşılaştırma", () => {
+  const g = (label: string, extra: Record<string, unknown> = {}) => ({ label, area: null, subtype: null, products: ["a", "b"], evidenceUrls: [], attributes: [], hasSet: false, ...extra });
+  it("aynı aileden iki grup seçilmez", async () => {
+    const { diverseGroups } = await import("@/modules/audit/business");
+    const out = diverseGroups([g("Tek Kişilik Nevresim Takımı"), g("Çift Kişilik Nevresim Takımı"), g("Havlu")] as never, 2);
+    expect(out.map((x: { label: string }) => x.label)).toEqual(["Tek Kişilik Nevresim Takımı", "Havlu"]);
+  });
+  it("bütçe sınırı alt medyandan; tek fiyatla bütçe sorusu yok", async () => {
+    const { budgetCap } = await import("@/modules/audit/business");
+    expect(budgetCap([1349.99, 1099.99, 1649.99])).toBe(1500);
+    expect(budgetCap([5000, 28000])).toBe(7500);
+    expect(budgetCap([999])).toBeNull();
+  });
+  it("iki doğrulanmış malzeme varsa karşılaştırma sorusu (ünlü uyumu), malzeme + ürün türüyle somut ihtiyaç", async () => {
+    const { groupQuestions } = await import("@/modules/audit/business");
+    const qs = groupQuestions("retailer", [g("Nevresim Takımı", { attributes: ["%100 pamuk", "pamuk", "saten"], prices: [1349, 1099, 1649] })] as never, { country: "TR", gift: false });
+    expect(qs[2]!.text).toBe("%100 pamuk nevresim takımı arıyorum; hangi seçenekleri önerirsin?");
+    expect(qs[3]!.text).toBe("1.500 TL altı iyi bir nevresim takımı önerir misin?");
+    expect(qs[4]!.text).toBe("Nevresim takımı için pamuk mu saten mi daha iyi?");
+    expect(qs.map((q) => q.kind)).toEqual(["discovery", "discovery", "need", "need", "info"]);
+  });
+});
+
+describe("reklam taslağı: uzun grup adında kesik başlık yok", () => {
+  it("başlık ve metin sınıra sığan adaydan seçilir", async () => {
+    const { adDrafts } = await import("@/modules/ads/chatgpt-plan");
+    const d = adDrafts({ brand: "Madame Coco", label: "Tek Kişilik Nevresim Takımı", products: ["Alida Tek Kişilik %100 Pamuk Ranforce Nevresim Takımı - Gri", "Absolon Tek Kişilik Pamuklu Nevresim Takımı - Mavi"] });
+    for (const x of d) {
+      expect(x.title.endsWith("…")).toBe(false);
+      expect(x.body.endsWith("…")).toBe(false);
+      expect([...x.title].length).toBeLessThanOrEqual(50);
+      expect([...x.body].length).toBeLessThanOrEqual(100);
+    }
+    expect(d.find((x) => x.key === "need")!.title).toBe("Tek Kişilik Nevresim Takımı: size uygun model");
   });
 });

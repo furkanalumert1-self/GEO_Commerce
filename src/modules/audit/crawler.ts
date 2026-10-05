@@ -127,6 +127,15 @@ export async function resolveOrigin(fetcher: Fetcher, domain: string): Promise<{
   }
 }
 
+function sameHost(url: string, domain: string): boolean {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    return h === domain || h.endsWith(`.${domain}`);
+  } catch {
+    return false;
+  }
+}
+
 /** Sayfaların paralel çekilme sayısı (aynı site; yavaş proxy/ülke çıkışında süreyi belirleyen etken). */
 const CRAWL_CONCURRENCY = 4;
 
@@ -194,7 +203,9 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
     if (seenSitemaps.has(sm) || sitemapRank(sm) >= SKIP_SITEMAP_RANK) continue;
     seenSitemaps.add(sm);
     try {
-      const r = await fetcher(sm, { sameSiteAs: domain });
+      // Sitemap başka bir sunucuda olabilir (CDN/S3); robots.txt veya sitemap dizini gösterdiği için okunur.
+      // Sayfa taraması yine yalnız markanın alan adındaki adreslerle yapılır.
+      const r = await fetcher(sm, sameHost(sm, domain) ? { sameSiteAs: domain } : {});
       if (r.status !== 200) continue;
       result.sitemapFound = true;
       const parsed = parseSitemap(r.body);

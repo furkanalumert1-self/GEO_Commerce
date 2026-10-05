@@ -101,6 +101,8 @@ export async function generateDraft(input: GenerationInput, opts: { demo?: boole
     "Write as the store's own page for shoppers: never mention 'catalog', 'katalog', 'data', 'the provided list' or how the text was produced.",
     "Do not write prices or stock status in the text (they change and the page would go stale); describe features and link to product pages instead.",
     "If targetUrl is null, do not add a placeholder for it; the user chooses the page later.",
+    "Put questions and answers ONLY in the faq field; never repeat them as a section in bodyBlocks (the page shows the FAQ once).",
+    "State features taken from product names as plain facts about the product (e.g. 'Afrodille pudra takım çarşaflıdır'); never write phrases like 'ürün adında ... ifadesi geçer' or refer to product names as a source.",
   ].join(" ");
   const user = JSON.stringify(
     { opportunity: input.opportunity, evidence: input.evidence, targetUrl: input.targetUrl, catalog: input.catalog.map((c) => ({ ...c, priceMinor: c.priceMinor?.toString() ?? null })), allowedClaims: input.allowedClaims, brandVoice: input.brand.voice ?? null },
@@ -127,5 +129,24 @@ export async function generateDraft(input: GenerationInput, opts: { demo?: boole
   const json = (await res.json()) as { output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }> };
   const text = json.output?.flatMap((o) => o.content ?? []).find((c) => c.type === "output_text")?.text;
   if (!text) throw new AppError("dependency_unavailable", "Üretim çıktısı okunamadı", { retryable: true });
-  return actionContentSchema.parse(JSON.parse(text)) as ActionContent;
+  return withoutBodyFaq(actionContentSchema.parse(JSON.parse(text)) as ActionContent);
+}
+
+const FAQ_HEADING = /s[ıi]k(ça)?\s+sorulan\s+sorular|\bSSS\b|\bFAQ\b|frequently asked/i;
+
+/**
+ * Model SSS'yi gövdeye de yazarsa sayfada iki kez görünür: SSS alanı doluysa gövdedeki SSS bölümü
+ * (blok başlığı veya blok içindeki SSS başlığından sonrası) çıkarılır; boş kalan bloklar atılır.
+ */
+export function withoutBodyFaq(c: ActionContent): ActionContent {
+  if (!c.faq.length) return c;
+  const bodyBlocks = c.bodyBlocks
+    .filter((b) => !(b.heading && FAQ_HEADING.test(b.heading)))
+    .map((b) => {
+      const lines = b.markdown.split("\n");
+      const cut = lines.findIndex((l) => /^\s*(#{1,6}\s|\*\*)/.test(l) && FAQ_HEADING.test(l));
+      return cut < 0 ? b : { ...b, markdown: lines.slice(0, cut).join("\n").trimEnd() };
+    })
+    .filter((b) => b.markdown.trim());
+  return { ...c, bodyBlocks };
 }

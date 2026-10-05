@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_RULE, evaluateBudgetChange, evaluateCreateCampaign, type BudgetChangeInput } from "@/modules/ads/rules";
 import { canTransitionAction, checkApprovalHash, lineDiff, publishPrecondition, rollbackDecision, toHtml, validateJsonLd, versionHash, type ActionContent } from "@/modules/actions/workflow";
+import { withoutBodyFaq } from "@/modules/actions/generator";
 
 const base: BudgetChangeInput = {
   level: "approval_required", killSwitch: false, capabilities: ["read", "budget_write"], accessStatus: "active",
@@ -85,5 +86,22 @@ describe("HTML dışa aktarma: markdown biçimi", () => {
     expect(html).toContain('<a href="https://m.example/a">İncele</a>');
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
     expect(html).not.toContain("**");
+  });
+});
+
+describe("Fix with AI: SSS bir kez görünür", () => {
+  const base = { title: "T", metaDescription: "M", internalLinks: [], jsonLd: null, sources: [], changeSummary: "", placeholders: [], faq: [{ q: "Çarşaflı var mı?", a: "Evet." }] } as unknown as ActionContent;
+  it("gövdedeki SSS bölümü çıkarılır, diğer içerik kalır", () => {
+    const c = withoutBodyFaq({ ...base, bodyBlocks: [
+      { heading: "Nasıl seçilir?", markdown: "Kumaşa bakın.\n\n### Tek Kişilik Nevresim Hakkında Sıkça Sorulan Sorular\n\n**Çarşaflı var mı?**\n\nEvet." },
+      { heading: "Sık Sorulan Sorular", markdown: "**Çarşaflı var mı?** Evet." },
+      { markdown: "## SSS\n\nÇarşaflı var mı? Evet." },
+    ] });
+    expect(c.bodyBlocks).toEqual([{ heading: "Nasıl seçilir?", markdown: "Kumaşa bakın." }]);
+    expect(c.faq).toHaveLength(1);
+  });
+  it("SSS alanı boşsa gövdeye dokunulmaz", () => {
+    const blocks = [{ markdown: "## Sık sorulan sorular\n\nX? Y." }];
+    expect(withoutBodyFaq({ ...base, faq: [], bodyBlocks: blocks }).bodyBlocks).toEqual(blocks);
   });
 });

@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { isUuid } from "@/modules/tenancy/access";
 import { can } from "@/lib/permissions";
-import { fmtDate } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate } from "@/lib/format";
 import { brandMetrics } from "@/modules/monitoring/queries";
 import { measurementOutcome, measurementWindows, workflowView } from "@/lib/view-models";
 import { blockingIssues, type ActionContent } from "@/modules/actions/workflow";
@@ -58,14 +58,25 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
   if (measurement?.publishAt) {
     const windows = measurementWindows(new Date(measurement.publishAt), measurement.baselineDays ?? 14);
     const promptIds = a.opportunity ? (await db.prompt.findMany({ where: { workspaceId, brandId, clusterId: a.opportunity.clusterId }, select: { id: true } })).map((p) => p.id) : undefined;
-    const [before, after] = await Promise.all([
+    let [before, after] = await Promise.all([
       brandMetrics(db, workspaceId, brandId, { ...windows.before, promptIds }),
       brandMetrics(db, workspaceId, brandId, { ...windows.after, promptIds }),
     ]);
+    // Platformlar dönemler arasında farklıysa (ör. kredisi biten platform) yalnız ortak olanlarla karşılaştırılır.
+    const engOf = (m: typeof before) => m.perEngine.map((e) => e.engine);
+    const shared = engOf(before).filter((e) => engOf(after).includes(e));
+    let sharedEngines: string | undefined;
+    if (shared.length && (shared.length !== engOf(before).length || shared.length !== engOf(after).length)) {
+      [before, after] = await Promise.all([
+        brandMetrics(db, workspaceId, brandId, { ...windows.before, promptIds, engines: shared }),
+        brandMetrics(db, workspaceId, brandId, { ...windows.after, promptIds, engines: shared }),
+      ]);
+      sharedEngines = shared.map((e) => ENGINE_SHORT[e] ?? e).join(", ");
+    }
     const side = (m: typeof before) => ({ score: m.aggregate.score, samples: m.sampleCount, engines: m.perEngine.map((e) => e.engine).sort() });
     // Adım göstergesi ölçüm sonucuyla çelişmesin: etki hesaplanamıyorsa bunu açıkça söyler.
-    const outcome = measurementOutcome(windows.partial, before.sampleCount, after.sampleCount);
-    if (outcome.kind === "not_computable" && (a.status === "measuring" || a.status === "completed")) {
+    const outcome = measurementOutcome(windows.partial, before.sampleCount, after.sampleCount, { elapsedDays: windows.elapsedDays });
+    if (outcome.kind !== "computable" && (a.status === "measuring" || a.status === "completed")) {
       flow = { ...flow, label: a.status === "completed" ? "Ölçüm tamamlandı · etki hesaplanamadı" : flow.label, tone: a.status === "completed" ? "neutral" : flow.tone, next: outcome.message };
     }
     // Sonuç yalnız yeni ölçümle oluşur: aynı soru kümesini tek tıkla yeniden ölçme.
@@ -94,6 +105,7 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
         timeZone={tz}
         scopeLabel={a.opportunity ? `Soru kümesi: ${a.opportunity.cluster.label}` : "Markanın tüm soruları"}
         diagnosisHref={a.opportunity ? `${base}/opportunities/${a.opportunity.id}` : undefined}
+        sharedEngines={sharedEngines}
       />
     );
   }

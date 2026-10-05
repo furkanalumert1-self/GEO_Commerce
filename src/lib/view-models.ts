@@ -175,13 +175,18 @@ export function alignPrevious(current: Array<{ day: string }>, previous: Array<{
 
 export type MeasurementOutcome =
   | { kind: "computable"; title: string; message: string | null }
+  | { kind: "early"; title: string; message: string }
   | { kind: "not_computable"; title: string; message: string };
+
+/** Değişikliğin AI yanıtlarına yansıması için asgari süre ve her dönemde asgari yanıt sayısı. */
+export const MIN_EFFECT_DAYS = 3;
+export const MIN_EFFECT_SAMPLES = 10;
 
 /**
  * Dönemin bitmesi ile karşılaştırma yeterliliği ayrı değerlendirilir. Başlangıç (önceki dönem) verisi
  * yoksa geçmişe dönük veri oluşmayacağı için etki hesaplanamaz — "veri toplanıyor" denmez.
  */
-export function measurementOutcome(partial: boolean, beforeSamples: number, afterSamples: number): MeasurementOutcome {
+export function measurementOutcome(partial: boolean, beforeSamples: number, afterSamples: number, opts: { elapsedDays?: number } = {}): MeasurementOutcome {
   if (beforeSamples === 0) {
     return {
       kind: "not_computable",
@@ -195,6 +200,17 @@ export function measurementOutcome(partial: boolean, beforeSamples: number, afte
     return partial
       ? { kind: "not_computable", title: "Sonraki dönem verisi bekleniyor", message: "Yayından sonra henüz gözlem yok; sonuç oluşmadan başarı veya başarısızlık değerlendirilmez." }
       : { kind: "not_computable", title: "Etki hesaplanamadı", message: "Dönem tamamlandı; yayından sonra gözlem olmadığı için etki hesaplanamadı." };
+  }
+  // Erken veya küçük örneklemli fark gürültüdür (uygulamadan dakikalar sonra +13 puan gibi): sayı gösterilmez.
+  const tooSoon = partial && opts.elapsedDays !== undefined && opts.elapsedDays < MIN_EFFECT_DAYS;
+  const tooFew = beforeSamples < MIN_EFFECT_SAMPLES || afterSamples < MIN_EFFECT_SAMPLES;
+  if (tooSoon || tooFew) {
+    const reasons = [
+      tooSoon ? `Uygulamanın üzerinden ${opts.elapsedDays === 0 ? "1 günden az" : `${opts.elapsedDays} gün`} geçti; AI yanıtlarının değişikliği yansıtması birkaç gün sürer.` : null,
+      tooFew ? `Güvenilir karşılaştırma için her dönemde en az ${MIN_EFFECT_SAMPLES} yanıt gerekir (önce ${beforeSamples}, sonra ${afterSamples}).` : null,
+    ].filter(Boolean);
+    const when = tooSoon ? `${MIN_EFFECT_DAYS - (opts.elapsedDays ?? 0)} gün sonra` : "birkaç ölçüm daha yapıldığında";
+    return { kind: "early", title: "Değerlendirmek için henüz erken", message: `${reasons.join(" ")} Fark, ${when} aynı sorular yeniden ölçüldüğünde gösterilir.` };
   }
   return { kind: "computable", title: "Değişiklik sonrası gözlenen fark", message: partial ? "Kısmi dönem: sonraki pencere henüz dolmadı; fark değişebilir." : null };
 }

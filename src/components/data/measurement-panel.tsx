@@ -22,6 +22,7 @@ export function MeasurementPanel({
   timeZone,
   scopeLabel,
   diagnosisHref,
+  sharedEngines,
 }: {
   windows: MeasurementWindows;
   before: MeasurementSide;
@@ -30,8 +31,10 @@ export function MeasurementPanel({
   timeZone: string;
   scopeLabel: string;
   diagnosisHref?: string;
+  /** Dönemler arası platformlar farklıysa yalnız ortak olanlarla karşılaştırılır; adları gösterilir. */
+  sharedEngines?: string;
 }) {
-  const outcome = measurementOutcome(windows.partial, before.samples, after.samples);
+  const outcome = measurementOutcome(windows.partial, before.samples, after.samples, { elapsedDays: windows.elapsedDays });
   const d = outcome.kind === "computable" ? absoluteDelta(after.score, before.score, "puan") : null;
   const rel = d?.kind === "points" ? relativeChange(after.score, before.score) : null;
   const sameEngines = before.engines.join(",") === after.engines.join(",");
@@ -49,7 +52,7 @@ export function MeasurementPanel({
           <p className="text-xs text-text-secondary">{fmtDate(windows.before.from, timeZone)} – {fmtDate(windows.before.to, timeZone)} · {fmtNumber(before.samples)} yanıt</p>
         </div>
         <div className="min-w-0">
-          <p className="text-sm text-text-secondary">Sonra</p>
+          <p className="text-sm text-text-secondary">Sonra{outcome.kind === "early" && after.samples ? " (erken ölçüm)" : ""}</p>
           <p className="tabular mt-1 text-[28px] font-semibold leading-tight">{after.samples ? (after.score ?? "—") : "—"}</p>
           <p className="text-xs text-text-secondary">{fmtDate(windows.after.from, timeZone)} – {fmtDate(windows.after.to, timeZone)} · {fmtNumber(after.samples)} yanıt</p>
         </div>
@@ -57,12 +60,13 @@ export function MeasurementPanel({
           <p className="text-sm text-text-secondary">Gözlenen fark</p>
           <p className="tabular mt-1 text-[28px] font-semibold leading-tight">{d?.kind === "points" ? `${d.value > 0 ? "+" : d.value < 0 ? "−" : ""}${fmtNumber(Math.abs(d.value), "tr-TR", 1)}` : "—"}</p>
           <p className="text-xs text-text-secondary">
-            {d?.kind === "points" ? `puan${rel !== null ? ` · göreli ${rel > 0 ? "+" : ""}${fmtNumber(rel * 100, "tr-TR", 0)}%` : ""}` : "Hesaplanamadı"}
+            {d?.kind === "points" ? `puan${rel !== null ? ` · göreli ${rel > 0 ? "+" : ""}${fmtNumber(rel * 100, "tr-TR", 0)}%` : ""}` : outcome.kind === "early" ? "Henüz erken" : "Hesaplanamadı"}
           </p>
         </div>
       </div>
       <div className="flex flex-col gap-1.5 border-t border-border px-5 py-4 text-sm text-text-secondary">
-        {outcome.message ? <p className={outcome.kind === "not_computable" ? "font-medium text-text" : undefined}>{outcome.message}</p> : null}
+        {outcome.message ? <p className={outcome.kind === "computable" ? undefined : "font-medium text-text"}>{outcome.message}</p> : null}
+        {sharedEngines ? <p>Karşılaştırma yalnız iki dönemde de ölçülen platformlarla yapıldı: {sharedEngines}.</p> : null}
         {!sameEngines && before.samples > 0 && after.samples > 0 ? <p className="text-warning">Platform kapsamı dönemler arasında değişti; fark sınırlı yorumlanmalıdır.</p> : null}
         <p>
           {manual ? "Uygulama kullanıcı bildirimiyle kaydedildi (doğrulanmış mağaza yayını değil). " : ""}

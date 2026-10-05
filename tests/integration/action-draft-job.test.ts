@@ -63,6 +63,16 @@ describe("Fix with AI arka planda", () => {
     }
   });
 
+  it("hedefsiz fırsatta önerilen hedef sayfa fırsata da yazılır", async () => {
+    const { t, access, opp } = await setup();
+    await db.opportunity.update({ where: { id: opp.id }, data: { targetUrl: null } });
+    await db.category.create({ data: { workspaceId: t.ws.id, brandId: t.brand.id, externalId: "c1", name: "Nevresim", url: "https://b.example/kategori/nevresim/" } });
+    const job = await startActionDraft(db, access, { opportunityId: opp.id, type: "content", operationId: `fix:${t.ws.id}:k4` });
+    expect(await runJob(db, job.id, "test")).toBe("succeeded");
+    expect((await db.action.findFirstOrThrow({ where: { brandId: t.brand.id } })).targetUrl).toBe("https://b.example/kategori/nevresim/");
+    expect((await db.opportunity.findUniqueOrThrow({ where: { id: opp.id } })).targetUrl).toBe("https://b.example/kategori/nevresim/");
+  });
+
   it("ürün verisi yoksa iş hiç başlatılmaz (hata istek içinde)", async () => {
     const { t, access, opp } = await setup();
     await db.product.updateMany({ where: { brandId: t.brand.id }, data: { active: false } });

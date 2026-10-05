@@ -142,7 +142,12 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       const v = await tx.actionVersion.create({
         data: { workspaceId: access.workspaceId, actionId: a.id, number: 1, content: content as object, contentHash: versionHash(content), createdById: input.userId, generated: true, sourceHashes: { opportunityUpdatedAt: opp.updatedAt.toISOString() } },
       });
-      if (opp.status === "new" || opp.status === "triaged") await tx.opportunity.update({ where: { id: opp.id }, data: { status: "in_progress" } });
+      // Önerilen hedef sayfa fırsata da yazılır: fırsat özeti ve sonraki taslaklar aynı sayfayı gösterir.
+      const oppData = {
+        ...(opp.status === "new" || opp.status === "triaged" ? { status: "in_progress" as const } : {}),
+        ...(!opp.targetUrl && genInput.targetUrl ? { targetUrl: genInput.targetUrl } : {}),
+      };
+      if (Object.keys(oppData).length) await tx.opportunity.update({ where: { id: opp.id }, data: oppData });
       return tx.action.update({ where: { id: a.id }, data: { currentVersionId: v.id } });
     });
     await commit(db, input.operationId, 1); // başarılı yeni draft sürümü = 1 fix unit

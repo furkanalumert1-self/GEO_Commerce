@@ -28,7 +28,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const access = await pageBrand(workspaceId, brandId);
   if (!isUuid(opportunityId)) notFound();
   const unlocked = await unlockedOpportunityIds(db, access);
-  const o = await db.opportunity.findFirst({ where: { id: opportunityId, workspaceId, brandId }, include: { cluster: true, evidence: { include: { observation: { select: { engine: true, sampledAt: true, model: true } } } }, actions: { select: { id: true, title: true, status: true, measurement: true, currentVersionId: true }, orderBy: { updatedAt: "desc" } } } });
+  const o = await db.opportunity.findFirst({ where: { id: opportunityId, workspaceId, brandId }, include: { cluster: true, evidence: { include: { observation: { select: { engine: true, sampledAt: true, model: true } } } }, actions: { select: { id: true, title: true, status: true, measurement: true, currentVersionId: true, targetUrl: true }, orderBy: { updatedAt: "desc" } } } });
   if (!o) notFound();
   if (unlocked !== "all" && !unlocked.has(o.id)) {
     return (
@@ -47,6 +47,8 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const base = `/w/${workspaceId}/b/${brandId}`;
   const latest = o.actions[0] ?? null;
+  // Eski kayıtlarda hedef yalnız taslakta olabilir: özet taslaktaki sayfayı gösterir.
+  const targetUrl = o.targetUrl ?? o.actions.find((a) => a.targetUrl)?.targetUrl ?? null;
   const needsFix = await actionsNeedingFix(db, o.actions);
   const pendingJob = fixAllowed ? await pendingDraftJob(db, brandId, o.id) : null;
   const flow = workflowView(latest?.status, { manualPublish: Boolean((latest?.measurement as { manualPublish?: boolean } | null)?.manualPublish), needsFix: latest ? needsFix.has(latest.id) : false });
@@ -54,7 +56,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
   const fixButton = fixAllowed ? (
     <DraftJobButton
       url={`${api}/actions`}
-      body={{ opportunityId: o.id, type: o.gapType === "structured_data" ? "schema" : o.gapType === "citation_gap" ? "citation_task" : o.gapType === "missing_comparison" ? "comparison" : "content", targetURL: o.targetUrl }}
+      body={{ opportunityId: o.id, type: o.gapType === "structured_data" ? "schema" : o.gapType === "citation_gap" ? "citation_task" : o.gapType === "missing_comparison" ? "comparison" : "content", targetURL: targetUrl }}
       variant={activeAction || productCount === 0 ? "secondary" : "primary"}
       label={activeAction ? "AI ile iyileştir: yeni taslak" : "AI ile iyileştir: taslak hazırla"}
       actionBase={`${base}/actions/`}
@@ -89,7 +91,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ wo
         <dt className="text-text-secondary">Son aksiyon</dt>
         <dd className="text-right">{latest ? <ActionStatusBadge status={latest.status} manual={Boolean((latest.measurement as { manualPublish?: boolean } | null)?.manualPublish)} needsFix={needsFix.has(latest.id)} /> : "Henüz yok"}</dd>
         <dt className="text-text-secondary">Hedef sayfa</dt>
-        <dd className="min-w-0 break-all text-right">{o.targetUrl ? <a className="text-primary underline" href={o.targetUrl} target="_blank" rel="noopener noreferrer nofollow">{o.targetUrl}</a> : "Belirlenmedi"}</dd>
+        <dd className="min-w-0 break-all text-right">{targetUrl ? <a className="text-primary underline" href={targetUrl} target="_blank" rel="noopener noreferrer nofollow">{targetUrl}</a> : "Belirlenmedi"}</dd>
         <dt className="text-text-secondary">Soru kümesi</dt>
         <dd className="text-right">{o.cluster.label}</dd>
       </dl>

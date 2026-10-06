@@ -7,7 +7,7 @@ import { pageBrand } from "@/lib/page-access";
 import { brandEntities } from "@/modules/monitoring/service";
 import { isUuid } from "@/modules/tenancy/access";
 import { ENGINE_SHORT, fmtDate, fmtPct, RUN_STATUS_LABEL } from "@/lib/format";
-import { executionMode } from "@/lib/queue";
+import { customerJobError, executionMode } from "@/lib/queue";
 import { InlineJobDriver } from "@/components/data/inline-job-driver";
 import { isStalled, runProgress } from "@/modules/monitoring/run-status";
 
@@ -47,7 +47,7 @@ export default async function RunPage({ params }: { params: Promise<{ workspaceI
         ) : running ? (
           <p className="mt-2 text-sm text-muted">Çalışıyor: {live.succeeded + live.failed}/{run.scheduledCount} yanıt işlendi — sayfayı yenileyerek ilerlemeyi görebilirsiniz; kısmi sonuçlar aşağıda ve nihai değildir.</p>
         ) : null}
-        {job?.status === "dead" ? <p className="mt-2 text-sm text-danger" role="alert">Ölçüm tamamlanamadı: {job.lastError ?? job.deadReason ?? "bilinmeyen hata"}. Ayrılan kota serbest bırakıldı; yeni bir ölçüm başlatabilirsiniz.</p> : null}
+        {job?.status === "dead" ? <p className="mt-2 text-sm text-danger" role="alert">Ölçüm tamamlanamadı: {customerJobError(job.lastError ?? job.deadReason)}. Ayrılan kota serbest bırakıldı; yeni bir ölçüm başlatabilirsiniz.</p> : null}
         {run.status === "partial" ? <p className="mt-2 text-sm text-warning">Bazı yanıtlar alınamadı; başarısız sorgular kota tüketmez ve görünürlük düşüşü sayılmaz.</p> : null}
       </Card>
       <div className="flex flex-col gap-4">

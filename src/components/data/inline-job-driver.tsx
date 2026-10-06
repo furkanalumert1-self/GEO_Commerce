@@ -24,6 +24,7 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
   const [paused, setPaused] = useState(false);
   const inFlight = useRef(false);
   const retries = useRef(0);
+  const lastRefresh = useRef(0);
   const [notice, setNotice] = useState<string | null>(null);
 
   const terminal = ["succeeded", "partial", "dead", "canceled"].includes(status);
@@ -52,6 +53,11 @@ export function InlineJobDriver({ advanceUrl, initialStatus, onDone, label = "An
       if (job) {
         setStatus(job.status);
         setProgress(job.progress);
+      }
+      // Sayfadaki durum etiketi, sayaçlar ve gelen yanıtlar iş sürerken de güncellenir (en sık 10 sn'de bir).
+      if (job && !["succeeded", "partial", "dead"].includes(job.status) && Date.now() - lastRefresh.current > 10_000) {
+        lastRefresh.current = Date.now();
+        router.refresh();
       }
       if (data.outcome === "busy") {
         await new Promise((r) => setTimeout(r, 3000));

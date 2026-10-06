@@ -8,7 +8,7 @@ import { ApiButton } from "@/components/forms/api-button";
 import { RunPlanner } from "@/components/forms/run-planner";
 import { db } from "@/lib/db";
 import { pageBrand, pageWorkspace } from "@/lib/page-access";
-import { engineAvailability } from "@/modules/monitoring/start";
+import { engineAvailability, recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { isUuid } from "@/modules/tenancy/access";
 import { JobStartButton } from "@/components/forms/job-start-button";
 import { executionMode } from "@/lib/queue";
@@ -87,7 +87,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           {step === 2 ? <BrandSettingsStep url={`${api}/onboarding`} initial={{ country: brand.country, language: brand.language, timezone: brand.timezone, currency: brand.currency, aliases: brand.aliases.join(", "), categories: brand.categories.join(", ") }} /> : null}
           {step === 3 ? (
             <div className="flex flex-col gap-3">
-              <p>{pages} sayfa okundu, katalogda {products} ürün var. Site incelemesi ürün adaylarını bulur; seçtiklerinizi Ürünlerim sayfasında onaylayarak kataloğa eklersiniz (onaysız eklenmez).</p>
+              <p>{pages} sayfa okundu, katalogda {products} ürün var. Site incelemesi ürünlerinizi bulur: adı, fiyatı ve stok bilgisi tam olanlar kataloğa otomatik eklenir; bilgisi eksik olanlar Ürünlerim sayfasında onayınızı bekler. Sitenize hiçbir şey yazılmaz.</p>
               <div className="flex flex-wrap gap-2">
                 <JobStartButton url={`${api}/crawls`} body={{ maxPages: 50 }} label="Siteyi incele ve ürünleri bul" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />
                 <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog#adaylar`}>Bulunan ürünleri incele</Link>
@@ -96,6 +96,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           ) : null}
           {step === 4 ? (
             <div className="flex flex-col gap-2">
+              <p className="text-sm text-text-secondary">Onayladığınız rakipler ölçümlerde markanızla karşılaştırılır; rakiplerin öne çıktığı sorular “Fırsatlar”da listelenir. Adı yanlış görünen rakibi “Rakip ekle/çıkar” sayfasında düzeltebilirsiniz.</p>
               {comps.length === 0 ? <p className="text-muted">Rakip adayı yok.</p> : comps.map((c) => (
                 <div key={c.id} className="flex flex-wrap items-center justify-between gap-2">
                   <span>{c.name} · {c.domain}</span>
@@ -112,7 +113,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
               <Link className="text-sm text-primary underline" href={`/w/${workspaceId}/b/${brandId}/prompts`}>Tüm takip ettiğim soruları gör</Link>
             </div>
           ) : null}
-          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce takip edeceğiniz soruları seçin: <Link className="text-primary underline" href={`${base}&step=5`}>Adım 5 — Takip edeceğiniz sorular</Link>.</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
+          {step === 6 ? (runs > 0 ? <p>İlk ölçüm yapıldı. <Link className="text-primary underline" href={`/w/${workspaceId}/b/${brandId}/visibility`}>Sonuçları gör</Link></p> : prompts === 0 ? <p className="text-muted">Önce takip edeceğiniz soruları seçin: <Link className="text-primary underline" href={`${base}&step=5`}>Adım 5 — Takip edeceğiniz sorular</Link>.</p> : <RunPlanner url={`${api}/runs`} engines={engineAvailability(access).all} broken={await recentlyBrokenEngines(db, engineAvailability(access).allowed)} locale={`${brand.language}-${brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />) : null}
           {step === 7 ? (
             <div className="flex flex-col gap-2">
               <p>Gözlemlenen gelir için mağazanızı bağlayın veya CSV sipariş importu kullanın. Reklam erişimi olmaması GEO kullanımını engellemez.</p>

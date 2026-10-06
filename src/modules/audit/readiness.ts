@@ -110,9 +110,11 @@ export function evaluateReadiness(crawl: CrawlResult): ReadinessResult {
     {
       id: "organization_schema",
       group: "geo",
-      label: "Organization / marka şeması",
+      label: "Marka kimlik bilgisi (yapılandırılmış veri)",
       status: allTypes.has("Organization") || allTypes.has("OnlineStore") ? "pass" : "not_detected",
-      detail: allTypes.has("Organization") ? "Organization şeması var" : "Organization şeması tespit edilemedi",
+      detail: allTypes.has("Organization") || allTypes.has("OnlineStore")
+        ? "Sitenizde marka adı, logo ve iletişim bilgisi makinelerin okuyacağı biçimde var"
+        : "Sitenizde marka adı, logo ve iletişim bilgisini AI ve arama motorlarına tanıtan kod (Organization şeması) bulunamadı; site yöneticinize iletebilirsiniz",
       priority: "low",
     },
     {

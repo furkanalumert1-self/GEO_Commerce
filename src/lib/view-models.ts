@@ -253,6 +253,10 @@ export interface NextStepInput {
   hasRun: boolean;
   continuing: { title: string; href: string } | null;
   topOpportunity: { title: string; href: string } | null;
+  /** Duraklamış (yarım kalan) ölçüm varsa önce o sürdürülür. */
+  runInProgress?: { href: string } | null;
+  /** Açık fırsat yokken markanın hiç anılmadığı soru sayısı. */
+  missedCount?: number;
 }
 
 export interface NextStep {
@@ -268,8 +272,10 @@ export function nextStep(i: NextStepInput): NextStep {
   if (i.productCount === 0) return { title: "Ürün bilgilerinizi tamamlayın", reason: "Sitenizi inceleyip ürünlerinizi bulalım; onayladıklarınız kataloğa eklenir.", cta: "Ürünleri bul", href: "/catalog#adaylar" };
   if (i.promptCount === 0) return { title: "Takip edeceğiniz soruları seçin", reason: "Müşterilerinizin AI'a sorabileceği soruları seçin; ölçüm bu sorularla yapılır.", cta: "Soruları seç", href: "/prompts" };
   if (!i.hasRun) return { title: "İlk ölçümü başlatın", reason: "Seçtiğiniz sorulara AI yanıtlarını toplayıp markanızın görünürlüğünü ölçelim.", cta: "Ölçümü planla", href: "/prompts#olcum" };
+  if (i.runInProgress) return { title: "Yarım kalan ölçümü sürdürün", reason: "Son ölçüm sayfa kapandığı için durakladı; kaldığı yerden devam eder.", cta: "Ölçümü aç", href: i.runInProgress.href };
   if (i.continuing) return { title: `Taslağı tamamlayın: ${i.continuing.title}`, reason: "Yarım kalan bir içerik taslağınız var.", cta: "Devam et", href: i.continuing.href };
   if (i.topOpportunity) return { title: `İlk öneriyi inceleyin: ${i.topOpportunity.title}`, reason: "Rakiplerin öne çıktığı ve kanıtı en güçlü soru grubu.", cta: "Başla", href: i.topOpportunity.href };
+  if (i.missedCount) return { title: `Markanızın anılmadığı ${i.missedCount} soruyu inceleyin`, reason: "Şu an açık fırsat yok; bu sorularda öne çıkan siteleri rakip olarak onaylarsanız fırsat oluşur.", cta: "İncele", href: "/opportunities" };
   return { title: "Yeni ölçüm başlatın", reason: "Şu an açık öneri yok; yeni ölçüm güncel durumu gösterir.", cta: "Ölçümü planla", href: "/prompts#olcum" };
 }
 

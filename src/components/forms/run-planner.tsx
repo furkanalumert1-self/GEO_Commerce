@@ -15,10 +15,11 @@ interface EngineInfo {
 const LABEL: Record<string, string> = { chatgpt: "ChatGPT (OpenAI API)", gemini: "Gemini (Google API)", claude: "Claude (Anthropic API)", perplexity: "Perplexity API", google_ai_overviews: "Google AI Overviews", copilot: "Microsoft Copilot" };
 
 /** Maliyet önizleme → onay → başlat. Kullanılamayan motorlar gerekçesiyle devre dışı. */
-export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false }: { url: string; engines: EngineInfo[]; locale: string; runPagePrefix?: string; inline?: boolean }) {
+export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false, broken = [] }: { url: string; engines: EngineInfo[]; locale: string; runPagePrefix?: string; inline?: boolean; broken?: string[] }) {
   const router = useRouter();
   const usable = engines.filter((e) => (e.status === "ready" || e.status === "demo") && e.inPlan).map((e) => e.engine);
-  const [selected, setSelected] = useState<string[]>(usable);
+  // Son ölçümlerde kalıcı hata veren platformlar (ör. kredisi biten) varsayılan olarak seçilmez; seçilebilir kalır.
+  const [selected, setSelected] = useState<string[]>(() => (usable.some((e) => !broken.includes(e)) ? usable.filter((e) => !broken.includes(e)) : usable));
   const [repeats, setRepeats] = useState(1);
   const [preview, setPreview] = useState<null | { unitsRequested: number; unitsPlanned: number; available: number; fits: boolean; sampledFraction: number; promptCount: number; unavailableEngines?: string[] }>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +62,7 @@ export function RunPlanner({ url, engines, locale, runPagePrefix, inline = false
                   <input type="checkbox" disabled={!ok} checked={selected.includes(e.engine)} onChange={(ev) => { setPreview(null); setSelected((s) => (ev.target.checked ? [...s, e.engine] : s.filter((x) => x !== e.engine))); }} />
                   {LABEL[e.engine] ?? e.engine}
                 </label>
-                {!e.inPlan && (e.status === "ready" || e.status === "demo") ? <Badge tone="warning">Pakette yok</Badge> : e.status === "not_configured" ? <Badge>Şu anda kullanılamıyor</Badge> : e.status === "unsupported" ? <Badge>Desteklenmiyor</Badge> : e.status === "demo" ? <Badge tone="warning">Örnek veri</Badge> : null}
+                {ok && broken.includes(e.engine) ? <Badge tone="warning">Şu an yanıt vermiyor</Badge> : !e.inPlan && (e.status === "ready" || e.status === "demo") ? <Badge tone="warning">Pakette yok</Badge> : e.status === "not_configured" ? <Badge>Şu anda kullanılamıyor</Badge> : e.status === "unsupported" ? <Badge>Desteklenmiyor</Badge> : e.status === "demo" ? <Badge tone="warning">Örnek veri</Badge> : null}
               </li>
             );
           })}

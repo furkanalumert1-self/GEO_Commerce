@@ -20,6 +20,7 @@ import { periodKey } from "@/modules/billing/quota";
 import { demoAudit, isDemoDomain, isDemoEmail } from "@/lib/demo";
 import { isCompetitorCandidate } from "./competitor-filter";
 import { seedPrompts } from "@/modules/prompts/seed";
+import { recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
 import { buildQuestionSet, detectBusiness, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
@@ -37,6 +38,13 @@ const AUDIT_ENGINES: EngineKey[] = ["chatgpt", "gemini"];
  * "şu anda kullanılamıyor" olarak gösterilir. Kapsam audit'in soru adımında sabitlenir (devam eden işte değişmez).
  */
 const OPTIONAL_AUDIT_ENGINES: EngineKey[] = ["claude"];
+
+/** Kredisi/anahtarı bozuk platformlar kapsamdan çıkarılır; hepsi bozuksa kapsam aynen kalır (hata görünür olsun). */
+async function withoutBrokenEngines(db: PrismaClient, engines: EngineKey[]): Promise<EngineKey[]> {
+  const broken = await recentlyBrokenEngines(db, engines);
+  const kept = engines.filter((e) => !broken.includes(e));
+  return kept.length ? kept : engines;
+}
 
 /** Ücretsiz ölçümün başlamadan önce gösterilen platform kapsamı (sunucu yapılandırmasına göre). */
 export function auditEngineScope(adapters: Record<EngineKey, AiMonitorAdapter> = getAiAdapters()) {
@@ -448,7 +456,7 @@ export async function runAudit(
     }
     work.prompts = proposed.length ? proposed.map((q) => q.text) : auditPrompts(categories, country);
     work.kinds = Object.fromEntries(proposed.map((q) => [q.text, q.kind]));
-    work.engines = scopeNow.engines;
+    work.engines = await withoutBrokenEngines(db, scopeNow.engines);
     await save();
   }
   const prompts = work.prompts;
@@ -458,7 +466,8 @@ export async function runAudit(
   const available = scope.map((e) => adapters[e]).filter((a) => a.status() === "ready" || a.status() === "demo");
   const unavailable = scope.filter((e) => !available.some((a) => a.engine === e)).map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? null }));
   // Kapsam dışı kalan isteğe bağlı platformlar: yalnız bilgi (kısmi sayılmaz, skora girmez).
-  const outOfScope = OPTIONAL_AUDIT_ENGINES.filter((e) => !scope.includes(e)).map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? null }));
+  // Kredisi biten (geçici olarak dışarıda tutulan) zorunlu platformlar da bu gruptadır: ölçümü "kısmi" yapmaz.
+  const outOfScope = [...AUDIT_ENGINES, ...OPTIONAL_AUDIT_ENGINES].filter((e) => !scope.includes(e)).map((e) => ({ engine: e, reason: adapters[e]?.statusReason() ?? "Şu anda kullanılamıyor" }));
   const siteDomain = work.crawl.siteDomain ?? audit.domain;
   const entity = { id: "self", type: "brand" as const, name: brandName, aliases: [], domain: siteDomain };
   const pairs = prompts.flatMap((prompt) => available.map((a) => ({ prompt, a })));
@@ -720,7 +729,7 @@ export async function confirmAudit(db: PrismaClient, auditId: string, input: { q
   const proposedKinds = new Map(sum.proposal.questions.map((q) => [q.text, q.kind]));
   const cfg = config();
   const demo = demoAudit(audit.domain, cfg);
-  const work: AuditWork = { ...sum.pendingWork, prompts: questions, kinds: Object.fromEntries(questions.map((q) => [q, proposedKinds.get(q) ?? questionKind(q)])), engines: auditEngineScope(getAiAdapters(cfg, { demo })).engines, confirmed: true, answers: [] };
+  const work: AuditWork = { ...sum.pendingWork, prompts: questions, kinds: Object.fromEntries(questions.map((q) => [q, proposedKinds.get(q) ?? questionKind(q)])), engines: await withoutBrokenEngines(db, auditEngineScope(getAiAdapters(cfg, { demo })).engines), confirmed: true, answers: [] };
   // Kullanıcının onay ekranında girdiği konular raporda gösterilir (öneriyle farklıysa).
   const topics = (input.topics ?? []).map((t) => t.trim()).filter((t) => t.length >= 2 && t.length <= 40).slice(0, 2);
   if (topics.length && work.proposal) work.proposal = { ...work.proposal, topics };

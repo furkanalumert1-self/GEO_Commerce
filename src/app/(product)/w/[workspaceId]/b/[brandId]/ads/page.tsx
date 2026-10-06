@@ -30,7 +30,7 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
       </>
     );
   }
-  const [accounts, plan, brandRow, categories, products, pages, activeProducts] = await Promise.all([
+  const [accounts, plan, brandRow, categories, products, pages, activeProducts, oppTargets] = await Promise.all([
     db.adsAccount.findMany({ where: { brandId, workspaceId }, select: { provider: true, accessStatus: true } }),
     buildChatgptAdsPlan(db, { workspaceId, brandId }),
     db.brand.findUniqueOrThrow({ where: { id: brandId }, select: { name: true, domain: true, country: true, categories: true } }),
@@ -38,12 +38,15 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
     db.product.findMany({ where: { brandId, active: true, url: { not: null } }, select: { name: true, url: true, categories: { select: { category: { select: { name: true } } } } }, take: 300 }),
     db.pageSnapshot.findMany({ where: { brandId, pageType: "product" }, select: { findings: true }, take: 200 }),
     db.product.count({ where: { brandId, workspaceId, active: true } }),
+    // Fırsat/taslak için doğrulanmış hedef sayfa (ör. sitede canlı kontrol edilen kategori sayfası).
+    db.opportunity.findMany({ where: { brandId, workspaceId, targetUrl: { not: null } }, select: { clusterId: true, targetUrl: true }, orderBy: { updatedAt: "desc" } }),
   ]);
   const norm = (s: string) => s.trim().toLocaleLowerCase("tr-TR");
   const home = `https://${brandRow.domain.replace(/^www\./, "")}/`;
   const groups: FlowGroup[] = plan.adGroups.map((g) => {
     const cat = norm(g.category ?? g.label);
-    const catPage = categories.find((c) => norm(c.name) === cat);
+    const oppTarget = oppTargets.find((o) => o.clusterId === g.clusterId)?.targetUrl ?? null;
+    const catPage = categories.find((c) => norm(c.name) === cat) ?? (oppTarget ? { name: g.label, url: oppTarget } : undefined);
     // Ad eşleşmesi grup adının tüm kelimelerini ister ("tek kişilik nevresim" grubuna "çift kişilik" ürün girmez);
     // kelime kökü için son iki harf esnek ("takımı" ~ "takım").
     const words = cat.split(/\s+/).filter((w) => w.length >= 3).map((w) => w.slice(0, Math.max(3, w.length - 2)));

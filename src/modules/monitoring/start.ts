@@ -34,15 +34,35 @@ export function engineAvailability(access: BrandAccess) {
 const PERMANENT_ENGINE_ERRORS = ["auth", "insufficient_quota", "http_404", "not_configured", "search_unavailable"];
 
 /**
- * Son 6 saatte en son yanıtlarının hepsi (en az 3) kalıcı hatayla düşen platformlar (ör. kredisi biten Gemini).
- * Bu platformlar yeni ölçüme eklenmez; boşa başarısız yanıt ve "kısmen tamamlandı" üretmez. Sağlayıcı düzelince
- * (yeni başarılı yanıt veya 6 saat) yeniden eklenir. Yalnız durum kodu okunur, içerik okunmaz.
+ * Kredisi/anahtarı bozuk platformlar (ör. kotası biten Gemini): son kanıtların (hesap içi yanıtlar ve ücretsiz
+ * ölçümler, 7 gün) en yenileri kalıcı hatadır ve o zamandan beri başarılı yanıt yoktur. Bu platformlar ölçüme
+ * eklenmez; boşa başarısız yanıt ve "kısmen tamamlandı" üretmez. Son hata 24 saatten eskiyse platform bir kez
+ * yeniden denenir (sağlayıcı düzelince kendiliğinden geri gelir). Yalnız durum kodları okunur, içerik okunmaz.
  */
 export async function recentlyBrokenEngines(db: PrismaClient, engines: EngineKey[], now = Date.now()): Promise<EngineKey[]> {
+  if (!engines.length) return [];
+  const since = new Date(now - 7 * 86_400_000);
   const out: EngineKey[] = [];
   for (const engine of engines) {
-    const last = await db.observation.findMany({ where: { engine, status: { not: "pending" }, updatedAt: { gte: new Date(now - 6 * 3600_000) } }, orderBy: { updatedAt: "desc" }, take: 3, select: { status: true, errorCode: true } });
-    if (last.length >= 3 && last.every((o) => o.status === "failed" && PERMANENT_ENGINE_ERRORS.includes(o.errorCode ?? ""))) out.push(engine);
+    // Yalnız bu platformu kapsayan son ücretsiz ölçümler (genel son N kayıt başka platformlarla dolabilir).
+    const audits = await db.audit.findMany({ where: { updatedAt: { gte: since }, status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["scopeEngines"], array_contains: [engine] } }, orderBy: { updatedAt: "desc" }, take: 3, select: { updatedAt: true, resultSummary: true } });
+    const obs = await db.observation.findMany({ where: { engine, status: { not: "pending" }, updatedAt: { gte: since } }, orderBy: { updatedAt: "desc" }, take: 3, select: { status: true, errorCode: true, updatedAt: true } });
+    type Ev = { at: number; ok: boolean; permanent: boolean };
+    const events: Ev[] = obs.map((o) => ({ at: o.updatedAt.getTime(), ok: o.status === "succeeded", permanent: o.status === "failed" && PERMANENT_ENGINE_ERRORS.includes(o.errorCode ?? "") }));
+    for (const a of audits) {
+      const sum = a.resultSummary as { scopeEngines?: string[]; failedCalls?: string[] } | null;
+      if (!sum?.scopeEngines?.includes(engine)) continue;
+      const codes = (sum.failedCalls ?? []).filter((f) => f.startsWith(`${engine}:`)).map((f) => f.slice(engine.length + 1));
+      events.push({ at: a.updatedAt.getTime(), ok: codes.length === 0, permanent: codes.length > 0 && codes.every((c) => PERMANENT_ENGINE_ERRORS.includes(c)) });
+    }
+    // En yeniden geriye: son başarıdan (veya geçici hatadan) beri art arda en az 2 kalıcı hata.
+    const sorted = events.sort((x, y) => y.at - x.at);
+    let streak = 0;
+    for (const e of sorted) {
+      if (e.ok || !e.permanent) break;
+      streak++;
+    }
+    if (streak >= 2 && now - sorted[0]!.at < 86_400_000) out.push(engine);
   }
   return out;
 }

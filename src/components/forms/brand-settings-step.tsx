@@ -25,12 +25,12 @@ export function BrandSettingsStep({ url, initial }: { url: string; initial: { co
   return (
     <div className="flex flex-col gap-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Ülke (ISO)" htmlFor="s-country"><input id="s-country" maxLength={2} className={inputClass} value={f.country} onChange={set("country")} /></Field>
-        <Field label="Dil" htmlFor="s-lang"><input id="s-lang" maxLength={5} className={inputClass} value={f.language} onChange={set("language")} /></Field>
+        <Field label="Ülke kodu" htmlFor="s-country" hint="Türkiye için TR"><input id="s-country" maxLength={2} className={inputClass} value={f.country} onChange={set("country")} /></Field>
+        <Field label="Dil kodu" htmlFor="s-lang" hint="Türkçe için tr"><input id="s-lang" maxLength={5} className={inputClass} value={f.language} onChange={set("language")} /></Field>
         <Field label="Saat dilimi" htmlFor="s-tz"><input id="s-tz" className={inputClass} value={f.timezone} onChange={set("timezone")} /></Field>
         <Field label="Para birimi" htmlFor="s-cur"><input id="s-cur" maxLength={3} className={inputClass} value={f.currency} onChange={set("currency")} /></Field>
       </div>
-      <Field label="Marka alias'ları" htmlFor="s-alias" hint="Virgülle ayırın; kısa/jenerik alias'lar inceleme kuyruğuna düşer"><input id="s-alias" className={inputClass} value={f.aliases} onChange={set("aliases")} /></Field>
+      <Field label="Markanızın diğer yazılışları (isteğe bağlı)" htmlFor="s-alias" hint="Virgülle ayırın (ör. Karaca Home). Çok kısa veya genel kelimeler otomatik eşleştirilmez; önce onayınıza sunulur."><input id="s-alias" className={inputClass} value={f.aliases} onChange={set("aliases")} /></Field>
       <Field label="Ürün kategorileri" htmlFor="s-cats" hint="Virgülle ayırın"><input id="s-cats" className={inputClass} value={f.categories} onChange={set("categories")} /></Field>
       <p aria-live="polite" className="text-xs text-muted">{state === "saving" ? "Kaydediliyor…" : state === "saved" ? "Kaydedildi" : state === "error" ? "Kaydedilemedi — alanları kontrol edin" : ""}</p>
     </div>

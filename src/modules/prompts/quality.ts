@@ -1,3 +1,4 @@
+import { questionNoun } from "@/modules/audit/business";
 /**
  * Soru kalitesi: amaç etiketi, ürün türü belirsizliği ve katalog uyumu. Sayısal "kalite puanı" üretilmez;
  * kullanıcıya "Uygun / Düzenleme gerekli" ve tek cümle neden gösterilir. Mevcut soruları değiştirmez.
@@ -29,10 +30,12 @@ const cap = (s: string) => s.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR"));
 export function purposeTemplates(category: string, country: string): Array<{ text: string; purpose: QuestionPurpose }> {
   const place = country === "TR" ? "Türkiye'de " : "";
   const c = lower(category.trim());
+  // Tamlamada tekil: "yemek takımı markaları", "yemek takımı türleri" ("yemek takımları markaları" değil).
+  const n = questionNoun(c);
   const list: Array<{ text: string; purpose: QuestionPurpose }> = [
-    { text: `${place}en iyi ${c} markaları hangileri?`, purpose: "brand_discovery" },
-    { text: `${cap(c)} seçerken nelere dikkat etmeliyim?`, purpose: "need_based" },
-    { text: `${cap(c)} türleri arasındaki farklar nelerdir?`, purpose: "comparison" },
+    { text: `${place}en iyi ${n} markaları hangileri?`, purpose: "brand_discovery" },
+    { text: `${cap(n)} seçerken nelere dikkat etmeliyim?`, purpose: "need_based" },
+    { text: `${cap(n)} türleri arasındaki farklar nelerdir?`, purpose: "comparison" },
     { text: `${place}kaliteli ${c} nereden alabilirim?`, purpose: "purchase" },
     { text: `${cap(c)} için hangi markaları önerirsin?`, purpose: "brand_discovery" },
   ];

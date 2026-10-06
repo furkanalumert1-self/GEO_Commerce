@@ -10,7 +10,8 @@ export default async function WorkspaceIndex() {
   // Yetkili tek marka varsa doğrudan Genel Bakış; aksi halde marka listesi. "Tüm markalar" overview'a gider (döngü yok).
   const target = singleBrandTarget(ws);
   if (target) redirect(target);
-  if (ws.length > 0) redirect(`/w/${ws[0]!.id}/overview`);
+  // Birden çok çalışma alanında en yeni açılır (ör. az önce kaydedilen rapordan oluşan alan).
+  if (ws.length > 0) redirect(`/w/${ws[ws.length - 1]!.id}/overview`);
   return (
     <main id="main" className="mx-auto max-w-md px-4 py-10">
       <Card className="p-5">

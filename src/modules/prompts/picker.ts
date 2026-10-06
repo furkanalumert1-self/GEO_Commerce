@@ -91,6 +91,16 @@ export function buildPickerGroups(clusters: ClusterRow[], brandCategories: strin
   return groups.sort((a, b) => a.label.localeCompare(b.label, "tr"));
 }
 
+/**
+ * Site taramasında/ürün dosyasında bulunan ürün kategorileri de soru grubu olarak sunulur (ör. "Çarşaflar",
+ * "Termos"): en az 2 ürünü olanlar, ürün sayısına göre en çok 8 tane. Tek ürünlü kategoriler listeyi kalabalıklaştırmaz.
+ */
+export function catalogGroupCategories(catalog: Array<{ categories: string[] }>, max = 8): string[] {
+  const count = new Map<string, number>();
+  for (const p of catalog) for (const c of new Set(p.categories.map((x) => x.trim()).filter(Boolean))) count.set(c, (count.get(c) ?? 0) + 1);
+  return [...count.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "tr")).slice(0, max).map(([c]) => c);
+}
+
 export async function loadPickerData(db: PrismaClient, ids: { workspaceId: string; brandId: string }, brand: { categories: string[]; country: string; language: string }, limit: number): Promise<PickerData> {
   const [clusters, used, products] = await Promise.all([
     db.intentCluster.findMany({
@@ -102,5 +112,5 @@ export async function loadPickerData(db: PrismaClient, ids: { workspaceId: strin
     db.product.findMany({ where: { workspaceId: ids.workspaceId, brandId: ids.brandId, active: true }, select: { name: true, categories: { select: { category: { select: { name: true } } } } }, take: 1000 }),
   ]);
   const catalog = products.map((p) => ({ name: p.name, categories: p.categories.map((c) => c.category.name) }));
-  return { groups: buildPickerGroups(clusters, brand.categories, brand.country, catalog), used, limit, locale: `${brand.language}-${brand.country}` };
+  return { groups: buildPickerGroups(clusters, [...brand.categories, ...catalogGroupCategories(catalog)], brand.country, catalog), used, limit, locale: `${brand.language}-${brand.country}` };
 }

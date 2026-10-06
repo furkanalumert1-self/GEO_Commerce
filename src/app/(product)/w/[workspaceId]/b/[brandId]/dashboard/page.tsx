@@ -14,6 +14,7 @@ import { actionsNeedingFix } from "@/modules/actions/readiness";
 import { revenueAvailability, revenueVisible } from "@/modules/commerce/availability";
 import { listCandidates } from "@/modules/catalog/candidates";
 import { ENGINE_SHORT, fmtDate, fmtMoney, fmtNumber, fmtPct, GAP_LABEL, plainStoredText, SURFACE_LABEL } from "@/lib/format";
+import { missedQuestions } from "@/modules/opportunities/missed";
 import { absoluteDelta, actionCta, alignPrevious, impactLevel, nextStep, plainTr, previousPeriod, sovMissingReason, STRONG_EVIDENCE_CONFIDENCE } from "@/lib/view-models";
 
 export const metadata: Metadata = { title: "Genel Bakış" };
@@ -90,6 +91,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     hasRun: Boolean(lastRun),
     continuing: continuingOpp ? { title: continuingOpp.title, href: `/actions/${actionByOpp.get(continuingOpp.id)}` } : null,
     topOpportunity: topOpps[0] ? { title: topOpps[0].title, href: `/opportunities/${topOpps[0].id}` } : null,
+    runInProgress: lastRun && ["queued", "running"].includes(lastRun.status) ? { href: `/runs/${lastRun.id}` } : null,
+    missedCount: openOpps === 0 && lastRun ? (await missedQuestions(db, workspaceId, brandId, { ownDomain: access.brand.domain })).missedCount : 0,
   });
   // Gelir yalnız gerçekten ölçülüyorsa gösterilir; bağlantısız durum 0 satış sayılmaz.
   const revenue = revenueVisible(revenueState) ? await revenueSummary(db, workspaceId, brandId, { from: range.from, to: range.to }) : null;
@@ -144,7 +147,8 @@ export default async function DashboardPage({ params, searchParams }: { params: 
     if (!pe || pe.validObservations === 0) return `${engineName(e)} yanıt vermedi`;
     return `${engineName(e)} yanıtlarının yalnız %${Math.round((pe.coverage ?? 0) * 100)}'i alınabildi`;
   });
-  const usedEngines = metrics.perEngine.filter((e) => !metrics.aggregate.missingEngines.includes(e.engine) && e.validObservations > 0).map((e) => engineName(e.engine));
+  // Kapsamı eksik olsa da geçerli yanıtı olan platformlar sonuca dahildir.
+  const usedEngines = metrics.perEngine.filter((e) => e.validObservations > 0).map((e) => engineName(e.engine));
   const scoredDays = trend.filter((d) => d.score !== null);
 
   return (

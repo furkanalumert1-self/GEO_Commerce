@@ -8,7 +8,7 @@ import { RunPlanner } from "@/components/forms/run-planner";
 import { Pager, pageParams } from "@/components/data/pager";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
-import { engineAvailability } from "@/modules/monitoring/start";
+import { engineAvailability, recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { fmtNumber } from "@/lib/format";
 import { executionMode } from "@/lib/queue";
 import { loadPickerData } from "@/modules/prompts/picker";
@@ -128,7 +128,7 @@ export default async function PromptsPage({ params, searchParams }: { params: Pr
         <Card className="mt-6" id="olcum">
           <CardHeader title="Ölçüm başlat" description="Başlatmadan önce soru, platform ve kota kullanımı gösterilir; onayınız olmadan ölçüm başlamaz." />
           <div className="px-5 pb-5 sm:px-6">
-            <RunPlanner url={`${api}/runs`} engines={engines.all} locale={`${access.brand.language}-${access.brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />
+            <RunPlanner url={`${api}/runs`} engines={engines.all} broken={await recentlyBrokenEngines(db, engines.allowed)} locale={`${access.brand.language}-${access.brand.country}`} inline={executionMode() === "inline"} runPagePrefix={`/w/${workspaceId}/b/${brandId}/runs`} />
           </div>
         </Card>
       ) : null}

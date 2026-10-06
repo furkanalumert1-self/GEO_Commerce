@@ -123,7 +123,7 @@ interface StepInfo {
  * `inline`: Redis'siz geçici dağıtım — audit, bu sayfa açıkken açık POST adımlarıyla ilerler (sekme kapanırsa
  * duraklar, geri gelince devam eder). Aksi halde worker yürütür ve sayfa yalnız durumu sorgular (GET).
  */
-export function AuditResult({ token, initial, signedIn, inline = false }: { token: string; initial: View; signedIn: boolean; inline?: boolean }) {
+export function AuditResult({ token, initial, signedIn, inline = false, accountHref = null }: { token: string; initial: View; signedIn: boolean; inline?: boolean; accountHref?: string | null }) {
   const [step, setStep] = useState<StepInfo | null>(null);
   const [paused, setPaused] = useState(false);
   const [view, setView] = useState<View>(initial);
@@ -538,7 +538,11 @@ export function AuditResult({ token, initial, signedIn, inline = false }: { toke
             </p>
             {claimError ? <p className="mt-2 text-sm text-danger" role="alert">{claimError}</p> : null}
             <div className="mt-3 flex flex-wrap gap-2">
-              {view.claimed ? (
+              {view.claimed && accountHref ? (
+                <Button asChild variant="primary">
+                  <Link href={accountHref}>Hesabınızda devam edin →</Link>
+                </Button>
+              ) : view.claimed ? (
                 <Badge tone="neutral">Bu rapor bir hesaba kaydedildi</Badge>
               ) : signedIn ? (
                 <Button variant="primary" onClick={claim} disabled={claiming}>{claiming ? "Kaydediliyor…" : "Raporu hesabıma kaydet"}</Button>

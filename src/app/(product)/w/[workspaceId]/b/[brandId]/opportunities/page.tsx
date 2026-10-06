@@ -5,6 +5,8 @@ import { Pager, pageParams } from "@/components/data/pager";
 import { db } from "@/lib/db";
 import { pageBrand } from "@/lib/page-access";
 import { unlockedOpportunityIds } from "@/modules/opportunities/access";
+import { missedQuestions } from "@/modules/opportunities/missed";
+import { NoOpportunityGuide } from "@/components/data/no-opportunity-guide";
 import { fmtDate, GAP_LABEL, OPP_STATUS_LABEL } from "@/lib/format";
 import { IMPACT_LABEL, impactLevel } from "@/lib/view-models";
 
@@ -67,7 +69,14 @@ export default async function OpportunitiesPage({ params, searchParams }: { para
       </div>
       <Card>
         {rows.length === 0 ? (
-          <EmptyState title={status || q ? "Sonuç yok" : "Henüz fırsat yok"} description={status || q ? "Seçili filtrelerde fırsat yok." : "Ölçümler tamamlandıkça rakiplere kaybedilen niyetler burada listelenir."} action={status || q ? <Link className="text-primary underline" href={base}>Filtreleri sıfırla</Link> : undefined} />
+          status || q ? (
+            <EmptyState title="Sonuç yok" description="Seçili filtrelerde fırsat yok." action={<Link className="text-primary underline" href={base}>Filtreleri sıfırla</Link>} />
+          ) : (
+            <div className="p-5 sm:p-6">
+              <h2 className="mb-2 font-semibold">Henüz fırsat yok</h2>
+              <NoOpportunityGuide data={await missedQuestions(db, workspaceId, brandId, { ownDomain: access.brand.domain })} competitorsHref={`/w/${workspaceId}/b/${brandId}/competitors`} visibilityHref={`/w/${workspaceId}/b/${brandId}/visibility`} />
+            </div>
+          )
         ) : (
           <TableWrap label="Fırsatlar">
             <thead>

@@ -78,118 +78,124 @@ export async function executeRun(
   const deadEngines = new Map<string, string>(
     (await db.observation.findMany({ where: { runId, status: "failed", errorCode: { in: PERMANENT } }, distinct: ["engine"], select: { engine: true, errorCode: true } })).map((o) => [o.engine, o.errorCode!]),
   );
+  // Tek örnek (soru × platform × dil × tekrar): kalıcı ilerleme, deneme ve kayıt. Süre bütçesi dolarsa "incomplete".
+  const sample = async (v: (typeof versions)[number], engine: EngineKey, locale: string, rep: number): Promise<"done" | "incomplete"> => {
+    const adapter = adapters[engine];
+    const [language, country] = locale.split("-");
+    const key = sampleKey(runId, v.id, engine, locale, rep);
+    const existing = await db.observation.findUnique({ where: { sampleKey: key } });
+    if (existing?.status === "succeeded") {
+      done++;
+      return "done";
+    }
+    const obs =
+      existing ??
+      (await db.observation.create({
+        data: {
+          workspaceId: run.workspaceId,
+          brandId: run.brandId,
+          runId,
+          promptVersionId: v.id,
+          provider: adapter.provider,
+          engine,
+          surface: adapter.surface,
+          country: country ?? brand.country,
+          language: language ?? brand.language,
+          repetition: rep,
+          weight: v.prompt.weight,
+          sampleKey: key,
+          sampledAt: now(),
+        },
+      }));
+    let attempt = existing?.attempt ?? 0;
+    let lastErr: ProviderError | null = null;
+    const deadCode = deadEngines.get(engine);
+    if (deadCode) {
+      await db.observation.update({ where: { id: obs.id }, data: { status: "failed", attempt: maxAttempts, errorCode: deadCode } });
+      done++;
+      await opts.onProgress?.(done, total);
+      return "done";
+    }
+    while (attempt < maxAttempts) {
+      if (overBudget()) {
+        // Süre bütçesi doldu: gözlem ara durumda kalır, sonraki adım aynı sampleKey ile devam eder.
+        await db.observation.update({ where: { id: obs.id }, data: { attempt } });
+        return "incomplete";
+      }
+      attempt++;
+      const attemptId = `${key}:${attempt}`;
+      try {
+        const answer = await adapter.ask({ prompt: v.text, country: country ?? brand.country, language: language ?? brand.language, signal: opts.callTimeoutMs ? AbortSignal.timeout(opts.callTimeoutMs) : undefined });
+        await db.costLedger.upsert({
+          where: { attemptId },
+          update: {},
+          create: { workspaceId: run.workspaceId, provider: answer.provider, model: answer.model, operation: "monitor", attemptId, costMicros: answer.costMicros ?? 0n, succeeded: true },
+        });
+        const ex = extract(answer.text, answer.urls, entities);
+        await db.$transaction(async (tx) => {
+          await tx.mention.deleteMany({ where: { observationId: obs.id } });
+          await tx.citation.deleteMany({ where: { observationId: obs.id } });
+          await tx.observation.update({
+            where: { id: obs.id },
+            data: {
+              status: "succeeded",
+              attempt,
+              model: answer.model,
+              provider: answer.provider,
+              surface: answer.surface,
+              rawText: answer.text,
+              listDetected: ex.listDetected,
+              latencyMs: answer.latencyMs,
+              costMicros: answer.costMicros,
+              parseVersion: ex.parseVersion,
+              errorCode: null,
+              sampledAt: now(),
+            },
+          });
+          if (ex.mentions.length) {
+            await tx.mention.createMany({
+              data: ex.mentions.map((m) => ({ workspaceId: run.workspaceId, observationId: obs.id, entityType: m.entityType, entityId: m.entityId, kind: m.kind, rank: m.rank, confidence: m.confidence, excerpt: m.excerpt, needsReview: m.needsReview })),
+              skipDuplicates: true,
+            });
+          }
+          if (ex.citations.length) {
+            await tx.citation.createMany({
+              data: ex.citations.map((c) => ({ workspaceId: run.workspaceId, observationId: obs.id, url: c.url, canonicalUrl: c.canonicalUrl, domain: c.domain, association: c.association, entityId: c.entityId, sourceType: c.sourceType })),
+              skipDuplicates: true,
+            });
+          }
+        });
+        lastErr = null;
+        break;
+      } catch (e) {
+        const pe = e instanceof ProviderError ? e : new ProviderError((e as Error).message, false);
+        lastErr = pe;
+        await db.costLedger.upsert({
+          where: { attemptId },
+          update: {},
+          create: { workspaceId: run.workspaceId, provider: adapter.provider, model: null, operation: "monitor", attemptId, costMicros: 0n, succeeded: false },
+        });
+        if (!pe.retryable) break;
+        if (attempt < maxAttempts) await sleep(Math.min(pe.retryAfterMs ?? 200 * 2 ** attempt, 5000) * (process.env.NODE_ENV === "test" ? 0 : 1));
+      }
+    }
+    if (lastErr) {
+      const permanent = PERMANENT.includes(lastErr.code);
+      if (permanent) deadEngines.set(engine, lastErr.code);
+      // Kalıcı/yeniden denenemez hata: deneme hakkı tükendi sayılır, sonraki adımlarda tekrar çağrılmaz.
+      await db.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt: lastErr.retryable ? attempt : maxAttempts, errorCode: lastErr.code } });
+    }
+    done++;
+    await opts.onProgress?.(done, total);
+    return "done";
+  };
+  // Aynı sorunun platformları paralel sorulur (her platform farklı sağlayıcı; sağlayıcı başına aynı anda tek çağrı).
+  // Ölçüm süresi kabaca platform sayısına bölünür; çağrı ve maliyet sayısı değişmez.
   for (const v of versions) {
-    for (const engine of plan.engines) {
-      const adapter = adapters[engine];
-      for (const locale of plan.locales) {
-        const [language, country] = locale.split("-");
-        for (let rep = 1; rep <= plan.repetitions; rep++) {
-          const key = sampleKey(runId, v.id, engine, locale, rep);
-          const existing = await db.observation.findUnique({ where: { sampleKey: key } });
-          if (existing?.status === "succeeded") {
-            done++;
-            continue;
-          }
-          const obs =
-            existing ??
-            (await db.observation.create({
-              data: {
-                workspaceId: run.workspaceId,
-                brandId: run.brandId,
-                runId,
-                promptVersionId: v.id,
-                provider: adapter.provider,
-                engine,
-                surface: adapter.surface,
-                country: country ?? brand.country,
-                language: language ?? brand.language,
-                repetition: rep,
-                weight: v.prompt.weight,
-                sampleKey: key,
-                sampledAt: now(),
-              },
-            }));
-          let attempt = existing?.attempt ?? 0;
-          let lastErr: ProviderError | null = null;
-          const deadCode = deadEngines.get(engine);
-          if (deadCode) {
-            await db.observation.update({ where: { id: obs.id }, data: { status: "failed", attempt: maxAttempts, errorCode: deadCode } });
-            done++;
-            await opts.onProgress?.(done, total);
-            continue;
-          }
-          while (attempt < maxAttempts) {
-            if (overBudget()) {
-              // Süre bütçesi doldu: gözlem ara durumda kalır, sonraki adım aynı sampleKey ile devam eder.
-              await db.observation.update({ where: { id: obs.id }, data: { attempt } });
-              return { incomplete: true, done, total, ok: 0, failed: 0, coverage: null, status: "running" };
-            }
-            attempt++;
-            const attemptId = `${key}:${attempt}`;
-            try {
-              const answer = await adapter.ask({ prompt: v.text, country: country ?? brand.country, language: language ?? brand.language, signal: opts.callTimeoutMs ? AbortSignal.timeout(opts.callTimeoutMs) : undefined });
-              await db.costLedger.upsert({
-                where: { attemptId },
-                update: {},
-                create: { workspaceId: run.workspaceId, provider: answer.provider, model: answer.model, operation: "monitor", attemptId, costMicros: answer.costMicros ?? 0n, succeeded: true },
-              });
-              const ex = extract(answer.text, answer.urls, entities);
-              await db.$transaction(async (tx) => {
-                await tx.mention.deleteMany({ where: { observationId: obs.id } });
-                await tx.citation.deleteMany({ where: { observationId: obs.id } });
-                await tx.observation.update({
-                  where: { id: obs.id },
-                  data: {
-                    status: "succeeded",
-                    attempt,
-                    model: answer.model,
-                    provider: answer.provider,
-                    surface: answer.surface,
-                    rawText: answer.text,
-                    listDetected: ex.listDetected,
-                    latencyMs: answer.latencyMs,
-                    costMicros: answer.costMicros,
-                    parseVersion: ex.parseVersion,
-                    errorCode: null,
-                    sampledAt: now(),
-                  },
-                });
-                if (ex.mentions.length) {
-                  await tx.mention.createMany({
-                    data: ex.mentions.map((m) => ({ workspaceId: run.workspaceId, observationId: obs.id, entityType: m.entityType, entityId: m.entityId, kind: m.kind, rank: m.rank, confidence: m.confidence, excerpt: m.excerpt, needsReview: m.needsReview })),
-                    skipDuplicates: true,
-                  });
-                }
-                if (ex.citations.length) {
-                  await tx.citation.createMany({
-                    data: ex.citations.map((c) => ({ workspaceId: run.workspaceId, observationId: obs.id, url: c.url, canonicalUrl: c.canonicalUrl, domain: c.domain, association: c.association, entityId: c.entityId, sourceType: c.sourceType })),
-                    skipDuplicates: true,
-                  });
-                }
-              });
-              lastErr = null;
-              break;
-            } catch (e) {
-              const pe = e instanceof ProviderError ? e : new ProviderError((e as Error).message, false);
-              lastErr = pe;
-              await db.costLedger.upsert({
-                where: { attemptId },
-                update: {},
-                create: { workspaceId: run.workspaceId, provider: adapter.provider, model: null, operation: "monitor", attemptId, costMicros: 0n, succeeded: false },
-              });
-              if (!pe.retryable) break;
-              if (attempt < maxAttempts) await sleep(Math.min(pe.retryAfterMs ?? 200 * 2 ** attempt, 5000) * (process.env.NODE_ENV === "test" ? 0 : 1));
-            }
-          }
-          if (lastErr) {
-            const permanent = PERMANENT.includes(lastErr.code);
-            if (permanent) deadEngines.set(engine, lastErr.code);
-            // Kalıcı/yeniden denenemez hata: deneme hakkı tükendi sayılır, sonraki adımlarda tekrar çağrılmaz.
-            await db.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt: lastErr.retryable ? attempt : maxAttempts, errorCode: lastErr.code } });
-          }
-          done++;
-          await opts.onProgress?.(done, total);
-        }
+    for (const locale of plan.locales) {
+      for (let rep = 1; rep <= plan.repetitions; rep++) {
+        const results = await Promise.all(plan.engines.map((engine) => sample(v, engine, locale, rep)));
+        if (results.includes("incomplete")) return { incomplete: true, done, total, ok: 0, failed: 0, coverage: null, status: "running" };
       }
     }
   }

@@ -12,7 +12,8 @@ import { isUuid } from "@/modules/tenancy/access";
 import { can } from "@/lib/permissions";
 import { ENGINE_SHORT, fmtDate } from "@/lib/format";
 import { brandMetrics } from "@/modules/monitoring/queries";
-import { measurementOutcome, measurementWindows, workflowView } from "@/lib/view-models";
+import { MIN_EFFECT_SAMPLES, measurementOutcome, measurementWindows, workflowView } from "@/lib/view-models";
+import { engineAvailability, recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { blockingIssues, type ActionContent } from "@/modules/actions/workflow";
 
 export const metadata: Metadata = { title: "Aksiyon" };
@@ -81,18 +82,28 @@ export default async function ActionPage({ params }: { params: Promise<{ workspa
     }
     // Sonuç yalnız yeni ölçümle oluşur: aynı soru kümesini tek tıkla yeniden ölçme.
     if (a.status === "measuring" && can(ctx, "runs.start")) {
+      // Küçük soru kümelerinde (ör. 3 soru × 2 platform = 6 yanıt) sorular tekrarlanır: tek ölçümde en az
+      // MIN_EFFECT_SAMPLES yanıta ulaşılır (en çok 3 tur). Bozuk platformlar sayılmaz; sunucu da onları çıkarır.
+      const { allowed } = engineAvailability(access);
+      const broken = await recentlyBrokenEngines(db, allowed);
+      const engineCount = Math.max(1, allowed.filter((e) => !broken.includes(e)).length);
+      const activePrompts = promptIds?.length ? await db.prompt.count({ where: { id: { in: promptIds }, active: true, archivedAt: null } }) : 0;
+      const repeats = activePrompts ? Math.min(3, Math.max(1, Math.ceil(MIN_EFFECT_SAMPLES / (activePrompts * engineCount)))) : 1;
       remeasure = (
         <div className="mt-3">
           <ApiButton
             url={`/api/v1/workspaces/${workspaceId}/brands/${brandId}/runs`}
-            body={{ engines: ["chatgpt", "gemini", "claude", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats: 1, ...(promptIds?.length ? { promptIds } : {}) }}
+            body={{ engines: ["chatgpt", "gemini", "claude", "perplexity"], locales: [`${access.brand.language}-${access.brand.country}`], repeats, ...(promptIds?.length ? { promptIds } : {}) }}
             idempotent
             variant="primary"
             label={a.opportunity ? "Bu soruları şimdi yeniden ölç" : "Soruları şimdi yeniden ölç"}
             pendingLabel="Başlatılıyor…"
             redirectTo={`${base}/runs/{runId}`}
           />
-          <p className="mt-1 text-xs text-text-secondary">Değişikliğin AI yanıtlarına yansıması birkaç gün sürebilir; en anlamlı sonuç için birkaç gün arayla tekrar ölçün.</p>
+          <p className="mt-1 text-xs text-text-secondary">
+            {activePrompts ? `${activePrompts * engineCount * repeats} yanıt · yaklaşık ${Math.max(1, Math.ceil((activePrompts * repeats * 35) / 60))} dk (sayfa açık kalmalı). ` : ""}
+            Değişikliğin AI yanıtlarına yansıması birkaç gün sürebilir; en anlamlı sonuç için birkaç gün arayla tekrar ölçün.
+          </p>
         </div>
       );
     }

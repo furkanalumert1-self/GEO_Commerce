@@ -118,6 +118,44 @@ describe("ölçüm ve job'lar", () => {
     expect(await db.costLedger.count({ where: { workspaceId: t.ws.id, succeeded: false } })).toBe(4);
   });
 
+  it("aynı sorunun platformları paralel sorulur; sağlayıcı başına aynı anda tek çağrı", async () => {
+    const t = await makeTenant();
+    const cluster = await db.intentCluster.create({ data: { workspaceId: t.ws.id, brandId: t.brand.id, type: "category_discovery", label: "c", locale: "tr-TR" } });
+    const versions = [];
+    for (const i of [1, 2]) {
+      const p = await db.prompt.create({ data: { workspaceId: t.ws.id, brandId: t.brand.id, clusterId: cluster.id } });
+      versions.push(await db.promptVersion.create({ data: { workspaceId: t.ws.id, promptId: p.id, version: 1, text: `Soru ${i}?`, normalizedHash: `h${i}`, commercialScore: 50, commercialRubric: {} } }));
+    }
+    let active = 0;
+    let peak = 0;
+    const perEngine = new Map<string, number>();
+    let perEnginePeak = 0;
+    const slow = (engine: EngineKey): AiMonitorAdapter => {
+      const base = createFixtureAdapter(engine);
+      return {
+        ...base,
+        ask: async (input) => {
+          active++;
+          perEngine.set(engine, (perEngine.get(engine) ?? 0) + 1);
+          peak = Math.max(peak, active);
+          perEnginePeak = Math.max(perEnginePeak, perEngine.get(engine)!);
+          await new Promise((r) => setTimeout(r, 30));
+          active--;
+          perEngine.set(engine, perEngine.get(engine)! - 1);
+          return base.ask(input);
+        },
+      };
+    };
+    const engines: EngineKey[] = ["chatgpt", "gemini", "claude"];
+    const adapters = Object.fromEntries(engines.map((e) => [e, slow(e)])) as unknown as Record<EngineKey, AiMonitorAdapter>;
+    const plan = { promptVersionIds: versions.map((v) => v.id), engines, locales: ["tr-TR"], repetitions: 1 };
+    const run = await createRun(db, { workspaceId: t.ws.id, brandId: t.brand.id, plan, trigger: "test", operationId: `run-par-${t.ws.id}` });
+    const res = await executeRun(db, run.id, plan, adapters, { maxAttempts: 1 });
+    expect(res).toMatchObject({ status: "succeeded", total: 6, done: 6 });
+    expect(peak).toBe(3);
+    expect(perEnginePeak).toBe(1);
+  });
+
   it("non-retryable hata DLQ'ya düşer; geçici hata yeniden denenir", async () => {
     handlers.test_fail_hard = async () => { throw new NonRetryableError("auth"); };
     let n = 0;

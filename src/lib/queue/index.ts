@@ -130,6 +130,18 @@ export async function relayOutbox(db: PrismaClient, limit = 100): Promise<number
   return n;
 }
 
+/**
+ * Müşteriye gösterilen iş hatası: veritabanı/altyapı ayrıntısı (sorgu metni, bağlantı kodları) gösterilmez.
+ * Ham mesaj JobRecord.lastError'da kalır (yönetici DLQ ve loglar için).
+ */
+export function customerJobError(message: string | null | undefined): string {
+  if (!message) return "Bilinmeyen hata";
+  if (/prisma|invocation|database error|EMAXCONN|ECONN|ETIMEDOUT|connection|pool|socket|deadlock|P\d{4}\b/i.test(message)) {
+    return "Geçici bir sunucu sorunu oluştu. Birkaç saniye sonra “Yeniden dene / devam et” ile kaldığı yerden sürdürebilirsiniz.";
+  }
+  return message;
+}
+
 export async function jobStatus(db: PrismaClient, jobId: string, workspaceId: string | null) {
   const job = await db.jobRecord.findFirst({ where: { id: jobId, workspaceId } });
   if (!job) return null;
@@ -141,7 +153,7 @@ export async function jobStatus(db: PrismaClient, jobId: string, workspaceId: st
     execution: (job.cursor as { execution?: string } | null)?.execution === "inline" ? "inline" : "queue",
     resumable: job.status === "queued" || job.status === "failed" || (job.status === "running" && (!job.lockedUntil || job.lockedUntil < new Date())),
     attempts: job.attempts,
-    error: job.status === "failed" || job.status === "dead" ? (job.lastError ?? "Bilinmeyen hata") : null,
+    error: job.status === "failed" || job.status === "dead" ? customerJobError(job.lastError) : null,
     // Sonuç kaydı oluşturan işler (ör. generate_action) kimliği adım durumuna yazar.
     resultId: ((job.cursor as { step?: { actionId?: string } } | null)?.step?.actionId) ?? null,
     startedAt: job.startedAt,

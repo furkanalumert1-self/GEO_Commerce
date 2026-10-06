@@ -79,18 +79,21 @@ export async function executeRun(
     (await db.observation.findMany({ where: { runId, status: "failed", errorCode: { in: PERMANENT } }, distinct: ["engine"], select: { engine: true, errorCode: true } })).map((o) => [o.engine, o.errorCode!]),
   );
   // Tek örnek (soru × platform × dil × tekrar): kalıcı ilerleme, deneme ve kayıt. Süre bütçesi dolarsa "incomplete".
+  // Platformlar paralel sorulur ama veritabanı yazımları sırayla yapılır: sunucu örneği başına bağlantı sayısı
+  // artmaz (Supabase pooler istemci sınırı). Yavaş olan sağlayıcı çağrılarıdır; DB yazımları milisaniyelerdir.
+  const { run: serial, client: sdb } = serializedDb(db);
   const sample = async (v: (typeof versions)[number], engine: EngineKey, locale: string, rep: number): Promise<"done" | "incomplete"> => {
     const adapter = adapters[engine];
     const [language, country] = locale.split("-");
     const key = sampleKey(runId, v.id, engine, locale, rep);
-    const existing = await db.observation.findUnique({ where: { sampleKey: key } });
+    const existing = await sdb.observation.findUnique({ where: { sampleKey: key } });
     if (existing?.status === "succeeded") {
       done++;
       return "done";
     }
     const obs =
       existing ??
-      (await db.observation.create({
+      (await sdb.observation.create({
         data: {
           workspaceId: run.workspaceId,
           brandId: run.brandId,
@@ -111,28 +114,28 @@ export async function executeRun(
     let lastErr: ProviderError | null = null;
     const deadCode = deadEngines.get(engine);
     if (deadCode) {
-      await db.observation.update({ where: { id: obs.id }, data: { status: "failed", attempt: maxAttempts, errorCode: deadCode } });
+      await sdb.observation.update({ where: { id: obs.id }, data: { status: "failed", attempt: maxAttempts, errorCode: deadCode } });
       done++;
-      await opts.onProgress?.(done, total);
+      await serial(async () => opts.onProgress?.(done, total));
       return "done";
     }
     while (attempt < maxAttempts) {
       if (overBudget()) {
         // Süre bütçesi doldu: gözlem ara durumda kalır, sonraki adım aynı sampleKey ile devam eder.
-        await db.observation.update({ where: { id: obs.id }, data: { attempt } });
+        await sdb.observation.update({ where: { id: obs.id }, data: { attempt } });
         return "incomplete";
       }
       attempt++;
       const attemptId = `${key}:${attempt}`;
       try {
         const answer = await adapter.ask({ prompt: v.text, country: country ?? brand.country, language: language ?? brand.language, signal: opts.callTimeoutMs ? AbortSignal.timeout(opts.callTimeoutMs) : undefined });
-        await db.costLedger.upsert({
+        await sdb.costLedger.upsert({
           where: { attemptId },
           update: {},
           create: { workspaceId: run.workspaceId, provider: answer.provider, model: answer.model, operation: "monitor", attemptId, costMicros: answer.costMicros ?? 0n, succeeded: true },
         });
         const ex = extract(answer.text, answer.urls, entities);
-        await db.$transaction(async (tx) => {
+        await sdb.$transaction(async (tx) => {
           await tx.mention.deleteMany({ where: { observationId: obs.id } });
           await tx.citation.deleteMany({ where: { observationId: obs.id } });
           await tx.observation.update({
@@ -170,7 +173,7 @@ export async function executeRun(
       } catch (e) {
         const pe = e instanceof ProviderError ? e : new ProviderError((e as Error).message, false);
         lastErr = pe;
-        await db.costLedger.upsert({
+        await sdb.costLedger.upsert({
           where: { attemptId },
           update: {},
           create: { workspaceId: run.workspaceId, provider: adapter.provider, model: null, operation: "monitor", attemptId, costMicros: 0n, succeeded: false },
@@ -183,10 +186,10 @@ export async function executeRun(
       const permanent = PERMANENT.includes(lastErr.code);
       if (permanent) deadEngines.set(engine, lastErr.code);
       // Kalıcı/yeniden denenemez hata: deneme hakkı tükendi sayılır, sonraki adımlarda tekrar çağrılmaz.
-      await db.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt: lastErr.retryable ? attempt : maxAttempts, errorCode: lastErr.code } });
+      await sdb.observation.update({ where: { id: obs.id }, data: { status: lastErr.code === "parse_failed" ? "parse_failed" : "failed", attempt: lastErr.retryable ? attempt : maxAttempts, errorCode: lastErr.code } });
     }
     done++;
-    await opts.onProgress?.(done, total);
+    await serial(async () => opts.onProgress?.(done, total));
     return "done";
   };
   // Aynı sorunun platformları paralel sorulur (her platform farklı sağlayıcı; sağlayıcı başına aynı anda tek çağrı).
@@ -216,6 +219,35 @@ export async function executeRun(
   }
   await writeRunSnapshots(db, runId);
   return { ok, failed, total, coverage, status, incomplete: false, done: total };
+}
+
+/** Prisma çağrılarını tek kuyruğa alır (paralel işlerde aynı anda en çok bir sorgu/işlem). */
+export function serializedDb(client: PrismaClient): { run: <T>(fn: () => Promise<T>) => Promise<T>; client: PrismaClient } {
+  let chain: Promise<unknown> = Promise.resolve();
+  const run = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const next = chain.then(fn, fn);
+    chain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+  const wrapped = new Proxy(client, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target) as unknown;
+      if (prop === "$transaction") return (...args: unknown[]) => run(() => (target.$transaction as (...a: unknown[]) => Promise<unknown>)(...args));
+      if (value && typeof value === "object" && typeof prop === "string" && !prop.startsWith("$")) {
+        return new Proxy(value as object, {
+          get(model, method) {
+            const fn = Reflect.get(model, method, model) as unknown;
+            return typeof fn === "function" ? (...args: unknown[]) => run(() => Promise.resolve((fn as (...a: unknown[]) => unknown).apply(model, args))) : fn;
+          },
+        });
+      }
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  return { run, client: wrapped };
 }
 
 /** Run bitiminde immutable MetricSnapshot (formül sürümüyle). */

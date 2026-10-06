@@ -11,7 +11,7 @@ import { pageBrand } from "@/lib/page-access";
 import { brandMetrics, parseRange } from "@/modules/monitoring/queries";
 import { brandEntities } from "@/modules/monitoring/service";
 import { isUuid } from "@/modules/tenancy/access";
-import { ENGINE_SHORT, fmtDate, fmtNumber, fmtPct, SURFACE_LABEL, RUN_STATUS_LABEL } from "@/lib/format";
+import { ENGINE_SHORT, fmtDate, fmtNumber, fmtPct, SURFACE_LABEL, RUN_STATUS_LABEL, trOfCount } from "@/lib/format";
 import { sovMissingReason } from "@/lib/view-models";
 import { isStalled, runProgress } from "@/modules/monitoring/run-status";
 
@@ -130,7 +130,7 @@ export default async function VisibilityPage({ params, searchParams }: { params:
       <Card className="mt-6">
         <CardHeader
           title="Yanıtlar"
-          description={<>Her satır tek bir AI yanıtıdır; ayrıntı için soruya tıklayın. {kindStats.map((k) => `${k.branded ? "Markalı sorular" : "Genel keşif"}: ${k.answers} yanıt, markanız ${k.mentioned}'inde anıldı`).join(" · ")}. <span className="whitespace-nowrap">Göster: {([["", "Tümü"], ["generic", "Genel keşif"], ["branded", "Markalı"]] as const).map(([k, l]) => <Link key={k} className={(sp.kind ?? "") === k ? "ml-1 font-medium text-text" : "ml-1 text-primary underline"} href={qs({ kind: k, page: "1" })}>{l}</Link>)}</span></>}
+          description={<>Her satır tek bir AI yanıtıdır; ayrıntı için soruya tıklayın. {kindStats.map((k) => `${k.branded ? "Markalı sorular" : "Genel keşif"}: ${k.answers} yanıt, markanız ${trOfCount(k.mentioned)} anıldı`).join(" · ")}. <span className="whitespace-nowrap">Göster: {([["", "Tümü"], ["generic", "Genel keşif"], ["branded", "Markalı"]] as const).map(([k, l]) => <Link key={k} className={(sp.kind ?? "") === k ? "ml-1 font-medium text-text" : "ml-1 text-primary underline"} href={qs({ kind: k, page: "1" })}>{l}</Link>)}</span></>}
           action={<Link className="text-sm text-primary underline" href={qs({ status: sp.status === "failed" ? "" : "failed", page: "1" })}>{sp.status === "failed" ? "Tümünü göster" : "Yalnız başarısızlar"}</Link>}
         />
         {observations.length === 0 ? (

@@ -1,3 +1,4 @@
+import { trOfCount } from "@/lib/format";
 import { Badge, Card, CardHeader, TableWrap, Td, Th, inputClass } from "@/components/ui";
 import type { buildChatgptAdsPlan } from "@/modules/ads/chatgpt-plan";
 import { CHATGPT_ADS_SPEC } from "@/modules/ads/chatgpt";
@@ -75,7 +76,7 @@ export function ChatgptAdsPlan({ plan, action, usps, downloadUrl }: { plan: Plan
           {plan.adGroups.slice(0, 3).map((g, i) => (
             <div key={g.clusterId} className="flex flex-col gap-3 p-4 text-sm">
               <p className="font-medium">Reklam grubu {i + 1}: {g.label} <Badge tone={g.priority === "yüksek" ? "danger" : g.priority === "orta" ? "warning" : "neutral"}>Öncelik: {g.priority}</Badge> </p>
-              <p className="text-muted">{g.answers ? `${g.answers} yanıtın ${g.brandMentioned}'inde anıldınız.` : "Henüz ölçüm yok; kategoriden başlangıç önerisi."} {g.lostTo.length ? `Kaybedilen yanıtlarda öne çıkan: ${g.lostTo.map((c) => `${c.name} (${c.count})`).join(", ")}.` : ""}</p>
+              <p className="text-muted">{g.answers ? `${g.answers} yanıtın ${trOfCount(g.brandMentioned)} anıldınız.` : "Henüz ölçüm yok; kategoriden başlangıç önerisi."} {g.lostTo.length ? `Kaybedilen yanıtlarda öne çıkan: ${g.lostTo.map((c) => `${c.name} (${c.count})`).join(", ")}.` : ""}</p>
               <div>
                 <p className="text-xs font-medium">Bağlam ipuçları (anahtar kelime yerine) · {g.hints.length}</p>
                 <p className="mt-1 text-xs text-muted">ChatGPT Ads&apos;te kelime eşleşmesi yoktur; bu ifadeler hangi sohbetlerde görünmek istediğinizi anlatır. Ads Manager&apos;da reklam grubunun &ldquo;context hints&rdquo; alanına yapıştırın.</p>

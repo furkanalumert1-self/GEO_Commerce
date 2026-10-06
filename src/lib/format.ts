@@ -6,6 +6,18 @@ export function fmtNumber(v: number | null | undefined, locale = "tr-TR", digits
   return new Intl.NumberFormat(locale, { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(v);
 }
 
+/**
+ * "36 yanıtın 10'unda" gibi: sayıya iyelik + bulunma eki (ünlü uyumu ve ünlüyle biten sayılarda "s" kaynaştırma).
+ * Ek, sayının okunuşundaki son kelimeye göre seçilir (10 → on → 'unda, 3 → üç → 'ünde, 2 → iki → 'sinde).
+ */
+export function trOfCount(n: number): string {
+  const units = ["ında", "inde", "sinde", "ünde", "ünde", "inde", "sında", "sinde", "inde", "unda"];
+  const tens = ["", "unda", "sinde", "unda", "ında", "sinde", "ında", "inde", "inde", "ında"];
+  const v = Math.abs(Math.trunc(n));
+  const suffix = v === 0 ? "ında" : v % 10 ? units[v % 10] : v % 100 ? tens[(v % 100) / 10] : v % 1000 ? "ünde" : "inde";
+  return `${n}'${suffix}`;
+}
+
 export function fmtPct(v: number | null | undefined, locale = "tr-TR", digits = 0): string {
   if (v === null || v === undefined || Number.isNaN(v)) return NA;
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: digits }).format(v);

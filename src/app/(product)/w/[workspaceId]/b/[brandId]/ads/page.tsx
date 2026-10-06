@@ -1,3 +1,4 @@
+import { trOfCount } from "@/lib/format";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { Alert, Badge, Card, CardHeader, EmptyState, PageHeader, TableWrap, Td, Th, cn } from "@/components/ui";
@@ -131,7 +132,7 @@ export default async function AdsPage({ params, searchParams }: { params: Promis
                     <li key={g.clusterId} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6">
                       <div className="min-w-0">
                         <p className="font-semibold">{g.label}</p>
-                        <p className="text-sm text-text-secondary">{g.answers ? `${g.answers} yanıtın ${g.brandMentioned}'inde markanız anıldı${lost ? `; ${g.lostTo.slice(0, 2).map((c) => c.name).join(", ")} öne çıktı` : ""}` : "Henüz ölçüm yok"}</p>
+                        <p className="text-sm text-text-secondary">{g.answers ? `${g.answers} yanıtın ${trOfCount(g.brandMentioned)} markanız anıldı${lost ? `; ${g.lostTo.slice(0, 2).map((c) => c.name).join(", ")} öne çıktı` : ""}` : "Henüz ölçüm yok"}</p>
                       </div>
                       <Link className="inline-flex min-h-11 items-center rounded-md border border-border bg-surface px-4 text-sm font-medium hover:bg-surface-subtle sm:min-h-10" href={`${base}?tab=chatgpt&group=${encodeURIComponent(g.clusterId)}`}>Bu fikirle taslak hazırla</Link>
                     </li>

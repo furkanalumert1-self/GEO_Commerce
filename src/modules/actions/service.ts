@@ -134,7 +134,13 @@ export async function createActionDraft(db: PrismaClient, access: BrandAccess, i
       allowedClaims: [],
     };
     // Redis'siz (inline) dağıtımda istek süresi sınırına (actions rotası maxDuration 180 sn) sığacak zaman aşımı.
-    const content = await generateDraft(genInput, { demo: fixturesAllowed(access), timeoutMs: executionMode() === "inline" ? 150_000 : undefined });
+    const content = await generateDraft(genInput, {
+      demo: fixturesAllowed(access),
+      timeoutMs: executionMode() === "inline" ? 150_000 : undefined,
+      onCost: async ({ model, costMicros }) => {
+        await db.costLedger.upsert({ where: { attemptId: `generate:${input.operationId}` }, update: {}, create: { workspaceId: access.workspaceId, provider: "openai", model, operation: "generate", attemptId: `generate:${input.operationId}`, costMicros: costMicros ?? 0n, succeeded: true } });
+      },
+    });
     const action = await db.$transaction(async (tx) => {
       const a = await tx.action.create({
         data: { workspaceId: access.workspaceId, brandId: access.brandId, opportunityId: opp.id, type: input.type, title: content.title ?? opp.title, targetUrl: genInput.targetUrl, status: "draft", version: 1 },

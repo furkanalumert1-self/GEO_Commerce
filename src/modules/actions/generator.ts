@@ -2,6 +2,7 @@ import { z } from "zod";
 import { config } from "@/lib/config";
 import { AppError } from "@/lib/http/errors";
 import type { ActionContent, ActionType } from "./workflow";
+import { callCostMicros, openaiUsage, parsePricing } from "@/lib/ai-pricing";
 
 /**
  * Fix with AI üretimi. Girdi: seçili fırsat/kanıt, güncel sayfa/katalog, marka sesi, dil, izinli iddialar.
@@ -88,7 +89,7 @@ export function templateDraft(input: GenerationInput): ActionContent {
 }
 
 /** Canlı üretim: OpenAI Responses + JSON şema zorunlu çıktı. Model adı config'ten. */
-export async function generateDraft(input: GenerationInput, opts: { demo?: boolean; timeoutMs?: number } = {}): Promise<ActionContent> {
+export async function generateDraft(input: GenerationInput, opts: { demo?: boolean; timeoutMs?: number; onCost?: (c: { model: string; costMicros: bigint | null }) => Promise<void> | void } = {}): Promise<ActionContent> {
   const status = generationStatus(opts);
   if (status === "demo") return templateDraft(input);
   if (status === "not_configured") throw new AppError("not_configured", "İçerik üretimi için GENERATION_MODEL ve OPENAI_API_KEY gerekli");
@@ -126,7 +127,9 @@ export async function generateDraft(input: GenerationInput, opts: { demo?: boole
   if (res.status === 401 || res.status === 403) throw new AppError("not_configured", "Üretim sağlayıcısı API anahtarını reddetti (OPENAI_API_KEY)");
   if (res.status === 404) throw new AppError("not_configured", "GENERATION_MODEL bulunamadı veya bu anahtarla erişilemiyor");
   if (!res.ok) throw new AppError("dependency_unavailable", `Üretim sağlayıcısı hata döndürdü (${res.status})`, { retryable: res.status >= 500 || res.status === 429 });
-  const json = (await res.json()) as { output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }> };
+  const json = (await res.json()) as { model?: string; output?: Array<{ type: string; content?: Array<{ type: string; text?: string }> }> };
+  // Yalnız yönetici maliyet raporu için; başarısız ayrıştırmada da çağrı ücretlendiği için önce kaydedilir.
+  await opts.onCost?.({ model: String(json.model ?? cfg.GENERATION_MODEL), costMicros: callCostMicros("openai", openaiUsage(json as Record<string, unknown>), parsePricing(cfg.AI_PRICING)) });
   const text = json.output?.flatMap((o) => o.content ?? []).find((c) => c.type === "output_text")?.text;
   if (!text) throw new AppError("dependency_unavailable", "Üretim çıktısı okunamadı", { retryable: true });
   return withoutBodyFaq(actionContentSchema.parse(JSON.parse(text)) as ActionContent);

@@ -1,3 +1,4 @@
+import { callCostMicros, geminiUsage, openaiUsage, parsePricing, perplexityUsage } from "@/lib/ai-pricing";
 import { config, type AppConfig } from "@/lib/config";
 import { ProviderError, type AiAnswer, type AiMonitorAdapter, type AskInput, type EngineKey } from "./types";
 import { createFixtureAdapter } from "./fixture";
@@ -120,7 +121,7 @@ export function openAiAdapter(cfg: AppConfig): AiMonitorAdapter {
         }
       }
       if (!text) throw new ProviderError("Yanıt ayrıştırılamadı", false, undefined, "parse_failed");
-      return { provider: "openai", engine: "chatgpt", model: String(json.model ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
+      return { provider: "openai", engine: "chatgpt", model: String(json.model ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: callCostMicros("openai", openaiUsage(json), parsePricing(cfg.AI_PRICING)), supportsCitations: true, raw: json };
     },
   };
 }
@@ -174,7 +175,7 @@ export function geminiAdapter(cfg: AppConfig): AiMonitorAdapter {
         if (finish === "MAX_TOKENS") throw new ProviderError("Yanıt token sınırında kesildi", true, undefined, "truncated");
         throw new ProviderError(`Yanıt ayrıştırılamadı${finish ? ` (${finish})` : ""}`, false, undefined, "parse_failed");
       }
-      return { provider: "google", engine: "gemini", model: String(json.modelVersion ?? used), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
+      return { provider: "google", engine: "gemini", model: String(json.modelVersion ?? used), surface: "api_grounded", text, urls, latencyMs, costMicros: callCostMicros("google", geminiUsage(json), parsePricing(cfg.AI_PRICING)), supportsCitations: true, raw: json };
     },
   };
 }
@@ -215,7 +216,7 @@ export function perplexityAdapter(cfg: AppConfig): AiMonitorAdapter {
           .flatMap((c) => ((c.annotations as Array<Record<string, unknown>>) ?? []).map((a) => a.url)),
       ].filter((u, i, all): u is string => typeof u === "string" && all.indexOf(u) === i);
       if (!text) throw new ProviderError("Yanıt ayrıştırılamadı", false, undefined, "parse_failed");
-      return { provider: "perplexity", engine: "perplexity", model: String(json.model ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: null, supportsCitations: true, raw: json };
+      return { provider: "perplexity", engine: "perplexity", model: String(json.model ?? model), surface: "api_grounded", text, urls, latencyMs, costMicros: callCostMicros("perplexity", perplexityUsage(json), parsePricing(cfg.AI_PRICING)), supportsCitations: true, raw: json };
     },
   };
 }

@@ -6,6 +6,6 @@ import { requirePlatformAdmin } from "../guard";
 export const GET = route(async ({ req, requestId }) => {
   await requirePlatformAdmin(req);
   const since = new Date(Date.now() - 30 * 86_400_000);
-  const rows = await db.costLedger.groupBy({ by: ["provider", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } });
-  return json(rows.map((r) => ({ provider: r.provider, succeeded: r.succeeded, attempts: r._count._all, costUsd: Number(r._sum.costMicros ?? 0n) / 1e6 })), { requestId });
+  const rows = await db.costLedger.groupBy({ by: ["provider", "operation", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } });
+  return json(rows.map((r) => ({ provider: r.provider, operation: r.operation, succeeded: r.succeeded, attempts: r._count._all, costUsd: Number(r._sum.costMicros ?? 0n) / 1e6 })), { requestId });
 });

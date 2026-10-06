@@ -72,6 +72,8 @@ export const envSchema = z.object({
   PLATFORM_ADMIN_ALLOWLIST: optional,
   SENTRY_DSN: optional,
   DAILY_PROVIDER_COST_CAP_USD: z.coerce.number().nonnegative().default(25),
+  /** Sağlayıcı birim fiyatları (USD, JSON); yalnız yönetici maliyet raporu ve günlük tavan için. Bkz. src/lib/ai-pricing.ts */
+  AI_PRICING: z.string().optional(),
   DEMO_MODE: bool,
 });
 

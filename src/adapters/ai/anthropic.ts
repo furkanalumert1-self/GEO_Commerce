@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AppConfig } from "@/lib/config";
+import { callCostMicros, parsePricing } from "@/lib/ai-pricing";
 import { ProviderError, type AiAnswer, type AiMonitorAdapter, type AskInput } from "./types";
 
 /**
@@ -109,12 +110,16 @@ export function claudeAdapter(cfg: AppConfig, client?: ClaudeClient): AiMonitorA
       const content: Anthropic.ContentBlock[] = [];
       let last: Anthropic.Message | null = null;
       let searches = 0;
+      let inputTokens = 0;
+      let outputTokens = 0;
       try {
         for (let i = 0; i <= MAX_PAUSE_RESUMES; i++) {
           const res = await api.messages.create({ model, max_tokens: MAX_OUTPUT_TOKENS, system: systemPrompt(input), messages, tools: [tool] }, { signal: input.signal });
           last = res;
           content.push(...res.content);
           searches += res.usage.server_tool_use?.web_search_requests ?? 0;
+          inputTokens += res.usage.input_tokens ?? 0;
+          outputTokens += res.usage.output_tokens ?? 0;
           // Uzun arama turu duraklatıldıysa aynı asistan içeriği geri gönderilerek sürdürülür (ek kullanıcı mesajı yok).
           if (res.stop_reason !== "pause_turn") break;
           messages.push({ role: "assistant", content: res.content });
@@ -141,7 +146,8 @@ export function claudeAdapter(cfg: AppConfig, client?: ClaudeClient): AiMonitorA
         text: parsed.text,
         urls: parsed.urls,
         latencyMs: Date.now() - started,
-        costMicros: null, // token fiyatı modele göre değişir; varsayım yapılmaz (kullanım raw içinde)
+        // Birim fiyat AI_PRICING'den; tanımlı değilse bilinmiyor (null). Yalnız yönetici raporunda görünür.
+        costMicros: callCostMicros("anthropic", { inputTokens, outputTokens, searches }, parsePricing(cfg.AI_PRICING)),
         supportsCitations: true,
         raw: { id: last.id, model: last.model, stop_reason: last.stop_reason, usage: last.usage, web_search_requests: searches, content },
       };

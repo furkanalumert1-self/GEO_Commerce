@@ -9,6 +9,9 @@ import { daysAgo, fmtDate } from "@/lib/format";
 import { ProviderCheck } from "@/components/forms/provider-check";
 import { ApiButton } from "@/components/forms/api-button";
 import { AuditForm } from "@/components/forms/audit-form";
+import { parsePricing } from "@/lib/ai-pricing";
+
+const OPERATION: Record<string, string> = { monitor: "Hesap içi ölçüm", audit: "Ücretsiz ölçüm", generate: "AI ile iyileştir" };
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 
@@ -34,6 +37,7 @@ export default async function AdminPage() {
     notFound();
   }
   const since = daysAgo(30);
+  const pricing = parsePricing(config().AI_PRICING);
   // Her bölüm ayrı yüklenir: biri hata verirse sayfa çökmez, kartta sebep gösterilir ve loglanır.
   const errors: Record<string, string> = {};
   const safe = async <T,>(key: string, p: Promise<T>, fallback: T): Promise<T> => {
@@ -49,7 +53,7 @@ export default async function AdminPage() {
   const [tenants, dead, costs, inboxErrors] = await Promise.all([
     safe("tenants", db.workspace.findMany({ select: { id: true, status: true, isDemo: true, createdAt: true, subscription: { select: { planKey: true, status: true, overrideExpiresAt: true } }, _count: { select: { brands: true } } }, orderBy: { createdAt: "desc" }, take: 50 }), []),
     safe("dlq", db.jobRecord.findMany({ where: { status: "dead" }, orderBy: { updatedAt: "desc" }, take: 25, select: { id: true, type: true, deadReason: true, lastError: true, workspaceId: true, updatedAt: true } }), []),
-    safe("costs", db.costLedger.groupBy({ by: ["provider", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true } }), []),
+    safe("costs", db.costLedger.groupBy({ by: ["provider", "operation", "succeeded"], where: { createdAt: { gte: since } }, _sum: { costMicros: true }, _count: { _all: true }, orderBy: [{ provider: "asc" }, { operation: "asc" }] }), []),
     safe("inbox", db.inboxEvent.count({ where: { error: { not: null } } }), 0),
   ]);
   const sectionError = (key: string) => (errors[key] ? <p role="alert" className="px-4 py-3 text-sm text-danger">Bu bölüm yüklenemedi: {errors[key]}</p> : null);
@@ -65,11 +69,15 @@ export default async function AdminPage() {
           </TableWrap>
         </Card>
         <Card>
-          <CardHeader title="Sağlayıcı maliyeti (30 gün)" description={`Webhook inbox hataları: ${inboxErrors}`} />
+          <CardHeader title="Sağlayıcı maliyeti (30 gün)" description={`Yalnız yöneticiler görür; müşteri ekranlarında ve API'de yer almaz. Birim fiyatlar AI_PRICING ayarından. Webhook inbox hataları: ${inboxErrors}`} />
           {sectionError("costs")}
           {sectionError("inbox")}
-          <TableWrap label="Maliyet"><thead><tr><Th>Sağlayıcı</Th><Th>Sonuç</Th><Th numeric>Deneme</Th><Th numeric>USD</Th></tr></thead>
-            <tbody>{costs.map((c, i) => <tr key={i}><Td>{c.provider}</Td><Td>{c.succeeded ? "başarılı" : "başarısız"}</Td><Td numeric>{c._count._all}</Td><Td numeric>{(Number(c._sum.costMicros ?? 0n) / 1e6).toFixed(2)}</Td></tr>)}</tbody>
+          <TableWrap label="Maliyet"><thead><tr><Th>Sağlayıcı</Th><Th>İşlem</Th><Th>Sonuç</Th><Th numeric>Çağrı</Th><Th numeric>Toplam USD</Th><Th numeric>Çağrı başına USD</Th></tr></thead>
+            <tbody>{costs.map((c, i) => {
+              const usd = Number(c._sum.costMicros ?? 0n) / 1e6;
+              const priced = Boolean(pricing[c.provider]) || c.provider === "perplexity";
+              return <tr key={i}><Td>{c.provider}</Td><Td>{OPERATION[c.operation] ?? c.operation}</Td><Td>{c.succeeded ? "başarılı" : "başarısız"}</Td><Td numeric>{c._count._all}</Td><Td numeric>{priced || usd > 0 ? usd.toFixed(2) : "fiyat tanımlı değil"}</Td><Td numeric>{(priced || usd > 0) && c._count._all ? (usd / c._count._all).toFixed(4) : "—"}</Td></tr>;
+            })}</tbody>
           </TableWrap>
         </Card>
       </div>

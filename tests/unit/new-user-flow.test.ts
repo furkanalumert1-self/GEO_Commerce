@@ -20,7 +20,7 @@ describe("yeni kullanıcı akışı", () => {
   it("soru önerilerinde tamlama tekil: “yemek takımı markaları”", () => {
     const t = purposeTemplates("Yemek Takımları", "TR").map((x) => x.text);
     expect(t).toContain("Türkiye'de en iyi yemek takımı markaları hangileri?");
-    expect(t).toContain("Yemek takımı türleri arasındaki farklar nelerdir?");
+    expect(t).toContain("Yemek takımı alırken hangi markaları karşılaştırmalıyım?");
     expect(t.join(" ")).not.toContain("takımları markaları");
   });
 });

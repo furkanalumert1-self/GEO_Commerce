@@ -1,4 +1,4 @@
-import { questionNoun } from "@/modules/audit/business";
+import { MATERIALS, questionNoun } from "@/modules/audit/business";
 /**
  * Soru kalitesi: amaç etiketi, ürün türü belirsizliği ve katalog uyumu. Sayısal "kalite puanı" üretilmez;
  * kullanıcıya "Uygun / Düzenleme gerekli" ve tek cümle neden gösterilir. Mevcut soruları değiştirmez.
@@ -23,21 +23,60 @@ export const PURPOSE_EXPECTATION: Record<QuestionPurpose, string> = {
 const lower = (s: string) => s.toLocaleLowerCase("tr-TR");
 const cap = (s: string) => s.replace(/^./, (x) => x.toLocaleUpperCase("tr-TR"));
 
+/** Soru kalıbı: aynı kalıbın kaç grupta kullanıldığını saymak için (kategori adından bağımsız). */
+export type QuestionPattern = "best_brands" | "where_buy" | "attribute" | "compare_brands" | "recommend_brands" | "tips" | "types_diff" | "online_stores" | "budget" | "store_compare" | "options";
+
+const PATTERNS: Array<[QuestionPattern, RegExp]> = [
+  ["tips", /seçerken .*nelere dikkat etmeliyim\?$/],
+  ["types_diff", /(türleri arasındaki farklar nelerdir|daha iyi)\?$/],
+  ["attribute", /arıyorum; hangi (markaları|seçenekleri) önerirsin\?$/],
+  ["best_brands", /en iyi .+ markaları hangileri\?$/],
+  ["where_buy", /nereden alabilirim\?$/],
+  ["compare_brands", /alırken hangi markaları karşılaştırmalıyım\?$|için hangi markaları karşılaştırabilirim\?$/],
+  ["recommend_brands", /için hangi markaları önerirsin\?$/],
+  ["online_stores", /satın alabileceğim online mağazalar hangileri\?$/],
+  ["store_compare", /hangi online mağazaları karşılaştırabilirim\?$|geniş seçenek sunan online mağazalar hangileri\?$/],
+  ["budget", /tl altı iyi bir .+ önerir misin\?$/],
+  ["options", /alacağım; hangi seçenekleri değerlendirmeliyim\?$/],
+];
+
+export function questionPattern(text: string): QuestionPattern | null {
+  const t = lower(text.trim());
+  return PATTERNS.find(([, re]) => re.test(t))?.[0] ?? null;
+}
+
+/** Bilgi amaçlı kalıplar: yanıtta marka nadiren geçer; grup başına en çok bir tane önerilir. */
+export const INFO_PATTERNS: QuestionPattern[] = ["tips", "types_diff"];
+
+/** Grup ürün adlarında geçen malzeme/özellik (doğrulanmış; en sık geçen önce). */
+export function groupAttributes(productNames: string[], max = 1): string[] {
+  const names = productNames.map(lower);
+  return MATERIALS.map((m) => ({ m, n: names.filter((x) => x.includes(m)).length }))
+    .filter((x) => x.n > 0)
+    .filter((x, i, all) => !all.some((o, j) => j < i && o.m.includes(x.m)))
+    .sort((a, b) => b.n - a.n)
+    .slice(0, max)
+    .map((x) => x.m);
+}
+
 /**
- * Kategoriden tek amaçlı soru adayları (sırası sabit; ilk soru genel keşif). İki amacı birleştiren
- * ("hangi özellikler, hangi modeller") kalıplar kullanılmaz.
+ * Kategoriden tek amaçlı soru adayları. Satın almaya yakın sorular önce; bilgi sorusu ("nelere dikkat") tek ve en
+ * sonda. Katalogda doğrulanmış malzeme/özellik varsa somut soru eklenir ("kaz tüyü yastık arıyorum…"): bu
+ * sorularda AI somut marka sayar, ölçüm daha ayırt edicidir. İki amacı birleştiren kalıplar kullanılmaz.
  */
-export function purposeTemplates(category: string, country: string): Array<{ text: string; purpose: QuestionPurpose }> {
+export function purposeTemplates(category: string, country: string, opts: { attributes?: string[] } = {}): Array<{ text: string; purpose: QuestionPurpose; pattern: QuestionPattern }> {
   const place = country === "TR" ? "Türkiye'de " : "";
   const c = lower(category.trim());
   // Tamlamada tekil: "yemek takımı markaları", "yemek takımı türleri" ("yemek takımları markaları" değil).
   const n = questionNoun(c);
-  const list: Array<{ text: string; purpose: QuestionPurpose }> = [
-    { text: `${place}en iyi ${n} markaları hangileri?`, purpose: "brand_discovery" },
-    { text: `${cap(n)} seçerken nelere dikkat etmeliyim?`, purpose: "need_based" },
-    { text: `${cap(n)} türleri arasındaki farklar nelerdir?`, purpose: "comparison" },
-    { text: `${place}kaliteli ${c} nereden alabilirim?`, purpose: "purchase" },
-    { text: `${cap(c)} için hangi markaları önerirsin?`, purpose: "brand_discovery" },
+  const attr = opts.attributes?.find((a) => !n.includes(a));
+  const list: Array<{ text: string; purpose: QuestionPurpose; pattern: QuestionPattern }> = [
+    { text: `${place}en iyi ${n} markaları hangileri?`, purpose: "brand_discovery", pattern: "best_brands" },
+    ...(attr ? [{ text: `${attr} ${n} arıyorum; hangi markaları önerirsin?`, purpose: "purchase" as const, pattern: "attribute" as const }] : []),
+    { text: `${place}kaliteli ${c} nereden alabilirim?`, purpose: "purchase", pattern: "where_buy" },
+    { text: `${cap(n)} alırken hangi markaları karşılaştırmalıyım?`, purpose: "comparison", pattern: "compare_brands" },
+    { text: `${cap(c)} için hangi markaları önerirsin?`, purpose: "brand_discovery", pattern: "recommend_brands" },
+    { text: `${cap(n)} seçerken nelere dikkat etmeliyim?`, purpose: "need_based", pattern: "tips" },
   ];
   return list.map((x) => ({ ...x, text: cap(x.text.replace(/\s+/g, " ").trim()) }));
 }
@@ -45,7 +84,7 @@ export function purposeTemplates(category: string, country: string): Array<{ tex
 export function classifyPurpose(text: string): QuestionPurpose {
   const t = lower(text);
   if (/(fark|karşılaştır|mı .* mı|vs\.?|yoksa)/.test(t)) return "comparison";
-  if (/(nereden|satın al|fiyat|uygun fiyat|hangi markalarda|sipariş)/.test(t)) return "purchase";
+  if (/(nereden|satın al|fiyat|uygun fiyat|hangi markalarda|sipariş|arıyorum)/.test(t)) return "purchase";
   if (/(dikkat|nasıl seç|seçerken|kim için|hangisi uygun|ihtiyac)/.test(t)) return "need_based";
   return "brand_discovery";
 }

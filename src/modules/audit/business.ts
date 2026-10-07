@@ -361,6 +361,66 @@ export function cleanTopic(raw: string, language: string): string | null {
   return t;
 }
 
+/** Menüde tekrar eden ama ürün kategorisi olmayan bağlantılar (hesap, sipariş, kurumsal, yardım). */
+const NON_CATEGORY_LINK = /(hakkımızda|hakkimizda|iletişim|iletisim|mağazalar|magazalar|mağazamız|sipariş|siparis|iade|kargo|teslimat|yardım|yardim|sss|sık sorulan|üye|uye|giriş|giris|hesab|hesap|sepet|favori|kampanya|blog|kariyer|müşteri|musteri|gizlilik|çerez|cerez|kvkk|sözleşme|sozlesme|koşul|kosul|şart|sart|login|account|cart|wishlist|contact|about|help|faq)/i;
+
+/**
+ * Sitenin ana menüsündeki ürün kategorileri: taranan sayfaların çoğunda tekrar eden (menü) bağlantı metinleri,
+ * ana sayfadaki sırasıyla. Oda/alan adları ("Banyo"), vitrin etiketleri ve hesap/kurumsal bağlantılar elenir.
+ * Taranan ürün örneklemi küçük olsa da işin ana kategorilerini (ör. nevresim takımı, havlu) gösterir.
+ */
+export function menuCategories(pages: Page[], language: string, max = 8): string[] {
+  const withLinks = pages.filter((p) => (p.facts.anchors?.length ?? 0) > 0);
+  if (withLinks.length < 2) return [];
+  const hostOf = (u: string) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  };
+  const pathOf = (u: string) => {
+    try {
+      return new URL(u).pathname.replace(/\/+$/, "");
+    } catch {
+      return "";
+    }
+  };
+  const productUrls = new Set(pages.filter((p) => p.pageType === "product").map((p) => pathOf(p.url)));
+  const count = new Map<string, { text: string; n: number; first: number }>();
+  let order = 0;
+  const home = withLinks.find((p) => p.pageType === "home");
+  for (const p of home ? [home, ...withLinks.filter((x) => x !== home)] : withLinks) {
+    const host = hostOf(p.url);
+    const seen = new Set<string>();
+    for (const a of p.facts.anchors ?? []) {
+      const path = pathOf(a.url);
+      if (!path || hostOf(a.url) !== host || productUrls.has(path) || NON_CATEGORY_LINK.test(path) || NON_CATEGORY_LINK.test(a.text)) continue;
+      const text = cleanTopic(a.text.replace(/\s+/g, " ").trim(), language);
+      if (!text || text.split(" ").length > 4 || /\d/.test(text) || AREA_ONLY.test(text) || NAV_TEXT.test(text) || LEGAL.test(text)) continue;
+      const k = norm(text);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const cur = count.get(k) ?? { text, n: 0, first: order++ };
+      cur.n++;
+      count.set(k, cur);
+    }
+  }
+  const need = Math.max(2, Math.ceil(withLinks.length * 0.6));
+  return [...count.values()].filter((c) => c.n >= need).sort((a, b) => a.first - b.first).slice(0, max).map((c) => c.text);
+}
+
+/** Menüde yer alan ürün grubu öne alınır (taranan örneklemdeki ürün sayısından önce); eşitlikte mevcut sıra korunur. */
+export function preferMenuGroups(groups: TopicGroup[], menu: string[]): TopicGroup[] {
+  if (!menu.length) return groups;
+  const keys = menu.map((m) => norm(questionNoun(m)));
+  const inMenu = (g: TopicGroup) => {
+    const k = norm(questionNoun(g.label));
+    return keys.some((m) => m.length >= 3 && (k === m || k.includes(m) || m.includes(k)));
+  };
+  return groups.map((g, i) => ({ g, i, m: inMenu(g) ? 0 : 1 })).sort((a, b) => a.m - b.m || a.i - b.i).map((x) => x.g);
+}
+
 /**
  * Mağazada temsilî ana kategoriler: ürün adreslerinin ilk yol bölümü (/ev-tekstili/…) ana sayfa menüsünde bir
  * bölümse, o bölümün menü adı alınır; bölümler menüdeki alt bağlantı sayısına göre sıralanır (ürün yelpazesi
@@ -433,7 +493,7 @@ export interface TopicGroup {
 
 /** Oda/alan adları tek başına ölçüm grubu olamaz ("Banyo" vitrifiye mi tekstil mi belirsiz). */
 const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım)$/i;
-const MATERIALS = ["%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
+export const MATERIALS = ["kaz tüyü", "boncuk elyaf", "elyaf", "visco", "lateks", "silikon", "ortopedik", "%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
 
 /**
  * Ürün sayfalarının breadcrumb'larından (yoksa ürün kategori yolundan) gruplar: alan = 1. düzey, grup = 2. düzey,

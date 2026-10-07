@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 import { dedupePrompts, promptHash } from "./intent";
-import { catalogMatchCount, classifyPurpose, PURPOSE_LABEL, purposeTemplates, questionQuality } from "./quality";
+import { catalogMatchCount, classifyPurpose, groupAttributes, INFO_PATTERNS, PURPOSE_LABEL, purposeTemplates, questionPattern, questionQuality, type QuestionPattern } from "./quality";
 
 /** Ürün grubu → soru seçimi için sayfa verisi. Kayıt/ölçüm yapmaz; öneriler yalnız hesaplanır. */
 export interface PickerQuestion {
@@ -40,6 +40,9 @@ type ClusterRow = {
   prompts: Array<{ id: string; active: boolean; archivedAt: Date | null; versions: Array<{ text: string }> }>;
 };
 
+const MAX_PATTERN_GROUPS = 2;
+const lower = (s: string) => s.toLocaleLowerCase("tr-TR");
+
 /**
  * Saf birleştirme: soru grupları + markanın ürün kategorileri. Öneriler grubun ürün kategorisinden
  * (yoksa grup adından) şablonla üretilir; mevcut (aktif/arşiv) sorulara aynı veya çok benzer olanlar çıkarılır.
@@ -76,18 +79,37 @@ export function buildPickerGroups(clusters: ClusterRow[], brandCategories: strin
   }
   const allExisting = groups.flatMap((g) => [...g.tracked, ...g.archived]).map((q) => ({ text: q.text }));
   const catalogTerms = [...new Set(catalog.flatMap((p) => p.categories))];
-  for (const g of groups) {
+  // Aynı soru kalıbı en çok MAX_PATTERN_GROUPS grupta takip edilir: sınıra ulaşan kalıp başka gruba önerilmez.
+  // Öneriler sayılmaz (her grup öneri alır); kalıp sırası gruplar arasında döndürülür, ilk öneriler farklı olur.
+  const patternUse = new Map<QuestionPattern, number>();
+  for (const g of groups) for (const q of g.tracked) {
+    const pt = questionPattern(q.text);
+    if (pt) patternUse.set(pt, (patternUse.get(pt) ?? 0) + 1);
+  }
+  // Az sorusu olan ve katalogda karşılığı olan gruplar önerileri önce alır.
+  const order = groups
+    .map((g, i) => ({ g, i, m: catalogMatchCount(g.category ?? g.label, catalog) ?? 0 }))
+    .sort((a, b) => a.g.tracked.length - b.g.tracked.length || b.m - a.m || a.i - b.i);
+  order.forEach(({ g }, gi) => {
     const base = g.category ?? g.label;
-    const candidates = purposeTemplates(base, country);
+    const words = lower(base).split(/\s+/).filter((w) => w.length > 3).map((w) => w.slice(0, Math.max(4, w.length - 2)));
+    const names = catalog.filter((p) => words.some((w) => lower(`${p.name} ${p.categories.join(" ")}`).includes(w))).map((p) => p.name);
+    const all = purposeTemplates(base, country, { attributes: groupAttributes(names) });
+    // Bilgi sorusu grup başına en çok bir tane: grupta zaten varsa önerilmez.
+    const hasInfo = g.tracked.some((q) => INFO_PATTERNS.includes(questionPattern(q.text) as QuestionPattern));
+    const rotated = all.slice(gi % Math.max(1, all.length - 1)).concat(all.slice(0, gi % Math.max(1, all.length - 1)));
+    const candidates = rotated.filter((c) => !(hasInfo && INFO_PATTERNS.includes(c.pattern)) && (patternUse.get(c.pattern) ?? 0) < MAX_PATTERN_GROUPS);
     const kept = dedupePrompts(candidates.map((c) => ({ text: c.text })), allExisting).kept.map((k) => k.text);
     const matches = catalogMatchCount(base, catalog);
-    for (const c of candidates.filter((x) => kept.includes(x.text))) {
+    // Bilgi sorusu her zaman listenin sonunda gösterilir.
+    const ordered = candidates.filter((x) => kept.includes(x.text)).sort((a, b) => Number(INFO_PATTERNS.includes(a.pattern)) - Number(INFO_PATTERNS.includes(b.pattern)));
+    for (const c of ordered) {
       const q = questionQuality(c.text, { group: g.label, catalogTerms, catalogMatches: matches });
       const item: PickerQuestion = { id: null, text: c.text, purpose: PURPOSE_LABEL[c.purpose], quality: q.status, reason: q.reason, suggestion: q.suggestion };
       if (q.status === "ok") g.suggested.push(item);
       else g.needsEdit.push(item);
     }
-  }
+  });
   return groups.sort((a, b) => a.label.localeCompare(b.label, "tr"));
 }
 

@@ -23,7 +23,7 @@ import { seedPrompts } from "@/modules/prompts/seed";
 import { recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
-import { buildQuestionSet, detectBusiness, homeBrandName, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
+import { buildQuestionSet, detectBusiness, homeBrandName, menuCategories, preferMenuGroups, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -174,6 +174,17 @@ function titleCategory(raw: string): string {
     .trim();
 }
 
+/** Büyük/küçük harf farkı gözetmeden tekilleştirir (ilk yazım korunur), en çok 10. */
+export function uniqueCategories(list: string[]): string[] {
+  const seen = new Set<string>();
+  return list.map((c) => c.trim()).filter((c) => {
+    const k = c.toLocaleLowerCase("tr-TR");
+    if (!c || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  }).slice(0, 10);
+}
+
 export function deriveCategoryTerms(pages: Array<{ pageType: string; facts: { h1: string | null; title: string | null; products: Array<{ category?: string | null }>; breadcrumbs?: string[] } }>): string[] {
   const paths = pages.flatMap((p) => p.facts.products.map((x) => x.category ?? "")).filter(Boolean).map((c) => c.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean));
   const leaves = [...new Set(paths.map((s) => s[s.length - 1]!))];
@@ -258,6 +269,8 @@ export interface AuditWork {
     readiness: ReturnType<typeof evaluateReadiness>;
     brandName: string;
     categories: string[];
+    /** Ana menüdeki ürün kategorileri (hesapta soru grubu önerisi olur). */
+    menuCategories?: string[];
     productCount: number;
     pages: number;
     failed: number;
@@ -344,7 +357,9 @@ export async function runAudit(
     const brandForQuestions = siteBrandName(crawl.pages, crawl.domain);
     const lang = (audit.locale.split("-")[0] ?? "tr").toLowerCase();
     // Kanıtlı ürün grupları (alan → grup → alt tür); yoksa doğrulanmış konu adları.
-    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(productGroups(crawl.pages, lang), 2);
+    // Ana menüdeki kategoriler öne alınır: küçük tarama örnekleminde ikincil ürünler asıl işin önüne geçmesin.
+    const menu = menuCategories(crawl.pages, lang);
+    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(preferMenuGroups(productGroups(crawl.pages, lang), menu), 2);
     const topics = groups.length ? groups.map((g) => g.label) : topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), lang);
     const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions, groups, gift: hasGiftSection(crawl.pages) });
     work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
@@ -352,6 +367,7 @@ export async function runAudit(
       readiness: evaluateReadiness(crawl),
       brandName: homeBrandName(home, audit.domain),
       categories: deriveCategoryTerms(crawl.pages),
+      menuCategories: menu,
       productCount: new Set(crawl.pages.flatMap((p) => p.facts.products.map((x) => x.sku ?? x.name))).size,
       pages: crawl.pages.length,
       failed: crawl.failed.length,
@@ -442,7 +458,7 @@ export async function runAudit(
             scopeEngines: [],
             provenance: { models: [], surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: 0 },
             readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+            crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, menuCategories: work.crawl.menuCategories ?? [], truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
             competitorCandidates: [],
             opportunityCount: 0,
             opportunityAnalyzed: false,
@@ -579,7 +595,7 @@ export async function runAudit(
         failedDetails,
         provenance: { models, surface: "api_grounded", country, language, sampledAt: new Date().toISOString(), sampleCount: okCount },
         readiness: { geoScore: work.crawl.readiness.geoScore, adsScore: work.crawl.readiness.adsScore, checks: work.crawl.readiness.checks as unknown as object[] },
-        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
+        crawl: { pages: work.crawl.pages, failed: work.crawl.failed, skippedByRobots: work.crawl.skippedByRobots, products: work.crawl.productCount, categories, menuCategories: work.crawl.menuCategories ?? [], truncated: work.crawl.truncated, failures: work.crawl.failures ?? [], siteDomain: work.crawl.siteDomain ?? null, wwwFallback: work.crawl.wwwFallback ?? false, landedHost: work.crawl.landedHost ?? null, viaCountryProxy: work.crawl.viaCountryProxy ?? false, productFacts: (work.crawl.productFacts ?? []) as unknown as object[] },
         competitorCandidates,
         opportunityCount,
         opportunityAnalyzed: answers.some((x) => x.ok && kindOf(x.prompt) !== "info"),
@@ -617,7 +633,7 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
   const out = await db.$transaction(async (tx) => {
     const consumed = await tx.audit.updateMany({ where: { id: audit.id, claimedAt: null }, data: { claimedAt: new Date(), claimUserId: userId } });
     if (consumed.count === 0) throw new AppError("conflict", "Bu audit zaten sahiplenildi");
-    const summary = (audit.resultSummary ?? {}) as { brandName?: string; prompts?: string[]; questions?: Array<{ text: string; topic?: string | null }>; business?: { topics?: string[] } | null; crawl?: { categories?: string[] }; competitorCandidates?: Array<{ domain: string }> };
+    const summary = (audit.resultSummary ?? {}) as { brandName?: string; prompts?: string[]; questions?: Array<{ text: string; topic?: string | null }>; business?: { topics?: string[] } | null; crawl?: { categories?: string[]; menuCategories?: string[] }; competitorCandidates?: Array<{ domain: string }> };
     // Raporda ölçülen ürün grupları hesapta kategori olur; sorular aynı gruplara bağlanır (isim tahmini yok).
     const reportTopics = (summary.business?.topics ?? []).filter(Boolean);
     const existingTrial = await tx.membership.findFirst({ where: { userId, role: "owner", workspace: { subscription: { isNot: null } } } });
@@ -631,7 +647,8 @@ export async function claimAudit(db: PrismaClient, token: string, userId: string
       await tx.subscription.create({ data: { workspaceId: ws.id, planKey: "starter", status: "trialing", currentPeriodStart: now, currentPeriodEnd: end, trialEnd: end } });
     }
     const brand = await tx.brand.create({
-      data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: reportTopics.length ? reportTopics : (summary.crawl?.categories ?? []), onboarding: { step: 2, fromAuditId: audit.id } },
+      // Ölçülen gruplar önce; ardından ana menü kategorileri (soru seçiminde ayrı grup olarak önerilir, soru eklenmez).
+      data: { workspaceId: ws.id, domain: audit.domain, name: summary.brandName ?? audit.domain, categories: uniqueCategories([...(reportTopics.length ? reportTopics : (summary.crawl?.categories ?? [])), ...(summary.crawl?.menuCategories ?? [])]), onboarding: { step: 2, fromAuditId: audit.id } },
     });
     await tx.audit.update({ where: { id: audit.id }, data: { workspaceId: ws.id } });
     // Analizdeki sorular + kategorilerden üretilenler aktif prompt olarak eklenir; ilk ölçüm hemen başlatılabilir.

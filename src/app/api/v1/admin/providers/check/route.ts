@@ -7,6 +7,7 @@ import { generationStatus } from "@/modules/actions/generator";
 import { APP_NAME } from "@/lib/brand";
 import { log } from "@/lib/observability/log";
 import { requirePlatformAdmin } from "../../guard";
+import { db } from "@/lib/db";
 import { crawlProxyFor, safeFetch } from "@/lib/http/safe-fetch";
 
 const body = z.object({ sendTestEmail: z.boolean().default(false) });
@@ -29,6 +30,11 @@ export const POST = route(async ({ req, requestId }) => {
       const started = Date.now();
       try {
         const r = await a.ask({ prompt: PROBE, country: "TR", language: "tr", signal: AbortSignal.timeout(90_000) });
+        // Başarılı kontrol, "son saatlerde yanıt vermedi" dışlamasını kaldırır (ör. kredi yüklendikten sonra).
+        if (r.text.trim()) {
+          await db.costLedger.create({ data: { workspaceId: null, provider: r.provider, model: r.model, operation: "check", attemptId: `check:${engine}:${Date.now()}`, costMicros: r.costMicros ?? 0n, succeeded: true } })
+            .catch((e) => log.warn("admin.provider_check_record_failed", { engine, message: e instanceof Error ? e.message.slice(0, 120) : "?" }));
+        }
         return { engine, status: "ready", ok: r.text.trim().length > 0, model: r.model, latencyMs: Date.now() - started, citations: r.urls.length, sample: r.text.slice(0, 160) };
       } catch (e) {
         const code = e instanceof ProviderError ? e.code : "error";

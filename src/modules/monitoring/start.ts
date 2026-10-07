@@ -37,7 +37,8 @@ const PERMANENT_ENGINE_ERRORS = ["auth", "insufficient_quota", "http_404", "not_
  * Kredisi/anahtarı bozuk platformlar (ör. kotası biten Gemini): son kanıtların (hesap içi yanıtlar ve ücretsiz
  * ölçümler, 7 gün) en yenileri kalıcı hatadır ve o zamandan beri başarılı yanıt yoktur. Bu platformlar ölçüme
  * eklenmez; boşa başarısız yanıt ve "kısmen tamamlandı" üretmez. Son hata 24 saatten eskiyse platform bir kez
- * yeniden denenir (sağlayıcı düzelince kendiliğinden geri gelir). Yalnız durum kodları okunur, içerik okunmaz.
+ * yeniden denenir (sağlayıcı düzelince kendiliğinden geri gelir). Yöneticinin başarılı sağlayıcı kontrolü de başarı
+ * sayılır; kredi yüklendikten sonra 24 saat beklemeye gerek kalmaz. Yalnız durum kodları okunur, içerik okunmaz.
  */
 export async function recentlyBrokenEngines(db: PrismaClient, engines: EngineKey[], now = Date.now()): Promise<EngineKey[]> {
   if (!engines.length) return [];
@@ -47,8 +48,10 @@ export async function recentlyBrokenEngines(db: PrismaClient, engines: EngineKey
     // Yalnız bu platformu kapsayan son ücretsiz ölçümler (genel son N kayıt başka platformlarla dolabilir).
     const audits = await db.audit.findMany({ where: { updatedAt: { gte: since }, status: { in: ["succeeded", "partial"] }, resultSummary: { path: ["scopeEngines"], array_contains: [engine] } }, orderBy: { updatedAt: "desc" }, take: 3, select: { updatedAt: true, resultSummary: true } });
     const obs = await db.observation.findMany({ where: { engine, status: { not: "pending" }, updatedAt: { gte: since } }, orderBy: { updatedAt: "desc" }, take: 3, select: { status: true, errorCode: true, updatedAt: true } });
+    const check = await db.costLedger.findFirst({ where: { operation: "check", succeeded: true, attemptId: { startsWith: `check:${engine}:` }, createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, select: { createdAt: true } });
     type Ev = { at: number; ok: boolean; permanent: boolean };
     const events: Ev[] = obs.map((o) => ({ at: o.updatedAt.getTime(), ok: o.status === "succeeded", permanent: o.status === "failed" && PERMANENT_ENGINE_ERRORS.includes(o.errorCode ?? "") }));
+    if (check) events.push({ at: check.createdAt.getTime(), ok: true, permanent: false });
     for (const a of audits) {
       const sum = a.resultSummary as { scopeEngines?: string[]; failedCalls?: string[] } | null;
       if (!sum?.scopeEngines?.includes(engine)) continue;

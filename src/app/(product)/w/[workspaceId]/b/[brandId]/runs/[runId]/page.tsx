@@ -38,7 +38,7 @@ export default async function RunPage({ params }: { params: Promise<{ workspaceI
         description={`${run.engines.map((e) => ENGINE_SHORT[e] ?? e).join(", ")} · ${run.locales.join(", ")} · ${run.repetitions} tekrar`}
       />
       <Card className="mb-6 p-4" aria-live="polite">
-        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(live.succeeded)], ["Başarısız", String(live.failed)], ["Bekleyen", String(live.pending)], ["Tamamlanan ölçüm", fmtPct(run.scheduledCount ? live.succeeded / run.scheduledCount : null)], ["Config", run.configVersion], ["Tetikleyici", run.trigger]]} />
+        <Provenance items={[["Planlanan", String(run.scheduledCount)], ["Başarılı", String(live.succeeded)], ["Başarısız", String(live.failed)], ["Bekleyen", String(live.pending)], ["Tamamlanan ölçüm", fmtPct(run.scheduledCount ? live.succeeded / run.scheduledCount : null)]]} />
         {stalled ? <p className="mt-2 text-sm text-warning" role="status">Bu ölçüm {live.lastActivity ? fmtDate(live.lastActivity, access.brand.timezone, "tr-TR", true) : "başlangıçtan"} beri ilerlemedi. {inline ? "Redis'siz modda ölçüm yalnız bu sayfa açıkken ilerler; aşağıdan devam ettirebilirsiniz." : "İşlem kuyruğu kontrol ediliyor; sorun sürerse yeni ölçüm başlatın."} Sonuçlar tamamlanana kadar nihai değildir.</p> : null}
         {running && inline && job && !["succeeded", "partial", "dead", "canceled"].includes(job.status) ? (
           <div className="mt-3">

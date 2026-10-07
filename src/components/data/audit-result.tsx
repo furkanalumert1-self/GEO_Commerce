@@ -286,7 +286,7 @@ export function AuditResult({ token, initial, signedIn, inline = false, accountH
           </ol>
           <p className="mt-3 text-xs text-muted">
             {inline
-              ? "Analiz bu sekme açıkken ilerler; sekme kapatılırsa duraklar, bağlantıya geri döndüğünüzde kaldığı yerden devam eder."
+              ? "Analiz boyunca sekmenizin açık kalması gerekmektedir. Sekme kapanırsa, bağlantıya geri döndüğünüzde analiz kaldığı yerden devam eder."
               : "Bu sayfayı kapatabilirsiniz; analiz arka planda sürer."}{" "}
             Bağlantı {new Date(view.expiresAt).toLocaleDateString("tr-TR")} tarihine kadar geçerlidir.
           </p>

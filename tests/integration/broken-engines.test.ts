@@ -19,3 +19,16 @@ describe("kredisi biten platform", () => {
     expect(await recentlyBrokenEngines(db, ["copilot"], now)).toEqual([]);
   });
 });
+
+describe("yönetici sağlayıcı kontrolü", () => {
+  it("başarılı kontrol, kredi yüklendikten sonra platformu 24 saat beklemeden geri getirir", async () => {
+    const now = Date.now();
+    const failing = (at: Date) =>
+      db.audit.create({ data: { domain: `p-${randomToken(4)}.example`, locale: "tr-TR", tokenHash: hashToken(randomToken(24)), fingerprintHash: randomToken(8), expiresAt: new Date(now + 86_400_000), status: "partial", resultSummary: { scopeEngines: ["perplexity"], failedCalls: ["perplexity:insufficient_quota"] }, updatedAt: at } });
+    await failing(new Date(now - 120_000));
+    await failing(new Date(now - 90_000));
+    expect(await recentlyBrokenEngines(db, ["perplexity"], now)).toEqual(["perplexity"]);
+    await db.costLedger.create({ data: { workspaceId: null, provider: "perplexity", operation: "check", attemptId: `check:perplexity:${randomToken(6)}`, costMicros: 0n, succeeded: true, createdAt: new Date(now - 30_000) } });
+    expect(await recentlyBrokenEngines(db, ["perplexity"], now)).toEqual([]);
+  });
+});

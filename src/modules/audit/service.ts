@@ -23,7 +23,7 @@ import { seedPrompts } from "@/modules/prompts/seed";
 import { recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
-import { buildQuestionSet, detectBusiness, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
+import { buildQuestionSet, detectBusiness, homeBrandName, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -350,7 +350,7 @@ export async function runAudit(
     work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
     work.crawl = {
       readiness: evaluateReadiness(crawl),
-      brandName: home?.facts.ogSiteName ?? home?.facts.h1 ?? audit.domain.split(".")[0]!,
+      brandName: homeBrandName(home, audit.domain),
       categories: deriveCategoryTerms(crawl.pages),
       productCount: new Set(crawl.pages.flatMap((p) => p.facts.products.map((x) => x.sku ?? x.name))).size,
       pages: crawl.pages.length,

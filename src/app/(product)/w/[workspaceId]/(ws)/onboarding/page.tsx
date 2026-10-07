@@ -14,6 +14,7 @@ import { JobStartButton } from "@/components/forms/job-start-button";
 import { executionMode } from "@/lib/queue";
 import { QuestionPicker } from "@/components/forms/question-picker";
 import { loadPickerData } from "@/modules/prompts/picker";
+import { listCandidates } from "@/modules/catalog/candidates";
 
 export const metadata: Metadata = { title: "Kurulum" };
 
@@ -37,6 +38,10 @@ export default async function OnboardingPage({ params, searchParams }: { params:
   const brand = await db.brand.findUniqueOrThrow({ where: { id: brandId } });
   const saved = (brand.onboarding ?? {}) as { step?: number; completed?: boolean };
   const step = Math.min(7, Math.max(1, Number(sp.step ?? saved.step ?? 1) || 1));
+  // Kaldığı yerden devam: ulaşılan en ileri adım kaydedilir (geri dönmek kaydı geri almaz).
+  if (!saved.completed && step > (saved.step ?? 1)) {
+    await db.brand.update({ where: { id: brandId }, data: { onboarding: { ...(brand.onboarding as object | null ?? {}), step } } }).catch(() => undefined);
+  }
   const base = `/w/${workspaceId}/onboarding?brand=${brandId}`;
   const api = `/api/v1/workspaces/${workspaceId}/brands/${brandId}`;
   const [pages, products, comps, prompts, runs] = await Promise.all([
@@ -46,6 +51,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
     db.prompt.count({ where: { brandId, active: true } }),
     db.monitoringRun.count({ where: { brandId } }),
   ]);
+  const pendingProducts = step === 3 ? (await listCandidates(db, { workspaceId, brandId })).candidates.filter((c) => c.status !== "imported").length : 0;
   const picker = step === 5 ? await loadPickerData(db, { workspaceId, brandId }, brand, access.entitlements.activePrompts) : null;
   const nav = (
     <div className="mt-6 flex flex-wrap justify-between gap-2">
@@ -92,6 +98,12 @@ export default async function OnboardingPage({ params, searchParams }: { params:
                 <JobStartButton url={`${api}/crawls`} body={{ maxPages: 50 }} label="Siteyi incele ve ürünleri bul" inline={executionMode() === "inline"} queuedMessage="Tarama kuyruğa alındı" runningLabel="Site taraması" />
                 <Link className="inline-flex min-h-11 items-center rounded-md border border-border px-3 sm:min-h-9" href={`/w/${workspaceId}/b/${brandId}/catalog#adaylar`}>Bulunan ürünleri incele</Link>
               </div>
+              {pendingProducts > 0 ? (
+                <Alert tone="primary" title={`${pendingProducts} ürün onayınızı bekliyor`}>
+                  Bilgisi eksik olduğu için (ör. stok durumu) kataloğa otomatik eklenmedi. Kontrol edip tek tıkla ekleyebilirsiniz.{" "}
+                  <Link className="font-medium text-primary underline" href={`/w/${workspaceId}/b/${brandId}/catalog#adaylar`}>İncele ve ekle →</Link>
+                </Alert>
+              ) : null}
             </div>
           ) : null}
           {step === 4 ? (

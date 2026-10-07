@@ -11,7 +11,7 @@ import { ApiButton } from "@/components/forms/api-button";
 import { AuditForm } from "@/components/forms/audit-form";
 import { parsePricing } from "@/lib/ai-pricing";
 
-const OPERATION: Record<string, string> = { monitor: "Hesap içi ölçüm", audit: "Ücretsiz ölçüm", generate: "AI ile iyileştir" };
+const OPERATION: Record<string, string> = { monitor: "Hesap içi ölçüm", audit: "Ücretsiz ölçüm", generate: "AI ile iyileştir", check: "Sağlayıcı kontrolü" };
 
 export const metadata: Metadata = { title: "Platform yönetimi", robots: { index: false } };
 

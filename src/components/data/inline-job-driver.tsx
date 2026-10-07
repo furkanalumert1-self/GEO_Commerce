@@ -9,7 +9,7 @@ interface StepResponse {
   job: { status: string; progress: { done: number; total: number }; error: string | null; resumable: boolean } | null;
 }
 
-export const INLINE_NOTE = "Analiz bu sekme açıkken adım adım ilerler. Sekme kapatılırsa analiz duraklar; geri döndüğünüzde kaldığı yerden devam edebilirsiniz.";
+export const INLINE_NOTE = "Analiz boyunca sekmenizin açık kalması gerekmektedir. Sekme kapanırsa, geri döndüğünüzde analiz kaldığı yerden devam eder.";
 
 /**
  * Redis'siz (inline) modda bir işi sınırlı adımlarla ilerletir: her adım açık bir POST'tur. Aynı anda tek

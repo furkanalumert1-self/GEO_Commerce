@@ -49,12 +49,40 @@ const AGENCY_RE = /\b(ajans|ajansı|agency|dijital pazarlama ajansı)\b/i;
 
 const norm = (s: string) => s.toLocaleLowerCase("tr-TR").replace(/ı/g, "i").replace(/[^a-z0-9ğüşöç]/g, "");
 
+/** Başlıklarda markaya eklenen genel ifadeler ("Online Alışveriş", "Resmi Web Sitesi", "Official Store"). */
+const TITLE_FILLER = /\s*[-–—:,]?\s*(online alışveriş( sitesi| mağazası)?|online mağaza(sı)?|resmi (web )?(sitesi|mağazası)|official (web)?site|official (online )?store|online shop(ping)?|alışveriş sitesi|e-?ticaret sitesi)\s*$/i;
+
+/**
+ * Sayfa başlığı/site adından yalın marka adı: "English Home Online Alışveriş | English Home" → "English Home",
+ * "Folinea® – Advanced Hair Growth" → "Folinea". Parçalardan alan adıyla eşleşen seçilir; yoksa ilk parça
+ * genel eklerinden arındırılır. Hiçbir şey kalmazsa alan adı etiketi döner.
+ */
+export function cleanBrandName(raw: string | null | undefined, domain: string): string;
+export function cleanBrandName(raw: string | null | undefined, domain: string, opts: { strict: true }): string | null;
+export function cleanBrandName(raw: string | null | undefined, domain: string, opts?: { strict?: boolean }): string | null {
+  const label = registrableLabel(domain);
+  const parts = (raw ?? "")
+    .replace(/[®™©]/g, "")
+    .split(/\s[–—|-]\s|\s?\|\s?/)
+    .map((x) => x.replace(TITLE_FILLER, "").trim())
+    .filter((x) => x.length >= 2);
+  const own = parts.find((x) => norm(x) === norm(label)) ?? parts.find((x) => norm(label).length >= 4 && norm(x).includes(norm(label)) && x.split(/\s+/).length <= 4);
+  if (opts?.strict) return own ?? null;
+  return own ?? parts[0] ?? label;
+}
+
+/** Ana sayfadan marka adı: site adı (og:site_name) güvenilir; başlık/H1 yalnız alan adıyla eşleşen parça varsa kullanılır. */
+export function homeBrandName(home: Page | undefined, domain: string): string {
+  const f = home?.facts;
+  if (f?.ogSiteName?.trim()) return cleanBrandName(f.ogSiteName, domain);
+  return cleanBrandName(f?.title, domain, { strict: true }) ?? cleanBrandName(f?.h1, domain, { strict: true }) ?? registrableLabel(domain);
+}
+
 /** Sitenin kendi marka adı: og:site_name, yoksa alan adı etiketi. */
 export function siteBrandName(pages: Page[], domain: string): string {
   const og = pages.map((p) => p.facts.ogSiteName).find((x) => x && x.trim().length >= 2);
-  // "Folinea® – Advanced Hair Growth" → "Folinea"
-  const name = (og ?? registrableLabel(domain)).split(/\s[–—|-]\s|\s\|\s/)[0]!.replace(/[®™©]/g, "").trim();
-  return name || registrableLabel(domain);
+  if (og) return cleanBrandName(og, domain);
+  return homeBrandName(pages.find((p) => p.pageType === "home"), domain);
 }
 
 /** "WhatsApp Marketing Hizmeti" → "WhatsApp Marketing"; "SEO Hizmetleri" → "SEO". */

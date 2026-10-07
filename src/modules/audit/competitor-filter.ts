@@ -10,6 +10,12 @@ const INSTITUTIONAL_SUFFIX = /\.(edu|gov|mil|k12|bel|pol|tsk|ac|gob|gouv|govt|in
 /** Kurumsal/akademik alt alan adı ve kelime işaretleri. */
 const INSTITUTIONAL_HINT = /(^|\.)(katalog|kutuphane|library|lib|dergi|dergipark|journal|scholar|akademik|academia|researchgate|universite|university|uni)\./;
 
+/** Sağlık ve genel bilgi otoriteleri: yanıtlarda kaynak olarak geçer, satış yapan rakip değildir. */
+const INFO_AUTHORITIES = new Set([
+  "who", "cdc", "mayoclinic", "webmd", "healthline", "medlineplus", "clevelandclinic", "hopkinsmedicine", "nhs", "sleepfoundation",
+  "verywellhealth", "verywellmind", "medicalnewstoday", "harvard", "health", "saglik", "memorial", "acibadem", "medicalpark", "florence",
+]);
+
 /** Haber, medya, ansiklopedi ve genel içerik siteleri (kayıtlı alan adının ilk etiketi). */
 const MEDIA_BRANDS = new Set([
   // TR haber/ekonomi/teknoloji
@@ -57,6 +63,7 @@ export function nonCompetitorReason(domain: string, ownDomain?: string): NonComp
   }
   if (INSTITUTIONAL_SUFFIX.test(d) || INSTITUTIONAL_HINT.test(`${d}.`)) return "institutional";
   const label = registrableLabel(d);
+  if (INFO_AUTHORITIES.has(label)) return "institutional";
   if (MEDIA_BRANDS.has(label) || MEDIA_WORD.test(label) || LISTICLE_PREFIX.test(label)) return "media";
   return null;
 }

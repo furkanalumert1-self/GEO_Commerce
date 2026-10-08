@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { menuCategories, preferMenuGroups, type TopicGroup } from "@/modules/audit/business";
+import { menuCategories, preferMenuGroups, productGroups, type TopicGroup } from "@/modules/audit/business";
+import { isCompetitorCandidate, nonCompetitorReason } from "@/modules/audit/competitor-filter";
 import { buildPickerGroups } from "@/modules/prompts/picker";
 import { groupAttributes, purposeTemplates, questionPattern } from "@/modules/prompts/quality";
 
@@ -10,13 +11,23 @@ const menu = [
   { url: "https://www.example.com/c-banyo", text: "Banyo" },
   { url: "https://www.example.com/hakkimizda", text: "Hakkımızda" },
   { url: "https://www.example.com/siparis-takibi", text: "Sipariş Takibi" },
+  { url: "https://www.example.com/kurumsal-satis", text: "Kurumsal Satış" },
+  { url: "https://www.example.com/kulup", text: "KULÜP Kart" },
+  { url: "https://www.example.com/cabare", text: "CaBaRe" },
+  { url: "https://www.example.com/c-mutfak/tencere", text: "Tencere" },
 ];
-const page = (url: string, pageType: string, extra: Array<{ url: string; text: string }> = []) =>
-  ({ url, pageType, facts: { title: null, h1: null, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [], links: [], breadcrumbs: [], lang: "tr", anchors: [...menu, ...extra] } }) as never;
+const page = (url: string, pageType: string, extra: Array<{ url: string; text: string }> = [], products: Array<{ name: string }> = []) =>
+  ({ url, pageType, facts: { title: null, h1: null, ogSiteName: null, metaDescription: null, schemaTypes: [], products, links: [], breadcrumbs: [], lang: "tr", anchors: [...menu, ...extra] } }) as never;
 
 describe("ana menü kategorileri", () => {
-  it("sayfaların çoğunda tekrar eden menü bağlantılarından ürün kategorilerini alır; alan adı ve kurumsal bağlantıları eler", () => {
-    const pages = [page("https://www.example.com/", "home", [{ url: "https://www.example.com/c-mutfak/tabak", text: "Tabak" }]), page("https://www.example.com/c-banyo/havlu", "category"), page("https://www.example.com/p/layna", "product")];
+  it("sayfaların çoğunda tekrar eden, ürün/kategori kanıtı olan menü bağlantılarını alır; kurumsal, kulüp ve koleksiyon adlarını eler", () => {
+    const pages = [
+      page("https://www.example.com/", "home", [{ url: "https://www.example.com/c-mutfak/tabak", text: "Tabak" }]),
+      page("https://www.example.com/c-banyo/havlu", "category"),
+      page("https://www.example.com/p/layna", "product", [], [{ name: "Layna Yün Yastık" }]),
+      page("https://www.example.com/c-yatak-odasi/nevresim-takimi/ranforce-cift", "product", [], [{ name: "Ranforce Çift Kişilik Nevresim Takımı" }]),
+    ];
+    // Tencere menüde var ama taranan sayfalarda kanıtı yok; "Tabak" yalnız bir sayfada geçiyor.
     expect(menuCategories(pages, "tr")).toEqual(["Nevresim Takımı", "Havlu", "Yastık"]);
   });
 
@@ -50,5 +61,24 @@ describe("soru önerileri", () => {
     expect(by("Yastık").suggested.concat(by("Yastık").needsEdit).some((q) => questionPattern(q.text) === "tips")).toBe(false);
     expect(by("Nevresim Takımı").suggested.some((q) => questionPattern(q.text) === "best_brands")).toBe(false);
     expect(by("Nevresim Takımı").suggested.length).toBeGreaterThan(2);
+  });
+});
+
+describe("ürün grubu ve rakip doğruluğu", () => {
+  it("alt bölüm üst bölümü daraltıyorsa grup alt bölümdür: “Çay › Çay Bardakları” çay değildir", () => {
+    const product = (name: string, crumbs: string[]) => ({ url: `https://pasabahce.example/p/${name}`, pageType: "product", facts: { title: null, h1: name, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [{ name }], links: [], breadcrumbs: [...crumbs, name], lang: "tr" } }) as never;
+    const groups = productGroups([product("Leo Çay Bardağı", ["Sofra", "Çay", "Çay Bardakları"]), product("Timeless Çay Bardağı", ["Sofra", "Çay", "Çay Bardakları"])], "tr");
+    expect(groups[0]!.label).toBe("Çay Bardakları");
+    // Gerçek çay satan markada grup yine çay ürünüdür (2. düzey "Siyah Çay").
+    const tea = productGroups([product("Rize Turist", ["Çay", "Siyah Çay"]), product("Tiryaki", ["Çay", "Siyah Çay"])], "tr");
+    expect(tea[0]!.label).toBe("Siyah Çay");
+  });
+
+  it("alan adında marka adını taşıyan siteler markanın kendisidir, rakip önerilmez", () => {
+    expect(nonCompetitorReason("pasabahcemagazalari.com", "pasabahce.com")).toBe("own");
+    expect(nonCompetitorReason("www.karaca-home.com", "karaca.com")).toBe("own");
+    expect(isCompetitorCandidate("chado.com.tr", "pasabahce.com")).toBe(true);
+    // Kısa marka adı başka markaları yanlışlıkla elemesin.
+    expect(isCompetitorCandidate("ikea.com.tr", "ike.com")).toBe(true);
   });
 });

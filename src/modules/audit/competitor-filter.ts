@@ -60,6 +60,9 @@ export function nonCompetitorReason(domain: string, ownDomain?: string): NonComp
   if (ownDomain) {
     const own = ownDomain.toLowerCase().replace(/^www\./, "");
     if (d === own || d.endsWith(`.${own}`) || own.endsWith(`.${d}`)) return "own";
+    // Markanın diğer siteleri ("pasabahcemagazalari.com", "karaca-home.com"): alan adı marka adını taşır.
+    const ownLabel = registrableLabel(own).replace(/-/g, "");
+    if (ownLabel.length >= 5 && registrableLabel(d).replace(/-/g, "").includes(ownLabel)) return "own";
   }
   if (INSTITUTIONAL_SUFFIX.test(d) || INSTITUTIONAL_HINT.test(`${d}.`)) return "institutional";
   const label = registrableLabel(d);

@@ -362,7 +362,7 @@ export function cleanTopic(raw: string, language: string): string | null {
 }
 
 /** Menüde tekrar eden ama ürün kategorisi olmayan bağlantılar (hesap, sipariş, kurumsal, yardım). */
-const NON_CATEGORY_LINK = /(hakkımızda|hakkimizda|iletişim|iletisim|mağazalar|magazalar|mağazamız|sipariş|siparis|iade|kargo|teslimat|yardım|yardim|sss|sık sorulan|üye|uye|giriş|giris|hesab|hesap|sepet|favori|kampanya|blog|kariyer|müşteri|musteri|gizlilik|çerez|cerez|kvkk|sözleşme|sozlesme|koşul|kosul|şart|sart|login|account|cart|wishlist|contact|about|help|faq)/i;
+const NON_CATEGORY_LINK = /(ulaşın|ulasin|kurumsal|kulüp|kulup|club|kart\b|tasarımcı|tasarimci|designer|koleksiyon|collection|hakkımızda|hakkimizda|iletişim|iletisim|mağazalar|magazalar|mağazamız|sipariş|siparis|iade|kargo|teslimat|yardım|yardim|sss|sık sorulan|üye|uye|giriş|giris|hesab|hesap|sepet|favori|kampanya|blog|kariyer|müşteri|musteri|gizlilik|çerez|cerez|kvkk|sözleşme|sozlesme|koşul|kosul|şart|sart|login|account|cart|wishlist|contact|about|help|faq)/i;
 
 /**
  * Sitenin ana menüsündeki ürün kategorileri: taranan sayfaların çoğunda tekrar eden (menü) bağlantı metinleri,
@@ -387,6 +387,19 @@ export function menuCategories(pages: Page[], language: string, max = 8): string
     }
   };
   const productUrls = new Set(pages.filter((p) => p.pageType === "product").map((p) => pathOf(p.url)));
+  const categoryUrls = new Set(pages.filter((p) => p.pageType === "category").map((p) => pathOf(p.url)));
+  // Kanıt: menü adı taranan ürün adlarında/yollarında geçer, ya da bağlantı taranan bir kategori sayfasıdır veya
+  // taranan ürün adreslerinin üst yoludur. Kanıtsız menü öğesi (kurumsal sayfa, koleksiyon adı) kategori sayılmaz.
+  const productHay = pages
+    .filter((p) => p.pageType === "product")
+    .flatMap((p) => [...p.facts.products.map((x) => `${x.name ?? ""} ${(x as { category?: string | null }).category ?? ""}`), ...(p.facts.breadcrumbs ?? []), p.facts.h1 ?? ""])
+    .map(lowerTr);
+  const evidenced = (text: string, path: string) => {
+    const stem = lowerTr(questionNoun(text)).split(" ").map((w) => w.slice(0, Math.max(4, w.length - 2))).join(" ");
+    return categoryUrls.has(path) || [...productUrls].some((u) => u.startsWith(`${path}/`)) || (stem.length >= 4 && productHay.some((h) => h.includes(stem)));
+  };
+  // "CaBaRe", "KULÜP" gibi yazımlar marka/koleksiyon/program adıdır, ürün kategorisi değildir.
+  const oddCase = (t: string) => t.split(/\s+/).some((w) => /[a-zçğıöşü][A-ZÇĞİÖŞÜ]/.test(w) || (w.length >= 3 && w === w.toLocaleUpperCase("tr-TR") && /[A-ZÇĞİÖŞÜ]/.test(w)));
   const count = new Map<string, { text: string; n: number; first: number }>();
   let order = 0;
   const home = withLinks.find((p) => p.pageType === "home");
@@ -397,7 +410,7 @@ export function menuCategories(pages: Page[], language: string, max = 8): string
       const path = pathOf(a.url);
       if (!path || hostOf(a.url) !== host || productUrls.has(path) || NON_CATEGORY_LINK.test(path) || NON_CATEGORY_LINK.test(a.text)) continue;
       const text = cleanTopic(a.text.replace(/\s+/g, " ").trim(), language);
-      if (!text || text.split(" ").length > 4 || /\d/.test(text) || AREA_ONLY.test(text) || NAV_TEXT.test(text) || LEGAL.test(text)) continue;
+      if (!text || text.split(" ").length > 4 || /\d/.test(text) || oddCase(text) || AREA_ONLY.test(text) || NAV_TEXT.test(text) || LEGAL.test(text) || !evidenced(text, path)) continue;
       const k = norm(text);
       if (seen.has(k)) continue;
       seen.add(k);
@@ -496,6 +509,17 @@ const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|otur
 export const MATERIALS = ["kaz tüyü", "boncuk elyaf", "elyaf", "visco", "lateks", "silikon", "ortopedik", "%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
 
 /**
+ * Alt bölüm başka bir ürünü adlandırıyorsa üst bölüm yalnız kullanım alanıdır: "Çay › Çay Bardakları"nın ürünü
+ * bardaktır. Aynı ürünün alt türü ("Havlu › Yüz Havlusu", "Çay › Siyah Çay") grubu değiştirmez.
+ */
+function refines(child: string, parent: string): boolean {
+  const p = norm(parent);
+  const words = child.trim().split(/\s+/);
+  if (p.length < 2 || words.length < 2 || !norm(child).includes(p)) return false;
+  return !norm(words[words.length - 1]!).startsWith(p.slice(0, Math.max(3, p.length - 1)));
+}
+
+/**
  * Ürün sayfalarının breadcrumb'larından (yoksa ürün kategori yolundan) gruplar: alan = 1. düzey, grup = 2. düzey,
  * alt tür = 3. düzey. Oda/alan adı tek başına grup sayılmaz (alt düzeye inilir). Sıralama: grupta kanıtlı ürün
  * sayısı (taranan örneklemde), eşitlikte ilk görülme. Hiçbiri yoksa boş döner (uydurma yok).
@@ -517,6 +541,8 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
     if (!path.length) continue;
     let gi = path.length >= 2 ? 1 : 0;
     while (gi < path.length - 1 && (AREA_ONLY.test(path[gi]!) || AUDIENCE_LABEL.test(path[gi]!))) gi++;
+    // Alt bölüm üst bölümü daraltıyorsa ürün grubu odur: "Çay › Çay Bardakları" → "Çay Bardakları" (çay değil).
+    while (gi < path.length - 1 && refines(path[gi + 1]!, path[gi]!)) gi++;
     const label = path[gi]!;
     if (AREA_ONLY.test(label) || AUDIENCE_LABEL.test(label)) continue;
     const k = norm(label);

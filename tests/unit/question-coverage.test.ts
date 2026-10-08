@@ -74,6 +74,12 @@ describe("ürün grubu ve rakip doğruluğu", () => {
     expect(tea[0]!.label).toBe("Siyah Çay");
   });
 
+  it("kullanım alanı (“Pişirme”, “Servis ve Sunum”) grup olmaz; asıl ürüne inilir ve menüden elenir", () => {
+    const product = (name: string, crumbs: string[]) => ({ url: `https://schafer.example/p/${name}`, pageType: "product", facts: { title: null, h1: name, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [{ name }], links: [], breadcrumbs: [...crumbs, name], lang: "tr" } }) as never;
+    const groups = productGroups([product("Granit Tava 24", ["Mutfak", "Pişirme", "Tava & Tava Seti"]), product("Seramik Tava 28", ["Mutfak", "Pişirme", "Tava & Tava Seti"]), product("Servis Tabağı", ["Mutfak", "Servis ve Sunum", "Servis Tabakları"])], "tr");
+    expect(groups.map((g) => g.label)).toEqual(["Tava & Tava Seti", "Servis Tabakları"]);
+  });
+
   it("alan adında marka adını taşıyan siteler markanın kendisidir, rakip önerilmez", () => {
     expect(nonCompetitorReason("pasabahcemagazalari.com", "pasabahce.com")).toBe("own");
     expect(nonCompetitorReason("www.karaca-home.com", "karaca.com")).toBe("own");

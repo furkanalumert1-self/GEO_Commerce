@@ -505,7 +505,8 @@ export interface TopicGroup {
 }
 
 /** Oda/alan adları tek başına ölçüm grubu olamaz ("Banyo" vitrifiye mi tekstil mi belirsiz). */
-const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım)$/i;
+/** Kullanım alanları da tek başına ürün değildir ("Pişirme", "Servis ve Sunum"): alt düzeydeki ürüne inilir. */
+const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım|pişirme|servis|sunum|servis( (&|ve|,) ?sunum)|sunum( (&|ve) servis)|saklama|hazırlık|hazırlama|kahvaltı|ikram|içecek(ler)?)$/i;
 export const MATERIALS = ["kaz tüyü", "boncuk elyaf", "elyaf", "visco", "lateks", "silikon", "ortopedik", "%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
 
 /**

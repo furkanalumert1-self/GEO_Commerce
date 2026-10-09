@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { menuCategories, preferMenuGroups, productGroups, type TopicGroup } from "@/modules/audit/business";
+import { categorySuggestions, homeBrandName, menuCategories, preferMenuGroups, productGroups, type TopicGroup } from "@/modules/audit/business";
 import { isCompetitorCandidate, nonCompetitorReason } from "@/modules/audit/competitor-filter";
 import { buildPickerGroups } from "@/modules/prompts/picker";
 import { groupAttributes, purposeTemplates, questionPattern } from "@/modules/prompts/quality";
@@ -86,5 +86,30 @@ describe("ürün grubu ve rakip doğruluğu", () => {
     expect(isCompetitorCandidate("chado.com.tr", "pasabahce.com")).toBe(true);
     // Kısa marka adı başka markaları yanlışlıkla elemesin.
     expect(isCompetitorCandidate("ikea.com.tr", "ike.com")).toBe(true);
+  });
+});
+
+describe("kullanım alanı birleşimleri, menüde marka adı, kategori önerileri", () => {
+  const product = (name: string, crumbs: string[]) => ({ url: `https://emsan.example/p/${name}`, pageType: "product", facts: { title: null, h1: name, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [{ name }], links: [], breadcrumbs: [...crumbs, name], lang: "tr" } }) as never;
+
+  it("yalnız kullanım kelimelerinden oluşan ad (“İçecek Sunum”, “Kahvaltı & Servis”) grup olmaz", () => {
+    const groups = productGroups([product("Kristal Sürahi", ["Sofra", "İçecek Sunum", "Sürahiler"]), product("Cam Sürahi", ["Sofra", "İçecek Sunum", "Sürahiler"]), product("Kahvaltı Tabağı", ["Mutfak", "Kahvaltı & Servis", "Kahvaltı Takımları"])], "tr");
+    expect(groups.map((g) => g.label)).toEqual(["Sürahiler", "Kahvaltı Takımları"]);
+  });
+
+  it("marka adı menü kategorisi sayılmaz", () => {
+    const anchors = [
+      { url: "https://www.emsan.com.tr/", text: "Emsan" },
+      { url: "https://www.emsan.com.tr/kadehler", text: "Kadehler" },
+    ];
+    const pg = (url: string, pageType: string, products: Array<{ name: string }> = []) => ({ url, pageType, facts: { title: null, h1: null, ogSiteName: null, metaDescription: null, schemaTypes: [], products, links: [], breadcrumbs: [], lang: "tr", anchors } }) as never;
+    const pages = [pg("https://www.emsan.com.tr/", "home"), pg("https://www.emsan.com.tr/kadehler", "category"), pg("https://www.emsan.com.tr/p/kristal-kadeh", "product", [{ name: "Kristal Kadeh" }])];
+    expect(menuCategories(pages, "tr", 8, "Emsan")).toEqual(["Kadehler"]);
+  });
+
+  it("ürün grubu bulunamazsa ana sayfa açıklamasındaki kategoriler önerilir", () => {
+    const home = { url: "https://korkmaz.com.tr/", pageType: "home", facts: { title: "Korkmaz Mutfak Eşyaları", h1: null, ogSiteName: null, metaDescription: "Mutfağınızın tencere, tava, mutfak gereçleri, yemek takımları ve diğer tüm ihtiyaçları için en kaliteli ürünler Korkmaz.com.tr ile, hemen tıklayın!", schemaTypes: [], products: [], links: [], breadcrumbs: [], lang: "tr" } } as never;
+    expect(categorySuggestions([home], [], "Korkmaz")).toEqual(["Tencere", "Tava", "Mutfak gereçleri", "Yemek takımları"]);
+    expect(homeBrandName(home, "korkmaz.com.tr")).toBe("Korkmaz");
   });
 });

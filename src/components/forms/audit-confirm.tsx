@@ -16,6 +16,8 @@ export interface Proposal {
   questions: ProposalQuestion[];
   incomplete: string | null;
   brandName: string;
+  /** Ürün grubu çıkarılamadığında sitede bulunan kategori önerileri. */
+  suggestions?: string[];
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -101,7 +103,7 @@ export function AuditConfirm({
     <Card>
       <CardHeader
         title={needsTopic ? "Ne sattığınızı yazın" : "Ölçüm öncesi onay"}
-        description={needsTopic ? `Sitenizden (${pages} sayfa) ölçülecek ürün grubunu güvenle çıkaramadık. Sattığınız 1–2 ana kategoriyi yazıp “Soruları oluştur”a basın; sorular siz onaylayınca AI platformlarına sorulur.` : `Siteniz incelendi (${pages} sayfa${products ? `, ${products} ürün` : ""}). AI platformlarına sorular siz onaylayınca sorulur.`}
+        description={needsTopic ? `Sitenizden (${pages} sayfa) ölçülecek ürün grubunu güvenle çıkaramadık. Sattığınız 1–2 ana kategoriyi ${proposal.suggestions?.length ? "aşağıdaki önerilerden seçin veya yazın, ardından" : "yazıp"} “Soruları oluştur”a basın; sorular siz onaylayınca AI platformlarına sorulur.` : `Siteniz incelendi (${pages} sayfa${products ? `, ${products} ürün` : ""}). AI platformlarına sorular siz onaylayınca sorulur.`}
       />
       <div className="flex flex-col gap-5 px-4 pb-5 sm:px-6">
         <section aria-labelledby="ac-type">
@@ -123,6 +125,26 @@ export function AuditConfirm({
             ))}
             <Button onClick={regenerate} disabled={pending !== null || !topics.some((t) => t.trim())}>{pending === "preview" ? "Oluşturuluyor…" : questions.length ? "Soruları yeniden oluştur" : "Soruları oluştur"}</Button>
           </div>
+          {!service && proposal.suggestions?.length ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Sitenizde bulunan kategoriler">
+              <span className="text-xs text-text-secondary">Sitenizde bulduklarımız:</span>
+              {proposal.suggestions.map((s) => {
+                const chosen = topics.some((t) => t.trim().toLocaleLowerCase("tr-TR") === s.toLocaleLowerCase("tr-TR"));
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    aria-pressed={chosen}
+                    disabled={chosen}
+                    onClick={() => setTopics((t) => { const i = t.findIndex((x) => !x.trim()); const next = [...t]; next[i === -1 ? 1 : i] = s; return next; })}
+                    className="min-h-9 rounded-full border border-border bg-surface px-3 text-xs hover:border-primary disabled:border-primary disabled:bg-primary-soft disabled:text-primary"
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <p className="mt-1 text-xs text-text-secondary">Bu bir ön taramadır: site geneli değil, seçili {service ? "hizmetler" : "kategoriler"} için 5 soru ölçülür.</p>
         </section>
 

@@ -23,7 +23,7 @@ import { seedPrompts } from "@/modules/prompts/seed";
 import { recentlyBrokenEngines } from "@/modules/monitoring/start";
 import { candidateFacts, importProductFacts } from "@/modules/catalog/candidates";
 import type { ProductFacts } from "./html";
-import { buildQuestionSet, detectBusiness, homeBrandName, menuCategories, preferMenuGroups, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
+import { buildQuestionSet, categorySuggestions, detectBusiness, homeBrandName, menuCategories, preferMenuGroups, diverseGroups, hasGiftSection, productGroups, siteBrandName, topicsFor, type AuditQuestion, type BusinessProfile, type QuestionKind, type TopicGroup } from "./business";
 
 /**
  * Free GEO Audit (§4). Link: tahmin edilemeyen token, 7 gün TTL, noindex; full rapor varsayılan özel.
@@ -262,6 +262,8 @@ export interface AuditProposal {
   questions: AuditQuestion[];
   incomplete: string | null;
   brandName: string;
+  /** Ürün grubu çıkarılamadığında kullanıcıya önerilen kategoriler (menü ve ana sayfa açıklamasından). */
+  suggestions?: string[];
 }
 
 export interface AuditWork {
@@ -358,11 +360,11 @@ export async function runAudit(
     const lang = (audit.locale.split("-")[0] ?? "tr").toLowerCase();
     // Kanıtlı ürün grupları (alan → grup → alt tür); yoksa doğrulanmış konu adları.
     // Ana menüdeki kategoriler öne alınır: küçük tarama örnekleminde ikincil ürünler asıl işin önüne geçmesin.
-    const menu = menuCategories(crawl.pages, lang);
+    const menu = menuCategories(crawl.pages, lang, 8, brandForQuestions);
     const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(preferMenuGroups(productGroups(crawl.pages, lang), menu), 2);
     const topics = groups.length ? groups.map((g) => g.label) : topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), lang);
     const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions, groups, gift: hasGiftSection(crawl.pages) });
-    work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions };
+    work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions, suggestions: set.questions.length ? [] : categorySuggestions(crawl.pages, menu, brandForQuestions) };
     work.crawl = {
       readiness: evaluateReadiness(crawl),
       brandName: homeBrandName(home, audit.domain),

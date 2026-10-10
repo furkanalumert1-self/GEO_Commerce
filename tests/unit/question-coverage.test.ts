@@ -113,3 +113,36 @@ describe("kullanım alanı birleşimleri, menüde marka adı, kategori öneriler
     expect(homeBrandName(home, "korkmaz.com.tr")).toBe("Korkmaz");
   });
 });
+
+describe("Kütahya Porselen canlı analizinden", () => {
+  it("tekil isimde ünsüz yumuşaması: “mutfak gereci”, “servis tabağı”", async () => {
+    const { questionNoun } = await import("@/modules/audit/business");
+    expect(questionNoun("Mutfak Gereçleri")).toBe("mutfak gereci");
+    expect(questionNoun("Servis Tabakları")).toBe("servis tabağı");
+    expect(questionNoun("Yemek Takımları")).toBe("yemek takımı");
+    expect(questionNoun("Banyo Havluları")).toBe("banyo havlusu");
+  });
+
+  it("menüde sayı/“Tüm” önekleri atılır, tekil-çoğul birleşir, malzeme/ölçü kelimeleri ve kanal bölümleri elenir", () => {
+    const anchors = ["2 Kişilik Yemek Takımı", "6 Kişilik Yemek Takımları", "Tüm Yemek Takımları", "4 Kişilik Kahve Takımı", "Porselen", "Parça"].map((text, i) => ({ url: `https://kp.example/c${i}`, text }));
+    const pg = (url: string, pageType: string, products: Array<{ name: string }> = [], breadcrumbs: string[] = []) => ({ url, pageType, facts: { title: null, h1: null, ogSiteName: "Kütahya Porselen", metaDescription: null, schemaTypes: [], products, links: [], breadcrumbs, lang: "tr", anchors } }) as never;
+    const pages = [
+      pg("https://kp.example/", "home"),
+      pg("https://kp.example/p/ilay", "product", [{ name: "Bone İlay 24 Parça Yemek Takımı" }], ["SOFRA", "YEMEK TAKIMLARI", "6 Kişilik Yemek Takımları", "Bone İlay 24 Parça Yemek Takımı"]),
+      pg("https://kp.example/p/adora", "product", [{ name: "Adora 2 Kişilik Kahve Takımı Porselen" }], ["SOFRA", "YEMEK TAKIMLARI", "6 Kişilik Yemek Takımları", "Adora 2 Kişilik Kahve Takımı Porselen"]),
+      pg("https://kp.example/p/tavola", "product", [{ name: "Tavola Fırın Kabı" }], ["HORECA", "TAVOLA", "Tavola Fırın Kabı"]),
+    ];
+    expect(menuCategories(pages, "tr", 8, "Kütahya Porselen")).toEqual(["Yemek Takımı", "Kahve Takımı"]);
+    // “6 Kişilik Yemek Takımları” aynı ürünün alt türüdür; HORECA (profesyonel kanal) ölçülmez; büyük harf doğal yazılır.
+    expect(productGroups(pages, "tr").map((g) => g.label)).toEqual(["Yemek takımları"]);
+  });
+
+  it("Türkçe harfli marka adı alan adıyla eşleşir; “Pişirme Grubu” ve hediye seçkileri ürün grubu değildir", () => {
+    const home = { url: "https://kutahyaporselen.com/", pageType: "home", facts: { title: "En Güzel Yerinde | Kütahya Porselen", h1: null, ogSiteName: null, metaDescription: "En uygun fiyatlar ile porselen yemek takımları, porselen takımlar, porselen kahvaltı takımı ve daha fazlası KutahyaPorselen.com'da sizleri bekliyor.", schemaTypes: [], products: [], links: [], breadcrumbs: [], lang: "tr" } } as never;
+    expect(homeBrandName(home, "kutahyaporselen.com")).toBe("Kütahya Porselen");
+    expect(categorySuggestions([home], [], "Kütahya Porselen")).toEqual(["Porselen takımlar", "Porselen kahvaltı takımı"]);
+    const product = (name: string, crumbs: string[]) => ({ url: `https://kp.example/p/${name}`, pageType: "product", facts: { title: null, h1: name, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [{ name }], links: [], breadcrumbs: [...crumbs, name], lang: "tr" } }) as never;
+    const groups = productGroups([product("Porflame 4 Lt Tencere", ["SOFRA", "PİŞİRME GRUBU", "Porflame Tencere ve Tava"]), product("Porflame Tava", ["SOFRA", "PİŞİRME GRUBU", "Porflame Tencere ve Tava"]), product("Topkapı Fincan", ["HEDİYELİK", "Kurumsal Hediyeler"])], "tr");
+    expect(groups.map((g) => g.label)).toEqual(["Porflame Tencere ve Tava"]);
+  });
+});

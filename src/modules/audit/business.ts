@@ -47,7 +47,17 @@ const SAAS_PATH = /\/(pricing|fiyatlandirma|fiyatlar|plans|paketler|demo|signup|
 const NAV_TEXT = /^(tüm .*|all .*|hizmetlerimiz|hizmetler|ürünlerimiz|ürünler|çözümlerimiz|çözümler|ai çözümlerimiz|services|our services|solutions|products|tümü|tümünü gör|detaylı bilgi|detay|incele|devamı|daha fazla|read more|learn more|keşfet|hemen başla|iletişim|hakkımızda|blog|anasayfa|ana sayfa|home)$/i;
 const AGENCY_RE = /\b(ajans|ajansı|agency|dijital pazarlama ajansı)\b/i;
 
-const norm = (s: string) => s.toLocaleLowerCase("tr-TR").replace(/ı/g, "i").replace(/[^a-z0-9ğüşöç]/g, "");
+/** Karşılaştırma anahtarı: Türkçe harfler katlanır ("Kütahya Porselen" ≡ "kutahyaporselen" alan adı). */
+const norm = (s: string) =>
+  s
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9]/g, "");
 
 /** Başlıklarda markaya eklenen genel ifadeler ("Online Alışveriş", "Resmi Web Sitesi", "Official Store"). */
 const TITLE_FILLER = /\s*[-–—:,]?\s*(online alışveriş( sitesi| mağazası)?|online mağaza(sı)?|resmi (web )?(sitesi|mağazası)|official (web)?site|official (online )?store|online shop(ping)?|alışveriş sitesi|e-?ticaret sitesi)\s*$/i;
@@ -361,7 +371,9 @@ const ENGLISH_HINT = /\b(and|for|the|with|treatments?|serums?|shampoos?|hair|los
 
 /** "Collection: Saç Bakımı" → "Saç Bakımı"; gürültü ve (Türkçe sitede) İngilizce ürün tipi etiketleri elenir. */
 export function cleanTopic(raw: string, language: string): string | null {
-  const t = raw.replace(/^(collection|koleksiyon|kategori)\s*:\s*/i, "").split(/\s[|–—]\s/)[0]!.trim();
+  let t = raw.replace(/^(collection|koleksiyon|kategori)\s*:\s*/i, "").split(/\s[|–—]\s/)[0]!.trim();
+  // Menüde büyük harfle yazılan bölüm adı ("YEMEK TAKIMLARI") soruda doğal yazılır; 4 harfe kadar kısaltmalar korunur.
+  if (t.length > 4 && t === t.toLocaleUpperCase(language === "tr" ? "tr-TR" : "en-US") && /\p{Lu}{3}/u.test(t)) t = capTr(t.toLocaleLowerCase(language === "tr" ? "tr-TR" : "en-US"));
   if (t.length < 3 || t.length > 40 || JUNK_TOPIC.test(t) || MERCH_TOPIC.test(t)) return null;
   if (language === "tr" && /^[\x00-\x7F]+$/.test(t) && ENGLISH_HINT.test(t)) return null;
   return t;
@@ -403,8 +415,9 @@ export function menuCategories(pages: Page[], language: string, max = 8, brandNa
     .flatMap((p) => [...p.facts.products.map((x) => `${x.name ?? ""} ${(x as { category?: string | null }).category ?? ""}`), ...(p.facts.breadcrumbs ?? []), p.facts.h1 ?? ""])
     .map(lowerTr);
   const evidenced = (text: string, path: string) => {
-    const stem = lowerTr(questionNoun(text)).split(" ").map((w) => w.slice(0, Math.max(4, w.length - 2))).join(" ");
-    return categoryUrls.has(path) || [...productUrls].some((u) => u.startsWith(`${path}/`)) || (stem.length >= 4 && productHay.some((h) => h.includes(stem)));
+    // Her kelimenin kökü aynı ürün metninde geçmeli ("Yemek Takımı" → "yeme" + "takı").
+    const stems = lowerTr(questionNoun(text)).split(/\s+/).filter((w) => w.length >= 3).map((w) => w.slice(0, Math.max(3, Math.min(w.length, Math.max(4, w.length - 2)))));
+    return categoryUrls.has(path) || [...productUrls].some((u) => u.startsWith(`${path}/`)) || (stems.length > 0 && productHay.some((h) => stems.every((st) => h.includes(st))));
   };
   // "CaBaRe", "KULÜP" gibi yazımlar marka/koleksiyon/program adıdır, ürün kategorisi değildir.
   const oddCase = (t: string) => t.split(/\s+/).some((w) => /[a-zçğıöşü][A-ZÇĞİÖŞÜ]/.test(w) || (w.length >= 3 && w === w.toLocaleUpperCase("tr-TR") && /[A-ZÇĞİÖŞÜ]/.test(w)));
@@ -417,10 +430,13 @@ export function menuCategories(pages: Page[], language: string, max = 8, brandNa
     for (const a of p.facts.anchors ?? []) {
       const path = pathOf(a.url);
       if (!path || hostOf(a.url) !== host || productUrls.has(path) || NON_CATEGORY_LINK.test(path) || NON_CATEGORY_LINK.test(a.text)) continue;
-      const text = cleanTopic(a.text.replace(/\s+/g, " ").trim(), language);
+      // "2 Kişilik Yemek Takımı", "Tüm Çay Takımları" → "Yemek Takımı", "Çay Takımları" (aynı kategori bir kez).
+      const bare = a.text.replace(/\s+/g, " ").trim().replace(/^(tüm|bütün)\s+/iu, "").replace(/^(tek|\d+([.,]\d+)?)\s*(kişilik|parça|'?l[iıuü])?\s+/iu, "");
+      const text = cleanTopic(bare, language);
       if (!text || text.split(" ").length > 4 || /\d/.test(text) || oddCase(text) || isAreaOnly(text) || NAV_TEXT.test(text) || LEGAL.test(text) || !evidenced(text, path)) continue;
-      const k = norm(text);
-      if (seen.has(k) || brandKeys.has(k)) continue;
+      const k = norm(questionNoun(text));
+      const single = !/\s/.test(text);
+      if (seen.has(k) || brandKeys.has(norm(text)) || (single && (MATERIALS.includes(lowerTr(text)) || SUGGESTION_JUNK.has(lowerTr(text))))) continue;
       seen.add(k);
       const cur = count.get(k) ?? { text, n: 0, first: order++ };
       cur.n++;
@@ -435,19 +451,23 @@ export function menuCategories(pages: Page[], language: string, max = 8, brandNa
  * Ürün grubu çıkarılamadığında kullanıcıya önerilecek kategoriler: ana menü kategorileri ve ana sayfa açıklamasında
  * sayılan ürün adları ("tencere, tava, mutfak gereçleri, yemek takımları…"). Yalnız öneridir; kullanıcı seçer.
  */
+const SUGGESTION_JUNK = new Set(["parça", "adet", "set", "takım", "takımlar", "model", "modeller", "ürün", "ürünler", "yeni", "indirim"]);
+
 export function categorySuggestions(pages: Page[], menu: string[], brandName: string, max = 6): string[] {
   const home = pages.find((p) => p.pageType === "home") ?? pages[0];
   const brandKey = norm(brandName);
   const fromMeta = (home?.facts.metaDescription ?? "")
     .split(/[,;]|\s+ve\s+|\s+&\s+/)
     .map((x) => x.trim().replace(/^\S+(ın|in|un|ün|nın|nin|nun|nün|ınızın|inizin)\s+/iu, "").replace(/[.!?]+$/, "").trim())
-    .filter((x) => x.length >= 3 && x.split(/\s+/).length <= 3 && !/\d|\.|için|ile|tüm|hemen|tıkla|en |ürünler|online|alışveriş|sipariş|kargo|indirim/iu.test(x) && !(brandKey.length >= 3 && norm(x).includes(brandKey)));
+    .filter((x) => x.length >= 3 && x.split(/\s+/).length <= 3 && !/\d|\.|(^|\s)(için|ile|tüm|hemen|en|daha|fazla|fazlası|sizleri|bekliyor)(\s|$)|tıkla|online|alışveriş|sipariş|kargo|indirim|fiyat/iu.test(x) && !(brandKey.length >= 3 && norm(x).includes(brandKey)));
   const seen = new Set<string>();
   return [...menu, ...fromMeta]
     .map((x) => capTr(lowerTr(x)))
     .filter((x) => {
-      const k = norm(x);
-      if (seen.has(k) || isAreaOnly(x)) return false;
+      const k = norm(questionNoun(x));
+      const single = !/\s/.test(x.trim());
+      // Tek başına malzeme ("Porselen") veya ölçü kelimesi ("Parça") kategori değildir.
+      if (seen.has(k) || isAreaOnly(x) || (single && (MATERIALS.includes(lowerTr(x)) || SUGGESTION_JUNK.has(lowerTr(x))))) return false;
       seen.add(k);
       return true;
     })
@@ -540,11 +560,18 @@ export interface TopicGroup {
 const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım|pişirme|servis|sunum|servis( (&|ve|,) ?sunum)|sunum( (&|ve) servis)|saklama|hazırlık|hazırlama|kahvaltı|ikram|içecek(ler)?)$/i;
 /** Kullanım/oda kelimeleri: yalnız bunlardan oluşan ad ("İçecek Sunum", "Kahvaltı & Servis") ürün değildir. */
 const USAGE_WORDS = new Set(["pişirme", "servis", "sunum", "saklama", "hazırlık", "hazırlama", "kahvaltı", "kahvaltılık", "ikram", "içecek", "içecekler", "sofra", "mutfak", "banyo", "dekorasyon", "yaşam", "ev"]);
+/** Tek başına anlam taşımayan ekler ("Pişirme Grubu", "Servis Ürünleri"). */
+const GENERIC_WORDS = new Set(["grubu", "grup", "ürünleri", "ürünler", "çeşitleri", "koleksiyonu"]);
+/** Hediye koleksiyonları ("Kurumsal Hediyeler", "Zamansız Hediyeler") ürün türü değil, vitrin seçkisidir. */
+const GIFT_COLLECTION = /hediye(ler|lik)?$/iu;
 function isAreaOnly(label: string): boolean {
-  if (AREA_ONLY.test(label)) return true;
+  if (AREA_ONLY.test(label) || GIFT_COLLECTION.test(label.trim())) return true;
   const words = lowerTr(label).split(/[\s&,/+-]+|\bve\b/u).map((w) => w.trim()).filter(Boolean);
-  return words.length > 0 && words.every((w) => USAGE_WORDS.has(w));
+  return words.some((w) => USAGE_WORDS.has(w)) && words.every((w) => USAGE_WORDS.has(w) || GENERIC_WORDS.has(w));
 }
+
+/** Satış kanalı bölümleri (profesyonel/toptan): tüketici ürün grubu ölçümüne girmez ("HORECA › TAVOLA"). */
+const CHANNEL_SECTION = /^(horeca|toptan|b2b|proje( satış)?|kurumsal( satış)?|export|ihracat|otel( ve)? restoran)$/iu;
 
 export const MATERIALS = ["kaz tüyü", "boncuk elyaf", "elyaf", "visco", "lateks", "silikon", "ortopedik", "%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
 
@@ -556,7 +583,9 @@ function refines(child: string, parent: string): boolean {
   const p = norm(parent);
   const words = child.trim().split(/\s+/);
   if (p.length < 2 || words.length < 2 || !norm(child).includes(p)) return false;
-  return !norm(words[words.length - 1]!).startsWith(p.slice(0, Math.max(3, p.length - 1)));
+  // Baş isimler karşılaştırılır: "Yemek Takımları › 6 Kişilik Yemek Takımları" aynı ürünün alt türüdür.
+  const head = norm(parent.trim().split(/\s+/).pop()!);
+  return !norm(words[words.length - 1]!).startsWith(head.slice(0, Math.max(3, head.length - 2)));
 }
 
 /**
@@ -577,6 +606,7 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
       const cat = p.facts.products.find((x) => (x as { category?: string | null }).category)?.category;
       if (cat) path = cat.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean);
     }
+    if (path.some((c) => CHANNEL_SECTION.test(c.trim()))) continue;
     path = path.map((c) => cleanTopic(c, language) ?? "").filter(Boolean);
     if (!path.length) continue;
     let gi = path.length >= 2 ? 1 : 0;
@@ -625,7 +655,10 @@ export function questionNoun(label: string): string {
     const stem = m[1]!;
     const v = (stem.match(/[aeıioöuü](?=[^aeıioöuü]*$)/u) ?? ["a"])[0];
     const poss = v === "a" || v === "ı" ? "ı" : v === "e" || v === "i" ? "i" : v === "o" || v === "u" ? "u" : "ü";
-    words[words.length - 1] = `${stem}${/[aeıioöuü]$/u.test(stem) ? "s" : ""}${poss}`;
+    // Ünsüz yumuşaması: "gereçleri" → "gereci", "tabakları" → "tabağı" (çok heceli kökte k → ğ).
+    const syllables = (stem.match(/[aeıioöuü]/gu) ?? []).length;
+    const soft = stem.replace(/ç$/u, "c").replace(/k$/u, syllables >= 2 ? "ğ" : "k");
+    words[words.length - 1] = /[aeıioöuü]$/u.test(stem) ? `${stem}s${poss}` : `${soft}${poss}`;
     return words.join(" ");
   }
   if (t.length < 6) return t;

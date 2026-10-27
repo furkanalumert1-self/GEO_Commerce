@@ -157,8 +157,8 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
     }
     const cookie = [opts.headers?.cookie, ...[...jar].map(([k, v]) => `${k}=${v}`)].filter(Boolean).join("; ");
     const { setCookie, ...res } = await pinnedRequest(url, address, { ...opts, maxBytes, timeoutMs, headers: cookie ? { ...opts.headers, cookie } : opts.headers });
-    chain.push(`${url.pathname}${url.search} ${res.status}`);
     if (res.status >= 300 && res.status < 400 && res.headers.location) {
+      chain.push(`${url.protocol}//${url.host}${url.pathname} ${res.status}${setCookie.length ? " +çerez" : ""}`);
       for (const c of setCookie) {
         const m = /^\s*([^=;\s]+)=([^;]*)/.exec(c);
         if (m) jar.set(m[1]!, m[2]!);
@@ -168,7 +168,7 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
     }
     return { ...res, url: url.toString() };
   }
-  throw new AppError("validation_error", `Çok fazla yönlendirme (${chain.slice(0, 4).join(" → ")})`);
+  throw new AppError("validation_error", `Çok fazla yönlendirme (${[...chain.slice(0, 4), current].join(" → ")})`);
 }
 
 /**

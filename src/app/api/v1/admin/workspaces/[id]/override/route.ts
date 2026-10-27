@@ -5,12 +5,14 @@ import { json, readJson, route } from "@/lib/http/api";
 import { isUuid } from "@/modules/tenancy/access";
 import { requirePlatformAdmin } from "../../../guard";
 
-const body = z.object({ days: z.number().int().min(1).max(30).default(7), reason: z.string().trim().min(5).max(200), scope: z.enum(["fix", "commerce"]).default("fix") });
+const body = z.object({ days: z.number().int().min(1).max(30).default(7), reason: z.string().trim().min(5).max(200), scope: z.enum(["fix", "commerce", "agency"]).default("fix") });
 
-/** fix: teşhis + Fix with AI. commerce: ek olarak gelir/sipariş, mağaza bağlantısı ve Ads modülü (Commerce paketi özellikleri). */
+/** fix: teşhis + Fix with AI. agency: en üst paket kapsamı (tüm motorlar, geniş soru seti). commerce: ek olarak gelir/sipariş, mağaza bağlantısı ve Ads modülü (Commerce paketi özellikleri). */
 const SCOPES = {
   fix: { features: ["diagnosis", "fix_with_ai"], fixUnits: 20, opportunityDetail: 50 },
   commerce: { features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics", "commerce", "revenue", "ads"], fixUnits: 20, opportunityDetail: 50, commerceEvents: 5000 },
+  // En üst paketin (Agency) çıktısını göstermek için: bağlı tüm motorlar (Perplexity dahil), geniş soru seti; maliyet için kotalar sınırlı.
+  agency: { features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics", "commerce", "revenue", "ads"], engines: "all_connected", activePrompts: 50, answerUnits: 1000, competitorsPerBrand: 10, crawlUrls: 1000, catalogProducts: 5000, fixUnits: 30, opportunityDetail: "all", opportunitySummaryOnly: false, commerceEvents: 5000 },
 } as const;
 
 /**

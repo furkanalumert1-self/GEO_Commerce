@@ -100,7 +100,8 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
   const groupKey = (v: Record<string, unknown>) => String(v.productGroupID ?? v["@id"] ?? v.name ?? "grup");
   const groupHere = types.includes("ProductGroup") ? groupKey(o) : variantOf && typeof variantOf === "object" ? groupKey(variantOf) : group;
   for (const x of types) if (typeof x === "string") out.add(x);
-  if (types.includes("BreadcrumbList") && Array.isArray(o.itemListElement) && crumbs.length === 0) {
+  // Birden çok BreadcrumbList varsa (ör. Yoast "Ürünler › X" + WooCommerce "Kategori › Alt kategori › X") en ayrıntılısı kullanılır.
+  if (types.includes("BreadcrumbList") && Array.isArray(o.itemListElement) && o.itemListElement.length > crumbs.length) {
     const items = (o.itemListElement as Array<Record<string, unknown>>)
       .filter((x) => x && typeof x === "object")
       .sort((a, b) => Number(a.position ?? 0) - Number(b.position ?? 0))
@@ -110,7 +111,7 @@ function collectTypes(node: unknown, out: Set<string>, products: ProductFacts[],
         return typeof name === "string" ? decode(name).trim() : "";
       })
       .filter((n) => n && !HOME_CRUMB.test(n));
-    crumbs.push(...items);
+    if (items.length > crumbs.length) crumbs.splice(0, crumbs.length, ...items);
   }
   if (types.includes("Product")) {
     const offers = (Array.isArray(o.offers) ? o.offers[0] : o.offers) as Record<string, unknown> | undefined;

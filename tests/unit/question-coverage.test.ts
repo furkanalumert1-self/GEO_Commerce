@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { categorySuggestions, homeBrandName, menuCategories, preferMenuGroups, productGroups, type TopicGroup } from "@/modules/audit/business";
+import { categorySuggestions, cleanBrandName, diverseGroups, homeBrandName, menuCategories, preferMenuGroups, productGroups, type TopicGroup } from "@/modules/audit/business";
 import { isCompetitorCandidate, nonCompetitorReason } from "@/modules/audit/competitor-filter";
 import { buildPickerGroups } from "@/modules/prompts/picker";
 import { groupAttributes, purposeTemplates, questionPattern } from "@/modules/prompts/quality";
@@ -144,5 +144,45 @@ describe("Kütahya Porselen canlı analizinden", () => {
     const product = (name: string, crumbs: string[]) => ({ url: `https://kp.example/p/${name}`, pageType: "product", facts: { title: null, h1: name, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [{ name }], links: [], breadcrumbs: [...crumbs, name], lang: "tr" } }) as never;
     const groups = productGroups([product("Porflame 4 Lt Tencere", ["SOFRA", "PİŞİRME GRUBU", "Porflame Tencere ve Tava"]), product("Porflame Tava", ["SOFRA", "PİŞİRME GRUBU", "Porflame Tencere ve Tava"]), product("Topkapı Fincan", ["HEDİYELİK", "Kurumsal Hediyeler"])], "tr");
     expect(groups.map((g) => g.label)).toEqual(["Porflame Tencere ve Tava"]);
+  });
+});
+
+describe("Gürsan Mobilya (WooCommerce) analizinden", () => {
+  const page = (url: string, pageType: string, facts: Record<string, unknown>) => ({ url, pageType, facts: { title: null, h1: null, ogSiteName: null, metaDescription: null, schemaTypes: [], products: [], links: [], breadcrumbs: [], lang: "tr", ...facts } }) as never;
+
+  it("birden çok BreadcrumbList varsa en ayrıntılısı alınır (Yoast “Ürünler” yerine WooCommerce kategori yolu)", async () => {
+    const { extractPage } = await import("@/modules/audit/html");
+    const ld = (o: unknown) => `<script type="application/ld+json">${JSON.stringify(o)}</script>`;
+    const yoast = { "@type": "BreadcrumbList", itemListElement: [{ position: 1, item: { name: "Anasayfa" } }, { position: 2, item: { name: "Ürünler" } }, { position: 3, item: { name: "Bumerang Puf" } }] };
+    const woo = { "@type": "BreadcrumbList", itemListElement: [{ position: 1, item: { name: "Anasayfa" } }, { position: 2, item: { name: "Tamamlayıcılar" } }, { position: 3, item: { name: "Puflar" } }, { position: 4, item: { name: "Bumerang Puf" } }] };
+    const facts = extractPage(`<html><head>${ld(yoast)}${ld(woo)}</head><body><h1>Bumerang Puf</h1></body></html>`, "https://g.example/urun/bumerang/");
+    expect(facts.breadcrumbs).toEqual(["Tamamlayıcılar", "Puflar", "Bumerang Puf"]);
+  });
+
+  it("alan adı marka + genel kelimeyse marka adı baştaki kelimedir: “gursanmobilya” → “Gürsan”", () => {
+    expect(cleanBrandName("Ofis Koltukları ve Mobilyaları | Gürsan Ofis Mobilyaları - Ergonomik ve Şık Çözümler", "gursanmobilya.com.tr")).toBe("Gürsan");
+  });
+
+  it("ana sayfada öne çıkan ürün grubu önce; ortak sıfatlı farklı ürünler (yönetici masası / yönetici koltuğu) ikisi de seçilir", () => {
+    const g = (label: string, n: number) => ({ label, area: null, subtype: null, products: Array.from({ length: n }, (_, i) => `${label} ${i}`), evidenceUrls: [], attributes: [], hasSet: false }) as TopicGroup;
+    const ordered = preferMenuGroups([g("Kesonlar ve Etajerler", 4), g("Yönetici Masaları", 3), g("Yönetici Koltukları", 3)], [], "Çalışma masası, yönetici koltuğu, toplantı masası ve bekleme gruplarında kalite");
+    expect(diverseGroups(ordered, 2).map((x) => x.label)).toEqual(["Yönetici Masaları", "Yönetici Koltukları"]);
+  });
+
+  it("öneriler pazarlama ifadelerini almaz", () => {
+    const home = page("https://gursanmobilya.com.tr/", "home", { metaDescription: "Gürsan Ofis Mobilyaları, modern ve ergonomik tasarımlarla ofis alanlarını dönüştürür. Çalışma masası, yönetici koltuğu, toplantı masası ve bekleme gruplarında kalite ve konforu keşfedin." });
+    expect(categorySuggestions([home], [], "Gürsan")).toEqual(["Yönetici koltuğu", "Toplantı masası"]);
+  });
+
+  it("bölüm yolu tür söylemiyorsa (Outlet, HORECA serileri) ürün türü addaki bilinen ürün adından alınır", () => {
+    const product = (name: string, crumbs: string[]) => page(`https://kp.example/p/${encodeURIComponent(name)}`, "product", { h1: name, products: [{ name }], breadcrumbs: [...crumbs, name] });
+    const groups = productGroups([
+      product("Kütahya Porselen Bone Ent 27cm. Düz Tabak Dg-859 Kratos", ["HORECA", "BONE", "TILE LEGACY"]),
+      product("Kütahya Porselen Bone Bohem 16cm. Kayık Tabak Krem Fileli", ["HORECA", "BONE", "ATLANTIS"]),
+      product("Kütahya Porselen Bone O Fine Dining 16cm. Kase Dg-870 Kratos", ["HORECA", "BONE", "DUNE"]),
+      product("Kütahya Porselen Rüya 4 Parça 2 Kişilik Kahve Fincan Takımı 11430", ["OUTLET"]),
+    ], "tr");
+    // Tek ürünlük "Kase" ve "Fincan takımı" tür kanıtı sayılmaz; iki ürünlü "Tabak" kalır.
+    expect(groups.map((x) => x.label)).toEqual(["Tabak"]);
   });
 });

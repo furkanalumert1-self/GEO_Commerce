@@ -361,7 +361,7 @@ export async function runAudit(
     // Kanıtlı ürün grupları (alan → grup → alt tür); yoksa doğrulanmış konu adları.
     // Ana menüdeki kategoriler öne alınır: küçük tarama örnekleminde ikincil ürünler asıl işin önüne geçmesin.
     const menu = menuCategories(crawl.pages, lang, 8, brandForQuestions);
-    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(preferMenuGroups(productGroups(crawl.pages, lang), menu), 2);
+    const groups = ["service", "saas", "service_saas"].includes(business.type) ? [] : diverseGroups(preferMenuGroups(productGroups(crawl.pages, lang), menu, `${home?.facts.title ?? ""} ${home?.facts.metaDescription ?? ""}`), 2);
     const topics = groups.length ? groups.map((g) => g.label) : topicsFor(business, crawl.pages, deriveCategoryTerms(crawl.pages), lang);
     const set = buildQuestionSet(business, topics, { country: audit.locale.split("-")[1] ?? "TR", brandName: brandForQuestions, groups, gift: hasGiftSection(crawl.pages) });
     work.proposal = { business: { type: business.type, confidence: business.confidence, reasons: business.reasons, evidenceUrls: business.evidenceUrls.slice(0, 3), offerings: business.offerings, softwareOfferings: business.softwareOfferings, agencyWording: business.agencyWording }, topics: set.topics, groups, questions: set.questions, incomplete: set.incomplete, brandName: brandForQuestions, suggestions: set.questions.length ? [] : categorySuggestions(crawl.pages, menu, brandForQuestions) };

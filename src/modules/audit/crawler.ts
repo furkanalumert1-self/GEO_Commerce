@@ -211,7 +211,13 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
       const parsed = parseSitemap(r.body);
       sitemapUrls.push(...parsed.sitemaps);
       const urls = parsed.urls.filter((x) => !LOW_VALUE.test(x));
-      if (sitemapRank(sm) === 0) for (const u of urls.slice(0, opts.maxPages * 3)) productQueue.push({ url: u, depth: 1 });
+      // Ürün sitemap'i genelde kategori sırasıyla dizilir; baştan almak tek kategoriye yığılır. Liste boyunca eşit aralıklı örnek alınır.
+      if (sitemapRank(sm) === 0) {
+        // Önce tüm listeye yayılmış örnek (taranacak sayfa sayısı kadar), ardından yedekler (erişilemeyen sayfalar için).
+        const first = spreadSample(urls, opts.maxPages);
+        const picked = new Set(first);
+        for (const u of [...first, ...urls.filter((x) => !picked.has(x)).slice(0, opts.maxPages * 2)]) productQueue.push({ url: u, depth: 1 });
+      }
       else for (const u of urls.sort((a, b) => priority(a) - priority(b)).slice(0, opts.maxPages * 3)) queue.push({ url: u, depth: 1 });
     } catch {
       /* sitemap erişilemedi */
@@ -319,6 +325,13 @@ export async function crawlSite(opts: CrawlOptions): Promise<CrawlResult> {
 
 const MAX_SITEMAPS = 8;
 const SKIP_SITEMAP_RANK = 9;
+/** Listeden eşit aralıklı en çok n öğe (sıra korunur): uzun ürün listesinde tüm kategorilerden örnek. */
+export function spreadSample<T>(list: T[], n: number): T[] {
+  if (list.length <= n) return list;
+  const step = list.length / n;
+  return Array.from({ length: n }, (_, i) => list[Math.floor(i * step)]!);
+}
+
 /** Alt sitemap önceliği: 0 ürün, 1 kategori/koleksiyon, 2 dizin/diğer, 3 sayfa/marka, 9 blog/haber (atlanır). */
 function sitemapRank(url: string): number {
   const p = url.toLowerCase();

@@ -82,7 +82,23 @@ export function cleanBrandName(raw: string | null | undefined, domain: string, o
     for (let n = 1; n <= Math.min(3, words.length); n++) if (norm(words.slice(0, n).join(" ")) === norm(label)) return words.slice(0, n).join(" ");
     return null;
   };
-  const own = parts.find((x) => norm(x) === norm(label)) ?? parts.map(leading).find((x): x is string => Boolean(x)) ?? parts.find((x) => norm(label).length >= 4 && norm(x).includes(norm(label)) && x.split(/\s+/).length <= 4);
+  // Alan adı marka + genel kelimeyse ("gursanmobilya"): alan adının başını oluşturan baştaki kelimeler marka adıdır
+  // ("Gürsan Ofis Mobilyaları" → "Gürsan"). Etiketin en az %40'ını kapsamalı ve 4+ harf olmalı.
+  const prefix = (x: string) => {
+    const words = x.split(/\s+/);
+    let best: string | null = null;
+    for (let n = 1; n <= Math.min(3, words.length); n++) {
+      const k = norm(words.slice(0, n).join(" "));
+      if (!norm(label).startsWith(k)) break;
+      if (k.length >= 4 && k.length >= norm(label).length * 0.4) best = words.slice(0, n).join(" ");
+    }
+    return best;
+  };
+  const own =
+    parts.find((x) => norm(x) === norm(label)) ??
+    parts.map(leading).find((x): x is string => Boolean(x)) ??
+    parts.find((x) => norm(label).length >= 4 && norm(x).includes(norm(label)) && x.split(/\s+/).length <= 4) ??
+    parts.map(prefix).find((x): x is string => Boolean(x));
   if (opts?.strict) return own ?? null;
   return own ?? parts[0] ?? label;
 }
@@ -433,7 +449,7 @@ export function menuCategories(pages: Page[], language: string, max = 8, brandNa
       // "2 Kişilik Yemek Takımı", "Tüm Çay Takımları" → "Yemek Takımı", "Çay Takımları" (aynı kategori bir kez).
       const bare = a.text.replace(/\s+/g, " ").trim().replace(/^(tüm|bütün)\s+/iu, "").replace(/^(tek|\d+([.,]\d+)?)\s*(kişilik|parça|'?l[iıuü])?\s+/iu, "");
       const text = cleanTopic(bare, language);
-      if (!text || text.split(" ").length > 4 || /\d/.test(text) || oddCase(text) || isAreaOnly(text) || NAV_TEXT.test(text) || LEGAL.test(text) || !evidenced(text, path)) continue;
+      if (!text || text.split(" ").length > 4 || /\d/.test(text) || oddCase(text) || isAreaOnly(text) || NAV_TEXT.test(text) || LEGAL.test(text) || CHANNEL_SECTION.test(text) || MARKETING_PHRASE.test(text) || !evidenced(text, path)) continue;
       const k = norm(questionNoun(text));
       const single = !/\s/.test(text);
       if (seen.has(k) || brandKeys.has(norm(text)) || (single && (MATERIALS.includes(lowerTr(text)) || SUGGESTION_JUNK.has(lowerTr(text))))) continue;
@@ -451,7 +467,9 @@ export function menuCategories(pages: Page[], language: string, max = 8, brandNa
  * Ürün grubu çıkarılamadığında kullanıcıya önerilecek kategoriler: ana menü kategorileri ve ana sayfa açıklamasında
  * sayılan ürün adları ("tencere, tava, mutfak gereçleri, yemek takımları…"). Yalnız öneridir; kullanıcı seçer.
  */
-const SUGGESTION_JUNK = new Set(["parça", "adet", "set", "takım", "takımlar", "model", "modeller", "ürün", "ürünler", "yeni", "indirim"]);
+const SUGGESTION_JUNK = new Set(["parça", "adet", "set", "takım", "takımlar", "model", "modeller", "ürün", "ürünler", "yeni", "indirim", "modern", "şık", "kaliteli", "ergonomik", "özel", "yerli", "konforlu", "dayanıklı"]);
+/** Pazarlama ifadesi ("bekleme gruplarında kalite", "konforu keşfedin"): ürün kategorisi değildir. */
+const MARKETING_PHRASE = /(kalite|konfor|keşfed|tasarım|dönüştür|çözüm|avantaj|fırsat|\S+(nda|nde)\b)/iu;
 
 export function categorySuggestions(pages: Page[], menu: string[], brandName: string, max = 6): string[] {
   const home = pages.find((p) => p.pageType === "home") ?? pages[0];
@@ -459,7 +477,7 @@ export function categorySuggestions(pages: Page[], menu: string[], brandName: st
   const fromMeta = (home?.facts.metaDescription ?? "")
     .split(/[,;]|\s+ve\s+|\s+&\s+/)
     .map((x) => x.trim().replace(/^\S+(ın|in|un|ün|nın|nin|nun|nün|ınızın|inizin)\s+/iu, "").replace(/[.!?]+$/, "").trim())
-    .filter((x) => x.length >= 3 && x.split(/\s+/).length <= 3 && !/\d|\.|(^|\s)(için|ile|tüm|hemen|en|daha|fazla|fazlası|sizleri|bekliyor)(\s|$)|tıkla|online|alışveriş|sipariş|kargo|indirim|fiyat/iu.test(x) && !(brandKey.length >= 3 && norm(x).includes(brandKey)));
+    .filter((x) => x.length >= 3 && x.split(/\s+/).length <= 3 && !MARKETING_PHRASE.test(x) && !/\d|\.|(^|\s)(için|ile|tüm|hemen|en|daha|fazla|fazlası|sizleri|bekliyor)(\s|$)|tıkla|online|alışveriş|sipariş|kargo|indirim|fiyat/iu.test(x) && !(brandKey.length >= 3 && norm(x).includes(brandKey)));
   const seen = new Set<string>();
   return [...menu, ...fromMeta]
     .map((x) => capTr(lowerTr(x)))
@@ -475,14 +493,20 @@ export function categorySuggestions(pages: Page[], menu: string[], brandName: st
 }
 
 /** Menüde yer alan ürün grubu öne alınır (taranan örneklemdeki ürün sayısından önce); eşitlikte mevcut sıra korunur. */
-export function preferMenuGroups(groups: TopicGroup[], menu: string[]): TopicGroup[] {
-  if (!menu.length) return groups;
+export function preferMenuGroups(groups: TopicGroup[], menu: string[], emphasis = ""): TopicGroup[] {
   const keys = menu.map((m) => norm(questionNoun(m)));
   const inMenu = (g: TopicGroup) => {
     const k = norm(questionNoun(g.label));
     return keys.some((m) => m.length >= 3 && (k === m || k.includes(m) || m.includes(k)));
   };
-  return groups.map((g, i) => ({ g, i, m: inMenu(g) ? 0 : 1 })).sort((a, b) => a.m - b.m || a.i - b.i).map((x) => x.g);
+  // Ana sayfa başlığı/açıklamasında adı geçen ürün grubu ("çalışma masası, yönetici koltuğu…") işin vitrinidir; menüden de önce gelir.
+  const hay = lowerTr(emphasis);
+  const emphasized = (g: TopicGroup) => {
+    const stems = lowerTr(questionNoun(g.label)).split(/\s+/).filter((w) => w.length >= 3).map((w) => w.slice(0, Math.max(3, Math.min(w.length, Math.max(4, w.length - 2)))));
+    return hay.length > 0 && stems.length > 0 && stems.every((st) => hay.includes(st));
+  };
+  if (!menu.length && !hay) return groups;
+  return groups.map((g, i) => ({ g, i, m: emphasized(g) ? 0 : inMenu(g) ? 1 : 2 })).sort((a, b) => a.m - b.m || a.i - b.i).map((x) => x.g);
 }
 
 /**
@@ -559,11 +583,11 @@ export interface TopicGroup {
 /** Kullanım alanları da tek başına ürün değildir ("Pişirme", "Servis ve Sunum"): alt düzeydeki ürüne inilir. */
 const AREA_ONLY = /^(banyo|mutfak|sofra( (&|ve) mutfak)?|yatak odası|salon|oturma odası|ev|bahçe|balkon|ev ve yaşam|yaşam|ev dekorasyonu|dekorasyon|mobilya|giyim|kadın|erkek|çocuk|bebek( (&|ve) çocuk)?|aksesuar(lar)?|hediye.*|kozmetik|kişisel bakım|pişirme|servis|sunum|servis( (&|ve|,) ?sunum)|sunum( (&|ve) servis)|saklama|hazırlık|hazırlama|kahvaltı|ikram|içecek(ler)?)$/i;
 /** Kullanım/oda kelimeleri: yalnız bunlardan oluşan ad ("İçecek Sunum", "Kahvaltı & Servis") ürün değildir. */
-const USAGE_WORDS = new Set(["pişirme", "servis", "sunum", "saklama", "hazırlık", "hazırlama", "kahvaltı", "kahvaltılık", "ikram", "içecek", "içecekler", "sofra", "mutfak", "banyo", "dekorasyon", "yaşam", "ev"]);
+const USAGE_WORDS = new Set(["çay", "kahve", "pişirme", "servis", "sunum", "saklama", "hazırlık", "hazırlama", "kahvaltı", "kahvaltılık", "ikram", "içecek", "içecekler", "sofra", "mutfak", "banyo", "dekorasyon", "yaşam", "ev"]);
 /** Tek başına anlam taşımayan ekler ("Pişirme Grubu", "Servis Ürünleri"). */
 const GENERIC_WORDS = new Set(["grubu", "grup", "ürünleri", "ürünler", "çeşitleri", "koleksiyonu"]);
 /** Hediye koleksiyonları ("Kurumsal Hediyeler", "Zamansız Hediyeler") ürün türü değil, vitrin seçkisidir. */
-const GIFT_COLLECTION = /hediye(ler|lik)?$/iu;
+const GIFT_COLLECTION = /(hediye(ler|lik)?|özel günler|günü|yılbaşı|bayram|kampanya(lar)?)$/iu;
 function isAreaOnly(label: string): boolean {
   if (AREA_ONLY.test(label) || GIFT_COLLECTION.test(label.trim())) return true;
   const words = lowerTr(label).split(/[\s&,/+-]+|\bve\b/u).map((w) => w.trim()).filter(Boolean);
@@ -574,6 +598,23 @@ function isAreaOnly(label: string): boolean {
 const CHANNEL_SECTION = /^(horeca|toptan|b2b|proje( satış)?|kurumsal( satış)?|export|ihracat|otel( ve)? restoran)$/iu;
 
 export const MATERIALS = ["kaz tüyü", "boncuk elyaf", "elyaf", "visco", "lateks", "silikon", "ortopedik", "%100 pamuk", "pamuk", "ranforce", "saten", "pike", "gofre", "müslin", "flanel", "penye", "mikrofiber", "viskon", "jakarlı", "nakışlı", "bambu", "keten", "porselen", "seramik", "cam", "ahşap", "metal", "kadife", "deri", "yün", "kaşmir", "denim", "organik", "paslanmaz çelik", "döküm", "bakır", "mermer", "rattan", "hasır"];
+
+/** Yaygın ürün türü adları (ev, mutfak, mobilya, tekstil, kozmetik): addan tür çıkarmada yalnız bunlar kabul edilir. */
+const PRODUCT_NOUNS = ["tabak", "kase", "fincan", "bardak", "kupa", "kadeh", "sürahi", "demlik", "çaydanlık", "cezve", "tencere", "tava", "kek kalıbı", "kalıp", "servis", "tepsi", "kavanoz", "saklama kabı", "fırın kabı", "çatal", "kaşık", "bıçak", "koltuk", "masa", "sandalye", "tabure", "kanepe", "berjer", "puf", "sehpa", "dolap", "kitaplık", "etajer", "keson", "askılık", "yatak", "baza", "karyola", "nevresim", "çarşaf", "yastık", "yorgan", "battaniye", "pike", "havlu", "bornoz", "perde", "halı", "kilim", "kırlent", "örtü", "lamba", "abajur", "avize", "ayna", "vazo", "mum", "çerçeve", "serum", "şampuan", "parfüm", "ruj", "maskara"];
+const SET_WORD = /^(set|seti|takım|takımı|takımları)$/iu;
+function nameProductType(name: string): string | null {
+  const words = name.replace(/\(.*?\)/g, " ").replace(/\S*\d\S*/g, " ").split(/\s+/).filter((w) => w.length > 1).map((w) => lowerTr(w.replace(/[.,;:]+$/, "")));
+  // Set/takım adı önündeki türle: "Kahve Fincan Takımı" → "Fincan takımı", "Yemek Seti" → "Yemek seti".
+  const si = words.findIndex((w) => SET_WORD.test(w));
+  if (si > 0) return capTr(`${words[si - 1]} ${words[si]}`);
+  // Addaki son bilinen ürün türü: "Bone Rotondo Düz Tabak S.Mat" → "Tabak", "Kahve Fincan 80cc Dekorsuz" → "Fincan".
+  for (let i = words.length - 1; i >= 0; i--) {
+    const two = i > 0 ? `${words[i - 1]} ${words[i]}` : "";
+    const hit = PRODUCT_NOUNS.find((n) => two === n || two.startsWith(`${n} `) || words[i] === n || words[i]!.startsWith(n));
+    if (hit) return capTr(hit);
+  }
+  return null;
+}
 
 /**
  * Alt bölüm başka bir ürünü adlandırıyorsa üst bölüm yalnız kullanım alanıdır: "Çay › Çay Bardakları"nın ürünü
@@ -594,7 +635,7 @@ function refines(child: string, parent: string): boolean {
  * sayısı (taranan örneklemde), eşitlikte ilk görülme. Hiçbiri yoksa boş döner (uydurma yok).
  */
 export function productGroups(pages: Page[], language: string): TopicGroup[] {
-  const acc = new Map<string, { label: string; area: string | null; first: number; products: string[]; urls: string[]; subtypes: Map<string, number>; prices: number[] }>();
+  const acc = new Map<string, { label: string; area: string | null; first: number; products: string[]; urls: string[]; subtypes: Map<string, number>; prices: number[]; fromName?: boolean }>();
   let order = 0;
   for (const p of pages) {
     if (p.pageType !== "product") continue;
@@ -606,17 +647,26 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
       const cat = p.facts.products.find((x) => (x as { category?: string | null }).category)?.category;
       if (cat) path = cat.split(/\s*[>/|»]\s*/).map((x) => x.trim()).filter(Boolean);
     }
-    if (path.some((c) => CHANNEL_SECTION.test(c.trim()))) continue;
+    // Profesyonel kanal bölümlerinde (HORECA › BONE › DUNE) alt düzeyler seri adıdır; ürün türü addan alınır.
+    if (path.some((c) => CHANNEL_SECTION.test(c.trim()))) path = [];
     path = path.map((c) => cleanTopic(c, language) ?? "").filter(Boolean);
-    if (!path.length) continue;
     let gi = path.length >= 2 ? 1 : 0;
     while (gi < path.length - 1 && (isAreaOnly(path[gi]!) || AUDIENCE_LABEL.test(path[gi]!))) gi++;
     // Alt bölüm üst bölümü daraltıyorsa ürün grubu odur: "Çay › Çay Bardakları" → "Çay Bardakları" (çay değil).
     while (gi < path.length - 1 && refines(path[gi + 1]!, path[gi]!)) gi++;
-    const label = path[gi]!;
-    if (isAreaOnly(label) || AUDIENCE_LABEL.test(label)) continue;
-    const k = norm(label);
-    const cur = acc.get(k) ?? { label, area: gi > 0 ? path[0]! : null, first: order++, products: [] as string[], urls: [] as string[], subtypes: new Map<string, number>(), prices: [] as number[] };
+    let label = path[gi] ?? "";
+    let fromName = false;
+    if (!label || isAreaOnly(label) || AUDIENCE_LABEL.test(label)) {
+      // Bölüm yolu ürün türü söylemiyorsa ("Sofra › Outlet") ürün adındaki tür kullanılır: "… 6 Kişilik Yemek Takımı" → "Yemek takımı".
+      const t = nameProductType(name);
+      if (!t) continue;
+      label = t;
+      fromName = true;
+      gi = 0;
+      path = [t];
+    }
+    const k = norm(questionNoun(label));
+    const cur = acc.get(k) ?? { label, area: gi > 0 ? path[0]! : null, first: order++, products: [] as string[], urls: [] as string[], subtypes: new Map<string, number>(), prices: [] as number[], fromName };
     if (!cur.products.includes(name)) {
       cur.products.push(name);
       cur.urls.push(p.url);
@@ -628,6 +678,8 @@ export function productGroups(pages: Page[], language: string): TopicGroup[] {
     if (sub) cur.subtypes.set(sub, (cur.subtypes.get(sub) ?? 0) + 1);
     acc.set(k, cur);
   }
+  // Addan türetilen grup en az iki üründe görülmeli (tek ürün adı tür kanıtı sayılmaz).
+  for (const [k, v] of acc) if (v.fromName && v.products.length < 2) acc.delete(k);
   if (acc.size === 0) return listingGroups(pages, language);
   return [...acc.values()]
     .sort((a, b) => b.products.length - a.products.length || a.first - b.first)
@@ -730,13 +782,13 @@ export function budgetCap(prices: number[] | undefined): number | null {
  * farklı bir aileden seçilir; yoksa tek grup kalır (5 soru aynı ürünü iki kez ölçmez).
  */
 export function diverseGroups(groups: TopicGroup[], n = 2): TopicGroup[] {
-  const head = (g: TopicGroup) => new Set(lowerTr(g.label).split(/\s+/).filter((w) => w.length > 3).slice(-2));
-  const similar = (a: TopicGroup, b: TopicGroup) => {
-    const A = head(a);
-    const B = head(b);
-    const common = [...A].filter((w) => B.has(w)).length;
-    return common > 0 && common >= Math.min(A.size, B.size) / 2;
+  // Aynı aile = aynı baş isim (son kelime): "Tek/Çift Kişilik Nevresim Takımı", "Çalışma/Yönetici Masaları".
+  // Ortak sıfat ("Yönetici Masaları" / "Yönetici Koltukları") farklı ürün demektir.
+  const head = (g: TopicGroup) => {
+    const w = norm(lowerTr(g.label).split(/\s+/).filter(Boolean).pop() ?? "");
+    return w.slice(0, Math.max(4, w.length - 3));
   };
+  const similar = (a: TopicGroup, b: TopicGroup) => head(a) === head(b);
   const out: TopicGroup[] = [];
   for (const g of groups) {
     if (out.length >= n) break;

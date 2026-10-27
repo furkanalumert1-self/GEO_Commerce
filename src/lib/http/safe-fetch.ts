@@ -145,6 +145,9 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
   const timeoutMs = opts.timeoutMs ?? 10_000;
   const maxRedirects = opts.maxRedirects ?? 5;
   let current = raw;
+  // Bazı sunucular (WAF, çerez kontrolü) aynı adrese çerezle geri yönlendirir; tarayıcı gibi çerezi taşırız.
+  const jar = new Map<string, string>();
+  const chain: string[] = [];
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const { url, address } = await assertPublicUrl(current, opts);
     if (opts.sameSiteAs) {
@@ -152,14 +155,20 @@ export async function safeFetch(raw: string, opts: SafeFetchOptions = {}): Promi
       const h = registrableDomain(url.hostname);
       if (h !== site && !h.endsWith(`.${site}`)) throw new AppError("validation_error", "Redirect doğrulanmış domain dışına çıkıyor");
     }
-    const res = await pinnedRequest(url, address, { ...opts, maxBytes, timeoutMs });
+    const cookie = [opts.headers?.cookie, ...[...jar].map(([k, v]) => `${k}=${v}`)].filter(Boolean).join("; ");
+    const { setCookie, ...res } = await pinnedRequest(url, address, { ...opts, maxBytes, timeoutMs, headers: cookie ? { ...opts.headers, cookie } : opts.headers });
+    chain.push(`${url.pathname}${url.search} ${res.status}`);
     if (res.status >= 300 && res.status < 400 && res.headers.location) {
+      for (const c of setCookie) {
+        const m = /^\s*([^=;\s]+)=([^;]*)/.exec(c);
+        if (m) jar.set(m[1]!, m[2]!);
+      }
       current = new URL(res.headers.location, url).toString();
       continue;
     }
     return { ...res, url: url.toString() };
   }
-  throw new AppError("validation_error", "Çok fazla yönlendirme");
+  throw new AppError("validation_error", `Çok fazla yönlendirme (${chain.slice(0, 4).join(" → ")})`);
 }
 
 /**
@@ -246,7 +255,7 @@ function pinnedRequest(
   url: URL,
   address: string,
   opts: SafeFetchOptions & { maxBytes: number; timeoutMs: number },
-): Promise<Omit<SafeResponse, "url">> {
+): Promise<Omit<SafeResponse, "url"> & { setCookie: string[] }> {
   return new Promise((resolve, reject) => {
     const fn = url.protocol === "https:" ? httpsRequest : httpRequest;
     const family = isIP(address);
@@ -281,6 +290,7 @@ function pinnedRequest(
             headers: Object.fromEntries(Object.entries(res.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : (v ?? "")])),
             body: decodeBody(Buffer.concat(chunks), truncated),
             truncated,
+            setCookie: res.headers["set-cookie"] ?? [],
           });
         res.on("end", done);
         res.on("close", done);

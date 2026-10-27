@@ -265,7 +265,7 @@ function pinnedRequest(
       {
         ...(tunnel ? { createConnection: ((_o: unknown, cb: (err: Error | null, s?: TLSSocket) => void) => void openTunnel(tunnel, url, opts.timeoutMs).then((s) => cb(null, s), (e) => cb(e as Error))) as never } : {}),
         method: opts.method ?? "GET",
-        headers: { "user-agent": BOT_USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "tr-TR,tr;q=0.9,en;q=0.6", ...opts.headers },
+        headers: { host: url.host, "user-agent": BOT_USER_AGENT, accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", "accept-language": "tr-TR,tr;q=0.9,en;q=0.6", ...opts.headers },
         // DNS rebinding koruması: doğrulanan IP'ye bağlan.
         lookup: pinnedLookup(address, family) as never,
         timeout: opts.timeoutMs,

@@ -12,7 +12,7 @@ const SCOPES = {
   fix: { features: ["diagnosis", "fix_with_ai"], fixUnits: 20, opportunityDetail: 50 },
   commerce: { features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics", "commerce", "revenue", "ads"], fixUnits: 20, opportunityDetail: 50, commerceEvents: 5000 },
   // En üst paketin (Agency) çıktısını göstermek için: bağlı tüm motorlar (Perplexity dahil), geniş soru seti; maliyet için kotalar sınırlı.
-  agency: { features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics", "commerce", "revenue", "ads"], engines: "all_connected", activePrompts: 50, answerUnits: 1000, competitorsPerBrand: 10, crawlUrls: 1000, catalogProducts: 5000, fixUnits: 30, opportunityDetail: "all", opportunitySummaryOnly: false, commerceEvents: 5000 },
+  agency: { features: ["diagnosis", "fix_with_ai", "weekly_pdf", "advanced_metrics", "commerce", "revenue", "ads"], engines: "all_connected", brands: 3, activePrompts: 50, answerUnits: 1000, competitorsPerBrand: 10, crawlUrls: 1000, catalogProducts: 5000, fixUnits: 30, opportunityDetail: "all", opportunitySummaryOnly: false, commerceEvents: 5000 },
 } as const;
 
 /**
